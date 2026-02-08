@@ -1,6 +1,7 @@
 import dgram from 'dgram';
 import { networkInterfaces } from 'os';
 import { BrowserWindow } from 'electron';
+import { getOrCreateClientUUID } from './database';
 
 const DISCOVERY_PORT = 5555;
 const BROADCAST_ADDR = '255.255.255.255';
@@ -10,7 +11,7 @@ export class DiscoveryManager {
     private mode: 'server' | 'station' = 'station';
     private broadcastInterval: NodeJS.Timeout | null = null;
     private mainWindow: BrowserWindow | null = null;
-    private discoveredEndpoints: Map<string, any> = new Map();
+    // private discoveredEndpoints: Map<string, any> = new Map();
 
     constructor() {
         this.socket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
@@ -18,9 +19,10 @@ export class DiscoveryManager {
         this.socket.on('message', (msg, rinfo) => this.handleMessage(msg, rinfo));
         this.socket.on('error', (err) => console.error('Discovery Error:', err));
 
-        this.socket.bind(DISCOVERY_PORT, () => {
+        // Bind to random port to avoid conflict with Docker/Server on localhost
+        this.socket.bind(0, () => {
             this.socket.setBroadcast(true);
-            console.log(`Discovery: Listening on port ${DISCOVERY_PORT}`);
+            console.log(`Discovery: Listening on port ${this.socket.address().port}`);
         });
     }
 
@@ -50,15 +52,26 @@ export class DiscoveryManager {
         if (this.broadcastInterval) clearInterval(this.broadcastInterval);
 
         this.broadcastInterval = setInterval(() => {
-            const msg = JSON.stringify({
-                type: this.mode === 'server' ? 'LABELPILOT_SERVER' : 'LABELPILOT_STATION',
-                ip: this.getLocalIp(),
-                timestamp: Date.now()
-            });
+            try {
+                const msg = JSON.stringify({
+                    type: this.mode === 'server' ? 'LABELPILOT_SERVER' : 'LABELPILOT_STATION',
+                    ip: this.getLocalIp(),
+                    uuid: getOrCreateClientUUID(),
+                    port: 5556,
+                    timestamp: Date.now()
+                });
 
-            this.socket.send(msg, DISCOVERY_PORT, BROADCAST_ADDR, (err) => {
-                if (err) console.error('Discovery Broadcast Error:', err);
-            });
+                this.socket.send(msg, DISCOVERY_PORT, BROADCAST_ADDR, (err) => {
+                    if (err) console.error('Discovery Broadcast Error:', err);
+                });
+
+                // Also send to 127.0.0.1 specifically to pierce Docker Desktop bridge
+                this.socket.send(msg, DISCOVERY_PORT, '127.0.0.1', (err) => {
+                    if (err) { /* ignore loopback errors */ }
+                });
+            } catch (e) {
+                console.error("Broadcast preparation error:", e);
+            }
         }, 3000);
     }
 
@@ -68,15 +81,17 @@ export class DiscoveryManager {
             if (this.getLocalIp() === rinfo.address) return;
 
             const message = JSON.parse(msg.toString());
-            const key = `${message.type}:${rinfo.address}`;
 
-            // Debounce/Dedup logic can go here if needed, but for now we just forward
             // Only forward relevant messages based on mode
             if (this.mode === 'station' && message.type === 'LABELPILOT_SERVER') {
-                console.log(`Discovery: Found Server at ${rinfo.address}`);
+                // If message overrides port, use it, else default to 8000 (Django)
+                const serverPort = message.port || 8000;
+
+                console.log(`Discovery: Found Server at ${rinfo.address}:${serverPort}`);
                 this.mainWindow?.webContents.send('discovery-event', {
                     type: 'server-found',
                     ip: rinfo.address,
+                    port: serverPort,
                     ...message
                 });
             } else if (this.mode === 'server' && message.type === 'LABELPILOT_STATION') {

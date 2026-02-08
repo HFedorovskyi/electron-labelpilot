@@ -1,5 +1,4 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
-import dgram from 'dgram';
 import path from 'path';
 import { initDatabase } from './database';
 import { scaleManager } from './scales';
@@ -41,7 +40,15 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-    initDatabase();
+    const db = initDatabase();
+
+    // Log items with weights
+    const nomRows = db.prepare('SELECT n.*, c.weight as portion_weight FROM nomenclature n LEFT JOIN container c ON n.portion_container_id = c.id LIMIT 5').all();
+    console.log('Main Process: Nomenclature sample with join:', JSON.stringify(nomRows, null, 2));
+
+    const containerRows = db.prepare('SELECT * FROM container LIMIT 5').all();
+    console.log('Main Process: Container sample:', JSON.stringify(containerRows, null, 2));
+
     createWindow();
 
     // Initialize Managers
@@ -87,22 +94,57 @@ app.whenReady().then(() => {
     });
 
     // Printing Handlers
-    ipcMain.handle('print-label', async (event, options) => {
-        const win = BrowserWindow.fromWebContents(event.sender);
-        if (win) {
-            return new Promise((resolve, reject) => {
-                win.webContents.print({
-                    silent: options?.silent || false,
-                    deviceName: options?.deviceName,
-                    printBackground: true,
-                    margins: { marginType: 'none' }
-                }, (success, errorType) => {
-                    if (success) resolve(true);
-                    else reject(errorType);
-                });
+    ipcMain.handle('print-label', async (_, options) => {
+        const { silent, labelDoc, data } = options;
+
+        return new Promise((resolve) => {
+            const printWindow = new BrowserWindow({
+                show: false,
+                webPreferences: {
+                    preload: path.join(__dirname, '../preload/index.js'),
+                    sandbox: false,
+                    nodeIntegration: false,
+                    contextIsolation: true,
+                },
             });
-        }
-        return false;
+
+            // We need a simple HTML to mount the React component or just raw HTML
+            // Since we already have LabelRenderer in the renderer, let's just send the HTML?
+            // Or better: open a window, load a special "print" page that uses the same renderer.
+
+            // For now, let's use a simpler approach: 
+            // The sender window already has the rendered content? No, it has the preview.
+
+
+            // Actually, let's just reuse the existing window for printing if possible, 
+            // but the user wants it to be fast and not hold up the flow.
+
+            // REALISTIC APPROACH: 
+            // Open a hidden window that loads the same app but with a ?print=true route.
+            const devUrl = 'http://localhost:5173';
+            const url = app.isPackaged
+                ? `file://${path.join(__dirname, '../dist/index.html')}?print=true`
+                : `${devUrl}?print=true`;
+
+            printWindow.loadURL(url);
+
+            printWindow.webContents.on('did-finish-load', () => {
+                printWindow.webContents.send('print-data', { labelDoc, data });
+            });
+
+            ipcMain.once('ready-to-print', (e) => {
+                if (e.sender === printWindow.webContents) {
+                    printWindow.webContents.print({
+                        silent: silent !== false,
+                        printBackground: true,
+                        margins: { marginType: 'none' }
+                    }, (success) => {
+                        printWindow.close();
+                        resolve(success);
+                    });
+                }
+            });
+        });
     });
 
     ipcMain.handle('get-printers', async (event) => {
@@ -117,6 +159,16 @@ app.whenReady().then(() => {
 
     ipcMain.handle('usb-import', async (_, path) => {
         return importDataFromUSB(path);
+    });
+
+    ipcMain.handle('get-label', async (_, id) => {
+        const { getLabelById } = await import('./database');
+        return getLabelById(id);
+    });
+
+    ipcMain.handle('get-barcode-template', async (_, id) => {
+        const { getBarcodeTemplateById } = await import('./database');
+        return getBarcodeTemplateById(id);
     });
 
     // Data Sync Handlers

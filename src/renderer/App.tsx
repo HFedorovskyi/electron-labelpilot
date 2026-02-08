@@ -1,10 +1,18 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import Sidebar from './components/Sidebar';
 import WeighingStation from './components/WeighingStation';
 import Settings from './components/Settings';
+import PrintView from './components/PrintView';
 
 const App = () => {
     const [activeTab, setActiveTab] = useState('weighing');
+
+    // Check if this is a print-only window
+    const isPrintWindow = new URLSearchParams(window.location.search).get('print') === 'true';
+
+    if (isPrintWindow) {
+        return <PrintView />;
+    }
 
     return (
         <div className="flex h-screen bg-neutral-950 text-white font-sans overflow-hidden">

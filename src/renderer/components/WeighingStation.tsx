@@ -4,39 +4,60 @@ import { Printer, RefreshCw, Box } from 'lucide-react';
 const WeighingStation = () => {
     const [weight, setWeight] = useState<string>('0.000');
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const [status, setStatus] = useState<string>('disconnected');
+    const [, setStatus] = useState<string>('disconnected');
+    const [labelDoc, setLabelDoc] = useState<any>(null);
+
+    const getGrossWeight = () => {
+        return (parseFloat(weight) + (selectedProduct?.portion_weight || 0) / 1000).toFixed(3);
+    };
+
+    const getLabelData = () => {
+        const now = new Date();
+        const expDays = selectedProduct?.exp_date || 0;
+        const expDate = new Date();
+        expDate.setDate(now.getDate() + expDays);
+
+        const formatDate = (d: Date) => {
+            return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        };
+
+        return {
+            name: selectedProduct?.name || '',
+            article: selectedProduct?.article || '',
+            exp_date: String(expDays),
+            weight: weight,
+            weight_brutto: getGrossWeight(),
+            date: formatDate(now),
+            date_exp: formatDate(expDate),
+            ...selectedProduct?.extra_data // Spread any extra data from server
+        };
+    };
 
     useEffect(() => {
         const removeReadingListener = window.electron.on('scale-reading', (data: any) => {
-            // Check if data is object with weight property
             if (data && typeof data === 'object' && 'weight' in data) {
                 setWeight(typeof data.weight === 'number' ? data.weight.toFixed(3) : String(data.weight));
                 return;
             }
-
-            // Fallback for string or other formats
             const weightStr = typeof data === 'string' ? data : JSON.stringify(data);
             const match = weightStr.match(/(\d+\.\d+)/);
-            if (match) {
-                setWeight(match[1]);
-            } else {
-                setWeight(weightStr);
-            }
+            if (match) setWeight(match[1]);
+            else setWeight(weightStr);
         });
 
         const removeStatusListener = window.electron.on('scale-status', (s: any) => setStatus(s));
 
+        const removeUpdateListener = window.electron.on('data-updated', () => {
+            console.log('Sync Client: Data updated, refreshing list...');
+            loadProducts(searchQuery);
+        });
+
         return () => {
             removeReadingListener();
             removeStatusListener();
+            removeUpdateListener();
         };
     }, []);
-
-    const handlePrint = () => {
-        // window.print(); // Simple browser print
-        // Or invoke main process
-        window.electron.invoke('print-label', { silent: false });
-    };
 
     const [products, setProducts] = useState<any[]>([]);
     const [selectedProduct, setSelectedProduct] = useState<any | null>(null);
@@ -47,9 +68,39 @@ const WeighingStation = () => {
         loadProducts();
     }, []);
 
+    useEffect(() => {
+        const fetchLabel = async () => {
+            if (selectedProduct?.templates_pack_label) {
+                try {
+                    const label = await window.electron.invoke('get-label', selectedProduct.templates_pack_label);
+                    if (label && label.structure) {
+                        setLabelDoc(JSON.parse(label.structure));
+                    }
+                } catch (err) {
+                    console.error('Failed to fetch label template:', err);
+                }
+            } else {
+                setLabelDoc(null);
+            }
+        };
+        fetchLabel();
+    }, [selectedProduct]);
+
+    const handlePrint = async () => {
+        if (!labelDoc) return;
+        const printData = getLabelData();
+        // Invoke a "render and print" process or use invisible window
+        window.electron.invoke('print-label', {
+            silent: true,
+            labelDoc,
+            data: printData
+        });
+    };
+
     const loadProducts = async (query = '') => {
         try {
             const list = await window.electron.invoke('get-products', query);
+            console.log(`WeighingStation: Loaded ${list.length} products for query "${query}"`);
             setProducts(list);
         } catch (err) {
             console.error(err);
@@ -96,9 +147,9 @@ const WeighingStation = () => {
                             className="w-full bg-black/20 border border-white/10 rounded-2xl px-5 py-4 text-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all text-white placeholder-neutral-600"
                         />
                         {/* Dropdown Menu */}
-                        {isMenuOpen && products.length > 0 && (
+                        {isMenuOpen && (products.length > 0 || searchQuery !== '') && (
                             <div className="absolute w-full mt-2 bg-neutral-900 border border-white/10 rounded-2xl shadow-xl max-h-60 overflow-y-auto z-50">
-                                {products.map((p: any) => (
+                                {products.length > 0 ? products.map((p: any) => (
                                     <div
                                         key={p.id}
                                         onClick={() => handleSelectProduct(p)}
@@ -106,7 +157,9 @@ const WeighingStation = () => {
                                     >
                                         <span className="text-white group-hover:text-emerald-100">{p.name} <span className="text-neutral-500 text-sm ml-2">({p.article})</span></span>
                                     </div>
-                                ))}
+                                )) : (
+                                    <div className="px-5 py-3 text-neutral-500 italic">No products found</div>
+                                )}
                             </div>
                         )}
                     </div>
@@ -139,7 +192,7 @@ const WeighingStation = () => {
                     <div className="bg-black/30 border border-white/10 rounded-3xl p-8 text-center">
                         <label className="text-xs uppercase tracking-widest text-neutral-500 font-bold">Gross Weight</label>
                         <div className="text-7xl font-mono text-neutral-300 mt-2 font-light tracking-tighter">
-                            0.000 <span className="text-2xl text-neutral-600">kg</span>
+                            {(parseFloat(weight) + (selectedProduct?.portion_weight || 0) / 1000).toFixed(3)} <span className="text-2xl text-neutral-600">kg</span>
                         </div>
                     </div>
                 </div>
@@ -181,6 +234,14 @@ const WeighingStation = () => {
                             <span className="text-neutral-500">Box Status:</span>
                             <span className="font-mono text-amber-400">4 / 10 pack</span>
                         </div>
+                    </div>
+
+                    {/* Debug Info */}
+                    <div className="mt-6 pt-6 border-t border-white/5 text-[10px] font-mono text-neutral-600">
+                        <div>DEBUG INFO:</div>
+                        <div>Weight: {weight}</div>
+                        <div>Portion Weight: {selectedProduct?.portion_weight ?? 'N/A'}</div>
+                        <div>Selected ID: {selectedProduct?.id ?? 'N/A'}</div>
                     </div>
                 </div>
             </div>

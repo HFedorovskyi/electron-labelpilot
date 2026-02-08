@@ -1,4 +1,4 @@
-import { ScaleProtocol, ScaleReading } from './types';
+import type { ScaleProtocol, ScaleReading } from './types';
 
 export const CAS_Simple: ScaleProtocol = {
     id: 'cas_simple',

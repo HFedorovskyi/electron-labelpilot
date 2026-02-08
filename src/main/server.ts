@@ -1,5 +1,6 @@
 import http from 'http';
 import { initDatabase } from './database';
+import { importDataToDB, type SyncData } from './sync';
 
 const PORT = 5556;
 
@@ -7,7 +8,8 @@ export function startSyncServer() {
     const server = http.createServer((req, res) => {
         // Set CORS headers
         res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
         if (req.method === 'OPTIONS') {
             res.writeHead(200);
@@ -15,12 +17,14 @@ export function startSyncServer() {
             return;
         }
 
-        if (req.url === '/api/full-sync' && req.method === 'GET') {
+        console.log(`Sync Server: [${req.method}] ${req.url}`);
+        const normalizedUrl = req.url?.endsWith('/') ? req.url.slice(0, -1) : req.url;
+
+        if (normalizedUrl === '/api/full_sync' && req.method === 'GET') {
             try {
                 const db = initDatabase();
-                if (!db) throw new Error('Database not initialized');
 
-                // Fetch all data in dependency order
+                // Export logic (same as before)
                 const barcodes = db.prepare('SELECT * FROM barcodes').all();
                 const labels = db.prepare('SELECT * FROM labels').all();
                 const containers = db.prepare('SELECT * FROM container').all();
@@ -43,7 +47,29 @@ export function startSyncServer() {
                 res.writeHead(500);
                 res.end(JSON.stringify({ error: err.message }));
             }
-        } else {
+        }
+        else if ((normalizedUrl === '/api/sync_db' || normalizedUrl === '/api/full_sync') && req.method === 'POST') {
+            // Import Logic (Push from Server)
+            let body = '';
+            req.on('data', chunk => {
+                body += chunk.toString();
+            });
+            req.on('end', () => {
+                try {
+                    const data = JSON.parse(body) as SyncData;
+                    importDataToDB(data);
+
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ status: 'success', message: 'Data synced successfully' }));
+                    console.log('Sync Server: Imported full data snapshot via POST');
+                } catch (err: any) {
+                    console.error('Sync Server Import Error:', err);
+                    res.writeHead(500, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: err.message }));
+                }
+            });
+        }
+        else {
             res.writeHead(404);
             res.end('Not Found');
         }

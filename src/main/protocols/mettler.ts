@@ -1,4 +1,4 @@
-import { ScaleProtocol, ScaleReading } from './types';
+import type { ScaleProtocol, ScaleReading } from './types';
 
 export const Mettler_SICS: ScaleProtocol = {
     id: 'mettler_sics',

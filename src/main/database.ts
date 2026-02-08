@@ -102,19 +102,58 @@ export function initDatabase() {
 }
 
 export function getProducts(search: string = '') {
+  const db = initDatabase();
   if (!db) return [];
+
+  const baseQuery = `
+    SELECT n.*, c.weight as portion_weight 
+    FROM nomenclature n
+    LEFT JOIN container c ON n.portion_container_id = c.id
+  `;
 
   if (search) {
     const query = `
-      SELECT * FROM nomenclature 
-      WHERE name LIKE @search OR article LIKE @search
-      ORDER BY name ASC
+      ${baseQuery}
+      WHERE n.name LIKE @search OR n.article LIKE @search
+      ORDER BY n.name ASC
       LIMIT 50
     `;
-    return db.prepare(query).all({ search: `%${search}%` });
+    const results = db.prepare(query).all({ search: `%${search}%` });
+    console.log(`getProducts(search: "${search}") results:`, results.length);
+    return results;
   } else {
-    return db.prepare('SELECT * FROM nomenclature ORDER BY name ASC LIMIT 50').all();
+    const results = db.prepare(`${baseQuery} ORDER BY n.name ASC LIMIT 50`).all();
+    console.log('getProducts(all) results:', results.length);
+    return results;
   }
 }
 
-export default db;
+export function getLabelById(id: number) {
+  const db = initDatabase();
+  if (!db) return null;
+  return db.prepare('SELECT * FROM labels WHERE id = ?').get(id);
+}
+
+export function getBarcodeTemplateById(id: number) {
+  const db = initDatabase();
+  if (!db) return null;
+  return db.prepare('SELECT * FROM barcodes WHERE id = ?').get(id);
+}
+
+import { randomUUID } from 'crypto';
+
+export function getOrCreateClientUUID(): string {
+  const db = initDatabase();
+
+  const row = db.prepare('SELECT uuid_client FROM uuid LIMIT 1').get() as { uuid_client: string } | undefined;
+
+  if (row) {
+    return row.uuid_client;
+  } else {
+    const newUuid = randomUUID();
+    db.prepare('INSERT INTO uuid (uuid_client) VALUES (?)').run(newUuid);
+    console.log('Generated new Client UUID:', newUuid);
+    return newUuid;
+  }
+}
+

@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Save, RefreshCw, Settings as SettingsIcon, Radio, Server, Monitor } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Save, RefreshCw, Settings as SettingsIcon, Server, Monitor } from 'lucide-react';
 
 interface SerialPortInfo {
     path: string;
