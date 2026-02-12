@@ -42,6 +42,10 @@ class ScaleManager {
     async listPorts() {
         return await serialport_1.SerialPort.list();
     }
+    getStatus() {
+        return this.status;
+    }
+    status = 'disconnected';
     getProtocols() {
         return Object.values(protocols_1.PROTOCOLS).map(p => ({
             id: p.id,
@@ -49,13 +53,20 @@ class ScaleManager {
             description: p.description
         }));
     }
+    lastDataTime = 0;
+    watchdogInterval = null;
     connect(config) {
         this.disconnect();
         this.config = config;
         this.currentProtocol = (0, protocols_1.getProtocol)(config.protocolId);
         console.log(`ScaleManager: Connecting to ${config.type} using ${this.currentProtocol.name}`);
+        this.emitStatus('reconnecting');
         if (config.type === 'serial') {
             this.connectSerial(config);
+        }
+        else if (config.type === 'simulator') {
+            this.emitStatus('connected');
+            this.startPolling();
         }
         else {
             this.connectTcp(config);
@@ -72,15 +83,14 @@ class ScaleManager {
                 path: config.path,
                 baudRate: config.baudRate || this.currentProtocol?.defaultBaudRate || 9600
             });
-            // Use delimiter if protocol is text-based generic, else raw
-            // For now, raw flow is better for custom parsers
             this.scalePort.on('open', () => {
                 console.log(`ScaleManager: Port ${config.path} OPENED`);
-                this.emitStatus('connected');
+                // Status is 'connecting' until first data
+                this.emitStatus('connecting');
                 this.startPolling();
+                this.startWatchdog();
             });
             this.scalePort.on('data', (data) => {
-                // console.log('ScaleManager: Data received', data); // too verbose?
                 this.handleData(data);
             });
             this.scalePort.on('error', (err) => {
@@ -97,14 +107,30 @@ class ScaleManager {
             this.emitError(err.message);
         }
     }
+    startWatchdog() {
+        if (this.watchdogInterval)
+            clearInterval(this.watchdogInterval);
+        // Reset last data time to give it a chance
+        this.lastDataTime = Date.now();
+        this.watchdogInterval = setInterval(() => {
+            const timeSinceLastData = Date.now() - this.lastDataTime;
+            const timeout = 3000; // 3 seconds timeout
+            // If we are 'connected' but haven't seen data for timeout
+            if (this.status === 'connected' && timeSinceLastData > timeout) {
+                console.log('ScaleManager: Watchdog - Data timeout, setting status to connecting...');
+                this.emitStatus('connecting');
+            }
+        }, 1000);
+    }
     connectTcp(config) {
         if (!config.host || !config.port)
             return;
         this.tcpClient = new net_1.default.Socket();
         this.tcpClient.connect(config.port, config.host, () => {
             console.log('TCP Connected');
-            this.emitStatus('connected');
+            this.emitStatus('connecting');
             this.startPolling();
+            this.startWatchdog();
         });
         this.tcpClient.on('data', (data) => this.handleData(data));
         this.tcpClient.on('error', (err) => this.emitError(err.message));
@@ -128,7 +154,6 @@ class ScaleManager {
         console.log(`ScaleManager: Starting polling every ${interval}ms using command:`, cmd);
         this.pollingInterval = setInterval(() => {
             if (this.config?.type === 'serial' && this.scalePort?.isOpen) {
-                // console.log('ScaleManager: Sending poll command...');
                 this.scalePort.write(cmd, (err) => {
                     if (err)
                         console.error('ScaleManager: Write error:', err);
@@ -138,9 +163,8 @@ class ScaleManager {
                 this.tcpClient.write(cmd);
             }
             else if (this.config?.type === 'simulator') {
-                // Simulator logic...
                 const randomWeight = (Math.random() * 10 + 1).toFixed(3);
-                const isStable = Math.random() > 0.3; // 70% stable
+                const isStable = Math.random() > 0.3;
                 const reading = {
                     weight: parseFloat(randomWeight),
                     unit: 'kg',
@@ -155,29 +179,28 @@ class ScaleManager {
             return;
         const reading = this.currentProtocol.parse(data);
         if (reading) {
-            // Apply software stability check if protocol doesn't enforce it
-            // Or if we want double-check
+            // Valid data received
+            this.lastDataTime = Date.now();
+            if (this.status !== 'connected') {
+                this.emitStatus('connected');
+            }
             const isStable = this.checkStability(reading.weight, reading.stable);
             reading.stable = isStable;
             this.mainWindow?.webContents.send('scale-reading', reading);
+            // reset status to connecting if handled check is done outside? 
+            // no, watchdog handles timeouts.
         }
     }
     checkStability(weight, protocolReportedStable) {
-        // Add to history
         this.recentReadings.push(weight);
         if (this.recentReadings.length > this.STABILITY_COUNT) {
             this.recentReadings.shift();
         }
-        // If not enough data, use protocol flag
         if (this.recentReadings.length < this.STABILITY_COUNT)
             return protocolReportedStable;
-        // Calculate variance (max - min)
         const min = Math.min(...this.recentReadings);
         const max = Math.max(...this.recentReadings);
         const isSoftwareStable = (max - min) <= this.STABILITY_THRESHOLD;
-        // Trust hardware flag if true, otherwise check software
-        // Or assume strictly AND? Let's use OR (hardware valid OR software valid)
-        // Usually, hardware flag is authoritative.
         return protocolReportedStable || isSoftwareStable;
     }
     disconnect() {
@@ -185,7 +208,12 @@ class ScaleManager {
             clearInterval(this.pollingInterval);
             this.pollingInterval = null;
         }
+        if (this.watchdogInterval) {
+            clearInterval(this.watchdogInterval);
+            this.watchdogInterval = null;
+        }
         if (this.scalePort?.isOpen) {
+            this.scalePort.removeAllListeners();
             this.scalePort.close();
             this.scalePort = null;
         }
@@ -195,6 +223,7 @@ class ScaleManager {
         }
     }
     emitStatus(status) {
+        this.status = status;
         this.mainWindow?.webContents.send('scale-status', status);
     }
     emitError(msg) {

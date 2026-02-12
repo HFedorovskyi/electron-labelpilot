@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Save, RefreshCw, Settings as SettingsIcon, Server, Monitor } from 'lucide-react';
+import { Save, RefreshCw, Settings as SettingsIcon, Printer, Languages } from 'lucide-react';
+import { useTranslation, type Lang } from '../i18n';
 
 interface SerialPortInfo {
     path: string;
@@ -12,13 +13,15 @@ interface ProtocolInfo {
     description: string;
 }
 
-interface DiscoveredDevice {
-    ip: string;
-    type: 'LABELPILOT_SERVER' | 'LABELPILOT_STATION';
-    lastSeen: number;
+interface PrinterInfo {
+    name: string;
+    displayName: string;
+    isDefault: boolean;
+    status: number;
 }
 
 const Settings = () => {
+    const { t, lang, setLang } = useTranslation();
     const [ports, setPorts] = useState<SerialPortInfo[]>([]);
     const [protocols, setProtocols] = useState<ProtocolInfo[]>([]);
     const [config, setConfig] = useState({
@@ -32,64 +35,24 @@ const Settings = () => {
         stabilityCount: 5
     });
 
-    const [appMode, setAppMode] = useState<'station' | 'server'>('station');
-    const [discoveredDevices, setDiscoveredDevices] = useState<DiscoveredDevice[]>([]);
-    const [manualIp, setManualIp] = useState('127.0.0.1');
-    const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
+    const [printers, setPrinters] = useState<PrinterInfo[]>([]);
+    const [printerConfig, setPrinterConfig] = useState({
+        packPrinter: '',
+        boxPrinter: '',
+        autoPrintOnStable: false,
+        serverIp: ''
+    });
+    const [isSyncing, setIsSyncing] = useState(false);
+
     const [toastMessage, setToastMessage] = useState<string | null>(null);
 
     useEffect(() => {
         loadData();
-
-        // Listen for discovery events
-        const removeDiscoveryListener = window.electron.on('discovery-event', (data: any) => {
-            setDiscoveredDevices(prev => {
-                const exists = prev.find(d => d.ip === data.ip);
-                if (exists) return prev.map(d => d.ip === data.ip ? { ...d, lastSeen: Date.now() } : d);
-                return [...prev, { ip: data.ip, type: data.type === 'server-found' ? 'LABELPILOT_SERVER' : 'LABELPILOT_STATION', lastSeen: Date.now() }];
-            });
-
-            // Auto-fill IP if station finds server
-            if (appMode === 'station' && data.type === 'server-found') {
-                setManualIp(data.ip);
-            }
-        });
-
-        return () => {
-            removeDiscoveryListener();
-        };
-    }, [appMode]); // Re-bind if mode changes might stay same listener but logic inside usage
-
-    useEffect(() => {
-        // Inform main process of mode change
-        window.electron.send('set-app-mode', appMode);
-        setDiscoveredDevices([]); // Clear list on mode switch
-    }, [appMode]);
+    }, []);
 
     const showToast = (msg: string) => {
         setToastMessage(msg);
         setTimeout(() => setToastMessage(null), 3000);
-    };
-
-    const handleSync = async () => {
-        const targetIp = manualIp;
-        if (!targetIp) {
-            showToast("Enter Server IP");
-            return;
-        }
-
-        try {
-            setSyncStatus('syncing');
-            await window.electron.invoke('sync-data', targetIp);
-            setSyncStatus('success');
-            showToast("Data Synced Successfully!");
-        } catch (err) {
-            console.error(err);
-            setSyncStatus('error');
-            showToast("Sync Failed. Check Server.");
-        } finally {
-            setTimeout(() => setSyncStatus('idle'), 2000);
-        }
     };
 
     const loadData = async () => {
@@ -98,8 +61,14 @@ const Settings = () => {
             const protocolsList = await window.electron.invoke('get-protocols');
             const savedConfig = await window.electron.invoke('get-scale-config');
 
+            const printersList = await window.electron.invoke('get-printers');
+            const savedPrinterConfig = await window.electron.invoke('get-printer-config');
+
             setPorts(portsList);
             setProtocols(protocolsList);
+
+            if (savedPrinterConfig) setPrinterConfig(savedPrinterConfig);
+            if (printersList) setPrinters(printersList);
 
             if (savedConfig) {
                 setConfig(savedConfig);
@@ -112,9 +81,27 @@ const Settings = () => {
     };
 
     const handleSave = () => {
-        console.log('Saving config:', config);
         window.electron.send('save-scale-config', config);
-        showToast("Configuration Saved");
+        window.electron.send('save-printer-config', printerConfig);
+        showToast(t('settings.saved'));
+    };
+
+    const handleSync = async () => {
+        if (!printerConfig.serverIp) {
+            showToast(t('settings.serverIpRequired'));
+            return;
+        }
+
+        setIsSyncing(true);
+        try {
+            await window.electron.invoke('sync-data', printerConfig.serverIp);
+            showToast(t('settings.connectionSuccess'));
+        } catch (error) {
+            console.error('Connection test failed:', error);
+            showToast(t('settings.connectionFailed'));
+        } finally {
+            setIsSyncing(false);
+        }
     };
 
     return (
@@ -129,124 +116,158 @@ const Settings = () => {
 
             <h1 className="text-3xl font-bold mb-8 flex items-center gap-3">
                 <SettingsIcon className="w-8 h-8 text-emerald-500" />
-                Settings
+                {t('settings.title')}
             </h1>
 
             <div className="space-y-8 max-w-4xl">
-                {/* App Mode Selection */}
+                {/* ── Language Configuration ── */}
                 <div className="p-6 bg-white/5 border border-white/10 rounded-2xl">
-                    <h2 className="text-xl font-semibold mb-4 text-purple-400">Application Mode</h2>
+                    <h2 className="text-xl font-semibold mb-6 flex items-center gap-3 text-emerald-400">
+                        <Languages className="w-6 h-6" />
+                        {t('settings.language')}
+                    </h2>
                     <div className="flex gap-4">
-                        <button
-                            onClick={() => setAppMode('station')}
-                            className={`flex-1 p-4 rounded-xl border flex items-center justify-center gap-3 transition-all
-                                ${appMode === 'station' ? 'bg-purple-500/20 border-purple-500 text-purple-300' : 'bg-black/20 border-white/10 hover:bg-white/5'}
-                            `}
-                        >
-                            <Monitor size={24} />
-                            <div className="text-left">
-                                <div className="font-bold">Station Mode</div>
-                                <div className="text-xs opacity-70">Connects to a central server</div>
-                            </div>
-                        </button>
-                        <button
-                            onClick={() => setAppMode('server')}
-                            className={`flex-1 p-4 rounded-xl border flex items-center justify-center gap-3 transition-all
-                                ${appMode === 'server' ? 'bg-purple-500/20 border-purple-500 text-purple-300' : 'bg-black/20 border-white/10 hover:bg-white/5'}
-                            `}
-                        >
-                            <Server size={24} />
-                            <div className="text-left">
-                                <div className="font-bold">Server Mode</div>
-                                <div className="text-xs opacity-70">Manages data for stations</div>
-                            </div>
+                        {(['ru', 'en', 'de'] as Lang[]).map((l) => (
+                            <button
+                                key={l}
+                                onClick={() => setLang(l)}
+                                className={`px-6 py-3 rounded-xl border transition-all font-medium ${lang === l
+                                    ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.1)]'
+                                    : 'bg-black/20 border-white/10 text-neutral-400 hover:text-white hover:bg-white/5'
+                                    }`}
+                            >
+                                {l.toUpperCase()}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+
+                {/* ── Server Configuration ── */}
+                <div className="p-6 bg-white/5 border border-white/10 rounded-2xl">
+                    <h2 className="text-xl font-semibold mb-6 flex items-center gap-3 text-blue-400">
+                        <SettingsIcon className="w-6 h-6" />
+                        {t('sidebar.serverStatus')}
+                    </h2>
+                    <div>
+                        <label className="block text-sm text-neutral-400 mb-2">{t('settings.serverIp')}</label>
+                        <div className="flex gap-3">
+                            <input
+                                type="text"
+                                value={printerConfig.serverIp || ''}
+                                onChange={(e) => setPrinterConfig({ ...printerConfig, serverIp: e.target.value })}
+                                placeholder={t('settings.serverIpPlaceholder')}
+                                className="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-all hover:bg-black/40 font-mono"
+                            />
+                            <button
+                                onClick={handleSync}
+                                disabled={isSyncing || !printerConfig.serverIp}
+                                className={`px-6 rounded-xl font-medium transition-all flex items-center gap-2 ${isSyncing || !printerConfig.serverIp
+                                    ? 'bg-neutral-800 text-neutral-500 cursor-not-allowed'
+                                    : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg hover:shadow-blue-500/20'
+                                    }`}
+                            >
+                                <RefreshCw className={`w-5 h-5 ${isSyncing ? 'animate-spin' : ''}`} />
+                                {isSyncing ? t('settings.testing') : t('settings.testConnection')}
+                            </button>
+                        </div>
+                        <p className="mt-2 text-xs text-white/30">
+                            {t('settings.serverIpPlaceholder')}
+                        </p>
+                    </div>
+                </div>
+
+                {/* ── Printer Configuration ── */}
+                <div className="p-6 bg-white/5 border border-white/10 rounded-2xl">
+                    <h2 className="text-xl font-semibold mb-6 flex items-center gap-3 text-amber-400">
+                        <Printer className="w-6 h-6" />
+                        {t('settings.printer')}
+                    </h2>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        {/* Pack Label Printer */}
+                        <div className="bg-black/20 p-5 rounded-xl border border-white/5">
+                            <label className="block text-sm text-neutral-400 mb-2">{t('settings.packPrinter')}</label>
+                            <select
+                                value={printerConfig.packPrinter}
+                                onChange={(e) => setPrinterConfig({ ...printerConfig, packPrinter: e.target.value })}
+                                className="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50 transition-all hover:bg-black/40"
+                            >
+                                <option value="">{t('settings.systemDefault')}</option>
+                                {printers.map(p => (
+                                    <option key={p.name} value={p.name}>
+                                        {p.displayName || p.name}{p.isDefault ? ` (${t('settings.defaultMark')})` : ''}
+                                    </option>
+                                ))}
+                            </select>
+                            <p className="mt-2 text-xs text-white/30">{t('settings.printerHint')}</p>
+                        </div>
+
+                        {/* Box Label Printer */}
+                        <div className="bg-black/20 p-5 rounded-xl border border-white/5">
+                            <label className="block text-sm text-neutral-400 mb-2">{t('settings.boxPrinter')}</label>
+                            <select
+                                value={printerConfig.boxPrinter}
+                                onChange={(e) => setPrinterConfig({ ...printerConfig, boxPrinter: e.target.value })}
+                                className="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50 transition-all hover:bg-black/40"
+                            >
+                                <option value="">{t('settings.systemDefault')}</option>
+                                {printers.map(p => (
+                                    <option key={p.name} value={p.name}>
+                                        {p.displayName || p.name}{p.isDefault ? ` (${t('settings.defaultMark')})` : ''}
+                                    </option>
+                                ))}
+                            </select>
+                            <p className="mt-2 text-xs text-white/30">{t('settings.printerHint')}</p>
+                        </div>
+                    </div>
+
+                    <div className="flex items-center gap-3 mt-6">
+                        <button onClick={loadData} className="text-xs text-amber-400 hover:text-amber-300 flex items-center gap-1">
+                            <RefreshCw size={12} /> {t('settings.refreshPrinters')}
                         </button>
                     </div>
 
-                    {/* Discovery List */}
-                    <div className="mt-6">
-                        <h3 className="text-sm font-medium text-neutral-400 mb-2">
-                            {appMode === 'station' ? 'Discovered Servers' : 'Connected Stations'}
-                        </h3>
-                        <div className="bg-black/30 rounded-xl p-2 min-h-[60px]">
-                            {discoveredDevices.length === 0 && (
-                                <div className="text-neutral-600 text-sm p-2 italic flex items-center gap-2">
-                                    <span className="w-2 h-2 bg-neutral-600 rounded-full animate-pulse"></span>
-                                    Searching for devices...
+                    {/* Auto-Print Toggle */}
+                    <div className="mt-6 p-4 bg-black/20 rounded-xl border border-white/5">
+                        <div className="flex justify-between items-center">
+                            <div>
+                                <div className="font-medium text-white">{t('settings.autoPrint')}</div>
+                                <div className="text-xs text-neutral-500 mt-1">
+                                    {t('settings.autoPrintDesc')}
                                 </div>
-                            )}
-                            {discoveredDevices.map(device => (
-                                <div key={device.ip} className="flex justify-between items-center p-3 hover:bg-white/5 rounded-lg">
-                                    <div className="flex items-center gap-3">
-                                        {appMode === 'station' ? <Server size={16} className="text-emerald-400" /> : <Monitor size={16} className="text-blue-400" />}
-                                        <span className="font-mono">{device.ip}</span>
-                                    </div>
-                                    {appMode === 'station' && (
-                                        <button
-                                            onClick={() => setManualIp(device.ip)}
-                                            className="text-xs bg-white/10 hover:bg-white/20 px-3 py-1 rounded"
-                                        >
-                                            Use this IP
-                                        </button>
-                                    )}
-                                </div>
-                            ))}
+                            </div>
+                            <label className="relative inline-flex items-center cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    className="sr-only peer"
+                                    checked={printerConfig.autoPrintOnStable}
+                                    onChange={(e) => setPrinterConfig({ ...printerConfig, autoPrintOnStable: e.target.checked })}
+                                />
+                                <div className="w-11 h-6 bg-neutral-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-600"></div>
+                            </label>
                         </div>
                     </div>
                 </div>
 
-                {/* Data Synchronization Section (Only for Station) */}
-                {appMode === 'station' && (
-                    <div className="p-6 bg-white/5 border border-white/10 rounded-2xl">
-                        <h2 className="text-xl font-semibold mb-4 text-emerald-400">Data Synchronization</h2>
-                        <div className="flex justify-between items-end bg-black/30 p-4 rounded-xl mb-4 gap-4">
-                            <div className="flex-1">
-                                <label className="text-sm text-neutral-400 mb-2 block">Server IP Address</label>
-                                <div className="relative">
-                                    <input
-                                        type="text"
-                                        value={manualIp}
-                                        onChange={(e) => setManualIp(e.target.value)}
-                                        placeholder="e.g. 192.168.1.100"
-                                        className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-white font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
-                                    />
-                                </div>
-                            </div>
-                            <button
-                                onClick={handleSync}
-                                disabled={!manualIp || syncStatus === 'syncing'}
-                                className={`px-6 py-3 rounded-xl font-bold transition-all flex items-center gap-2 h-[50px]
-                                    ${syncStatus === 'syncing' ? 'bg-neutral-700 cursor-wait' :
-                                        !manualIp ? 'bg-neutral-800 text-neutral-500 cursor-not-allowed' :
-                                            'bg-emerald-600 hover:bg-emerald-500 shadow-lg hover:shadow-emerald-500/20'}
-                                `}
-                            >
-                                <RefreshCw className={`w-5 h-5 ${syncStatus === 'syncing' ? 'animate-spin' : ''}`} />
-                                {syncStatus === 'syncing' ? 'Syncing...' : 'Sync Data'}
-                            </button>
-                        </div>
-                    </div>
-                )}
-
-                {/* Scale Configuration Section */}
+                {/* ── Scale Configuration ── */}
                 <div className="p-6 bg-white/5 border border-white/10 rounded-2xl">
-                    <h2 className="text-xl font-semibold mb-6 text-white">Weighing Configuration</h2>
+                    <h2 className="text-xl font-semibold mb-6 text-white">{t('settings.scales')}</h2>
 
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                         {/* Left Column: Connection */}
                         <div className="space-y-6">
-                            <h3 className="text-lg font-medium text-white/80 border-b border-white/5 pb-2">Connection Interface</h3>
+                            <h3 className="text-lg font-medium text-white/80 border-b border-white/5 pb-2">{t('settings.connectionInterface')}</h3>
 
                             <div>
-                                <label className="block text-sm text-neutral-400 mb-2">Interface Type</label>
+                                <label className="block text-sm text-neutral-400 mb-2">{t('settings.connectionType')}</label>
                                 <select
                                     value={config.type}
                                     onChange={(e) => setConfig({ ...config, type: e.target.value })}
                                     className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all hover:bg-black/30"
                                 >
-                                    <option value="serial">Serial Port (USB/COM)</option>
-                                    <option value="tcp">Ethernet (TCP/IP)</option>
-                                    <option value="simulator">Simulator (Virtual)</option>
+                                    <option value="serial">{t('settings.serial')}</option>
+                                    <option value="tcp">{t('settings.tcp')}</option>
+                                    <option value="simulator">{t('settings.simulator')}</option>
                                 </select>
                             </div>
 
@@ -254,9 +275,9 @@ const Settings = () => {
                                 <div className="space-y-4">
                                     <div>
                                         <div className="flex justify-between mb-2">
-                                            <label className="text-sm text-neutral-400">Port</label>
+                                            <label className="text-sm text-neutral-400">{t('settings.port')}</label>
                                             <button onClick={loadData} className="text-xs text-emerald-400 hover:text-emerald-300 flex items-center gap-1">
-                                                <RefreshCw size={12} /> Refresh
+                                                <RefreshCw size={12} /> {t('settings.refresh')}
                                             </button>
                                         </div>
                                         <select
@@ -267,11 +288,11 @@ const Settings = () => {
                                             {ports.map(p => (
                                                 <option key={p.path} value={p.path}>{p.path} {p.manufacturer ? `(${p.manufacturer})` : ''}</option>
                                             ))}
-                                            {ports.length === 0 && <option value="" disabled>No ports found</option>}
+                                            {ports.length === 0 && <option value="" disabled>{t('settings.portsNotFound')}</option>}
                                         </select>
                                     </div>
                                     <div>
-                                        <label className="block text-sm text-neutral-400 mb-2">Baud Rate</label>
+                                        <label className="block text-sm text-neutral-400 mb-2">{t('settings.baudRate')}</label>
                                         <select
                                             value={config.baudRate}
                                             onChange={(e) => setConfig({ ...config, baudRate: Number(e.target.value) })}
@@ -288,7 +309,7 @@ const Settings = () => {
                             {config.type === 'tcp' && (
                                 <div className="grid grid-cols-3 gap-4">
                                     <div className="col-span-2">
-                                        <label className="block text-sm text-neutral-400 mb-2">IP Address</label>
+                                        <label className="block text-sm text-neutral-400 mb-2">{t('settings.ipAddress')}</label>
                                         <input
                                             type="text"
                                             value={config.host}
@@ -297,7 +318,7 @@ const Settings = () => {
                                         />
                                     </div>
                                     <div>
-                                        <label className="block text-sm text-neutral-400 mb-2">Port</label>
+                                        <label className="block text-sm text-neutral-400 mb-2">{t('settings.port')}</label>
                                         <input
                                             type="number"
                                             value={config.port}
@@ -311,10 +332,10 @@ const Settings = () => {
 
                         {/* Right Column: Protocol & Advanced */}
                         <div className="space-y-6">
-                            <h3 className="text-lg font-medium text-white/80 border-b border-white/5 pb-2">Protocol & Tuning</h3>
+                            <h3 className="text-lg font-medium text-white/80 border-b border-white/5 pb-2">{t('settings.protocolSettings')}</h3>
 
                             <div>
-                                <label className="block text-sm text-neutral-400 mb-2">Scale Protocol</label>
+                                <label className="block text-sm text-neutral-400 mb-2">{t('settings.protocol')}</label>
                                 <select
                                     value={config.protocolId}
                                     onChange={(e) => setConfig({ ...config, protocolId: e.target.value })}
@@ -332,7 +353,7 @@ const Settings = () => {
 
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
-                                    <label className="block text-sm text-neutral-400 mb-2">Polling (ms)</label>
+                                    <label className="block text-sm text-neutral-400 mb-2">{t('settings.pollingMs')}</label>
                                     <input
                                         type="number"
                                         value={config.pollingInterval}
@@ -341,7 +362,7 @@ const Settings = () => {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm text-neutral-400 mb-2">Stability (Readings)</label>
+                                    <label className="block text-sm text-neutral-400 mb-2">{t('settings.stabilityCount')}</label>
                                     <input
                                         type="number"
                                         value={config.stabilityCount}
@@ -359,7 +380,7 @@ const Settings = () => {
                             className="flex items-center gap-2 px-8 py-3 bg-emerald-600 hover:bg-emerald-500 hover:shadow-lg hover:shadow-emerald-500/20 rounded-xl font-semibold text-white transition-all transform active:scale-95"
                         >
                             <Save size={18} />
-                            Save Configuration
+                            {t('settings.save')}
                         </button>
                     </div>
                 </div>

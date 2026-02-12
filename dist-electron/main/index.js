@@ -47,6 +47,17 @@ const discovery_1 = require("./discovery");
 if (require('electron-squirrel-startup')) {
     electron_1.app.quit();
 }
+// Global error handler for EPIPE errors which are common in Electron main process
+// when console output pipes are closed unexpectedly.
+process.on('uncaughtException', (err) => {
+    if (err.code === 'EPIPE') {
+        // Safe to ignore EPIPE as it just means we can't write to stdout/stderr
+        return;
+    }
+    console.error('Uncaught Exception:', err);
+    // Usually we should exit on uncaught exception, but let's try to keep running if possible
+    // process.exit(1); 
+});
 let mainWindow = null;
 function createWindow() {
     mainWindow = new electron_1.BrowserWindow({
@@ -61,7 +72,7 @@ function createWindow() {
     });
     scales_1.scaleManager.setMainWindow(mainWindow);
     discovery_1.discoveryManager.setMainWindow(mainWindow);
-    const devUrl = 'http://localhost:5173';
+    const devUrl = 'http://127.0.0.1:5173';
     if (!electron_1.app.isPackaged) {
         mainWindow.loadURL(devUrl);
         mainWindow.webContents.openDevTools();
@@ -72,6 +83,10 @@ function createWindow() {
 }
 electron_1.app.whenReady().then(() => {
     (0, database_1.initDatabase)();
+    electron_1.ipcMain.handle('get-station-info', () => {
+        const { getStationInfo } = require('./database');
+        return getStationInfo();
+    });
     createWindow();
     // Initialize Managers
     scales_1.scaleManager.init();
@@ -88,8 +103,19 @@ electron_1.app.whenReady().then(() => {
     electron_1.ipcMain.handle('get-scale-config', () => {
         return scales_1.scaleManager.getConfig();
     });
+    electron_1.ipcMain.handle('get-scale-status', () => {
+        return scales_1.scaleManager.getStatus();
+    });
     electron_1.ipcMain.on('save-scale-config', (_, config) => {
         scales_1.scaleManager.saveAndConnect(config);
+    });
+    electron_1.ipcMain.handle('get-numbering-config', async () => {
+        const { loadNumberingConfig } = await Promise.resolve().then(() => __importStar(require('./config')));
+        return loadNumberingConfig();
+    });
+    electron_1.ipcMain.on('save-numbering-config', async (_, config) => {
+        const { saveNumberingConfig } = await Promise.resolve().then(() => __importStar(require('./config')));
+        saveNumberingConfig(config);
     });
     electron_1.ipcMain.on('disconnect-scale', () => {
         scales_1.scaleManager.disconnect();
@@ -105,25 +131,51 @@ electron_1.app.whenReady().then(() => {
         const { getProducts } = await Promise.resolve().then(() => __importStar(require('./database')));
         return getProducts(search);
     });
+    electron_1.ipcMain.handle('get-containers', async () => {
+        const { getContainers } = await Promise.resolve().then(() => __importStar(require('./database')));
+        return getContainers();
+    });
     // Printing Handlers
-    electron_1.ipcMain.handle('print-label', async (event, options) => {
-        const win = electron_1.BrowserWindow.fromWebContents(event.sender);
-        if (win) {
-            return new Promise((resolve, reject) => {
-                win.webContents.print({
-                    silent: options?.silent || false,
-                    deviceName: options?.deviceName,
-                    printBackground: true,
-                    margins: { marginType: 'none' }
-                }, (success, errorType) => {
-                    if (success)
-                        resolve(true);
-                    else
-                        reject(errorType);
-                });
+    electron_1.ipcMain.handle('print-label', async (_, options) => {
+        const { silent, labelDoc, data, printerName } = options;
+        return new Promise((resolve) => {
+            const printWindow = new electron_1.BrowserWindow({
+                show: false,
+                webPreferences: {
+                    preload: path_1.default.join(__dirname, '../preload/index.js'),
+                    sandbox: false,
+                    nodeIntegration: false,
+                    contextIsolation: true,
+                },
             });
-        }
-        return false;
+            const devUrl = 'http://127.0.0.1:5173';
+            const url = electron_1.app.isPackaged
+                ? `file://${path_1.default.join(__dirname, '../dist/index.html')}?print=true`
+                : `${devUrl}?print=true`;
+            printWindow.loadURL(url);
+            printWindow.webContents.on('did-finish-load', () => {
+                printWindow.webContents.send('print-data', { labelDoc, data });
+            });
+            const readyHandler = (event) => {
+                if (event.sender === printWindow.webContents) {
+                    electron_1.ipcMain.removeListener('ready-to-print', readyHandler);
+                    const printOptions = {
+                        silent: silent !== false,
+                        printBackground: true,
+                        margins: { marginType: 'none' }
+                    };
+                    // Route to specific printer (supports industrial: TSC, Zebra, Honeywell, CAB, etc.)
+                    if (printerName) {
+                        printOptions.deviceName = printerName;
+                    }
+                    printWindow.webContents.print(printOptions, (success) => {
+                        printWindow.close();
+                        resolve(success);
+                    });
+                }
+            };
+            electron_1.ipcMain.on('ready-to-print', readyHandler);
+        });
     });
     electron_1.ipcMain.handle('get-printers', async (event) => {
         const win = electron_1.BrowserWindow.fromWebContents(event.sender);
@@ -136,11 +188,51 @@ electron_1.app.whenReady().then(() => {
     electron_1.ipcMain.handle('usb-import', async (_, path) => {
         return (0, usb_sync_1.importDataFromUSB)(path);
     });
+    electron_1.ipcMain.handle('get-label', async (_, id) => {
+        const { getLabelById } = await Promise.resolve().then(() => __importStar(require('./database')));
+        return getLabelById(id);
+    });
+    electron_1.ipcMain.handle('get-barcode-template', async (_, id) => {
+        const { getBarcodeTemplateById } = await Promise.resolve().then(() => __importStar(require('./database')));
+        return getBarcodeTemplateById(id);
+    });
     // Data Sync Handlers
     electron_1.ipcMain.handle('sync-data', async (_, serverIp) => {
-        // dynamic import to avoid circular dep if any, though likely safe
         const { syncDataFromServer } = await Promise.resolve().then(() => __importStar(require('./sync')));
         return await syncDataFromServer(serverIp);
+    });
+    // Printer Config Handlers
+    electron_1.ipcMain.handle('get-printer-config', async () => {
+        const { loadPrinterConfig } = await Promise.resolve().then(() => __importStar(require('./config')));
+        return loadPrinterConfig();
+    });
+    electron_1.ipcMain.on('save-printer-config', async (_, config) => {
+        const { savePrinterConfig } = await Promise.resolve().then(() => __importStar(require('./config')));
+        savePrinterConfig(config);
+    });
+    // Database Viewer Handlers
+    electron_1.ipcMain.handle('get-tables', async () => {
+        const { getTables } = await Promise.resolve().then(() => __importStar(require('./database')));
+        return getTables();
+    });
+    electron_1.ipcMain.handle('get-table-data', async (_, tableName) => {
+        const { getTableData } = await Promise.resolve().then(() => __importStar(require('./database')));
+        return getTableData(tableName);
+    });
+    electron_1.ipcMain.handle('record-pack', async (_, data) => {
+        const { recordPack } = await Promise.resolve().then(() => __importStar(require('./database')));
+        return recordPack(data);
+    });
+    electron_1.ipcMain.handle('close-box', async (_, { boxId, weightNetto, weightBrutto }) => {
+        const { closeBox } = await Promise.resolve().then(() => __importStar(require('./database')));
+        return closeBox(boxId, weightNetto, weightBrutto);
+    });
+    electron_1.ipcMain.handle('get-latest-counters', async () => {
+        const { getLatestCounters } = await Promise.resolve().then(() => __importStar(require('./database')));
+        return getLatestCounters();
+    });
+    electron_1.ipcMain.on('log-to-main', (_event, ...args) => {
+        console.log('[Renderer Log]:', ...args);
     });
 });
 // Import and start Sync Server

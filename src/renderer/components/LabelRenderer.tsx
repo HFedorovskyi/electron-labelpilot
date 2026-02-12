@@ -1,5 +1,5 @@
 import { useRef, useEffect } from 'react';
-import JsBarcode from 'jsbarcode';
+import bwipjs from 'bwip-js';
 
 interface LabelRendererProps {
     doc: any; // LabelDoc
@@ -14,6 +14,7 @@ const LabelRenderer = ({ doc, data, preview = false }: LabelRendererProps) => {
     const zoom = preview ? 0.5 : 1; // Basic zoom for preview, but we might want it responsive
 
     const processText = (text: string) => {
+        if (!text) return '';
         return text.replace(/{{\s*([^{}]+)\s*}}/g, (match, key) => {
             const trimmedKey = key.trim();
             return data[trimmedKey] !== undefined ? String(data[trimmedKey]) : match;
@@ -55,16 +56,26 @@ const LabelElement = ({ el, processText }: { el: any; processText: (t: string) =
     };
 
     if (el.type === 'text') {
+        const getJustifyContent = (align: string) => {
+            if (align === 'center') return 'center';
+            if (align === 'right') return 'flex-end';
+            return 'flex-start';
+        };
+
         return (
             <div
                 style={{
                     ...commonStyle,
+                    fontFamily: el.fontFamily || 'Inter, sans-serif',
                     fontSize: `${el.fontSize}px`,
-                    color: el.color,
-                    fontWeight: el.fontWeight,
+                    color: el.color || '#000000',
+                    fontWeight: el.fontWeight || 400,
+                    fontStyle: el.fontStyle || 'normal',
+                    textAlign: el.textAlign || 'left',
+                    textDecoration: el.textDecoration || 'none',
                     display: 'flex',
                     alignItems: 'center',
-                    justifyContent: 'flex-start',
+                    justifyContent: getJustifyContent(el.textAlign),
                     whiteSpace: 'pre-wrap',
                     wordBreak: 'break-word',
                 }}
@@ -95,39 +106,95 @@ const LabelElement = ({ el, processText }: { el: any; processText: (t: string) =
 };
 
 const BarcodeElement = ({ el, processText, style }: { el: any; processText: (t: string) => string; style: React.CSSProperties }) => {
-    const svgRef = useRef<SVGSVGElement>(null);
+    const canvasRef = useRef<HTMLCanvasElement>(null);
 
     useEffect(() => {
-        if (svgRef.current) {
-            try {
-                const processedValue = processText(el.value);
-                console.log(`Rendering barcode: "${processedValue}" (type: ${el.barcodeType})`);
+        if (canvasRef.current) {
+            let processedValue = '';
+            let rawValue = '';
+            let bcid = 'code128';
 
-                if (!processedValue || processedValue === el.value && el.value.includes('{{')) {
-                    console.warn('Barcode value still contains placeholders or is empty:', processedValue);
+            try {
+                rawValue = el.value || '';
+                processedValue = processText(rawValue);
+
+                if (!processedValue || (processedValue === rawValue && rawValue.includes('{{'))) {
+                    console.warn('Barcode value empty or still contains placeholders:', processedValue);
+                    return;
                 }
 
-                JsBarcode(svgRef.current, processedValue, {
-                    format: el.barcodeType || 'CODE128',
-                    width: 2,
-                    height: el.h * 0.8,
-                    displayValue: el.showText,
-                    margin: 0,
-                    flat: true,
-                    // fontOptions: "bold",
-                    valid: (valid) => {
-                        if (!valid) console.error('Barcode is invalid for format', el.barcodeType);
+                const getBwipType = (type: any) => {
+                    const t = String(type).toLowerCase();
+                    if (t === '21' || t === 'ean13') return 'ean13';
+                    if (t === '22' || t === 'ean8') return 'ean8';
+                    if (t === '23' || t === 'code128') return 'code128';
+                    if (t === 'qr' || t === 'qrcode') return 'qrcode';
+                    if (t === 'datamatrix') return 'datamatrix';
+                    if (t === 'gs1datamatrix') return 'gs1datamatrix';
+                    if (t === 'gs1qr' || t === 'gs1qrcode' || t === 'qrdatabar' || t === 'gs-1') return 'gs1qrcode';
+                    if (t === 'gs1databar' || t === 'databar') return 'gs1databarexpandedstacked';
+                    return t || 'code128';
+                };
+
+                bcid = getBwipType(el.barcodeType);
+                const logMsg = `BWIP-JS Rendering Pipeline: RawType="${el.barcodeType}" -> BCID="${bcid}", Value="${processedValue}"`;
+                console.log(logMsg);
+                (window as any).electron.send('log-to-main', logMsg);
+
+                const render = (targetBcid: string, text: string, parseGS1: boolean) => {
+                    if (!canvasRef.current) return;
+                    const options: any = {
+                        bcid: targetBcid,
+                        text: text,
+                        scale: 2,
+                        includetext: !!el.showText,
+                        textxalign: 'center',
+                        parse: parseGS1,
+                    };
+
+                    // Only add height for 1D barcodes
+                    if (!(targetBcid.includes('qr') || targetBcid.includes('matrix'))) {
+                        options.height = 15;
                     }
-                });
+
+                    bwipjs.toCanvas(canvasRef.current, options);
+                };
+
+                const isGS1 = bcid.startsWith('gs1') || bcid === 'ean13' || bcid === 'ean8' || processedValue.includes('(');
+
+                try {
+                    render(bcid, processedValue, isGS1);
+                } catch (firstErr) {
+                    const errMsg = `[Barcode Error] Primary render failed for ${bcid} with value "${processedValue}": ${firstErr instanceof Error ? firstErr.message : String(firstErr)}`;
+                    console.error(errMsg, firstErr);
+                    (window as any).electron.send('log-to-main', errMsg);
+
+                    console.warn(`Primary render failed for ${bcid}. Trying non-GS1 fallback.`, firstErr);
+
+                    // Progressive Fallbacks
+                    let fallbackBcid = 'qrcode';
+                    if (bcid.includes('matrix')) fallbackBcid = 'datamatrix';
+                    else if (bcid === 'ean13' || bcid === 'ean8') fallbackBcid = 'code128';
+
+                    const cleanValue = processedValue.replace(/[()]/g, '');
+
+                    try {
+                        render(fallbackBcid, cleanValue, false);
+                    } catch (secondErr) {
+                        console.warn(`Secondary fallback ${fallbackBcid} failed. Trying CODE128.`, secondErr);
+                        render('code128', cleanValue, false);
+                    }
+                }
+
             } catch (err) {
-                console.error('Barcode Rendering Error:', err);
+                console.error('Critical Barcode Rendering Error:', err);
             }
         }
     }, [el, processText]);
 
     return (
-        <div style={{ ...style, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-            <svg ref={svgRef} style={{ maxWidth: '100%', maxHeight: '100%' }} />
+        <div style={{ ...style, display: 'flex', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' }}>
+            <canvas ref={canvasRef} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
         </div>
     );
 };

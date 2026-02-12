@@ -1,17 +1,99 @@
-import React, { useEffect, useState } from 'react';
-import { Printer, RefreshCw, Box } from 'lucide-react';
+import React, { useEffect, useState, useRef } from 'react';
+import { Printer, RefreshCw, Box, AlertCircle, X } from 'lucide-react';
+import { generateBarcode, type BarcodeData } from '../utils/barcodeGenerator';
+import { useTranslation } from '../i18n';
 
 const WeighingStation = () => {
+    const { t } = useTranslation();
+    // --- STATE DECLARATIONS ---
     const [weight, setWeight] = useState<string>('0.000');
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const [, setStatus] = useState<string>('disconnected');
+    const [status, setStatus] = useState<string>('disconnected');
     const [labelDoc, setLabelDoc] = useState<any>(null);
 
+    const [products, setProducts] = useState<any[]>([]);
+    const [selectedProduct, setSelectedProduct] = useState<any | null>(null);
+    const [searchQuery, setSearchQuery] = useState('');
+    const [isMenuOpen, setIsMenuOpen] = useState(false);
+    const [alertMessage, setAlertMessage] = useState<string | null>(null);
+    const [numberingConfig, setNumberingConfig] = useState<any>(null);
+
+    const [containers, setContainers] = useState<any[]>([]);
+
+    const [boxLabelDoc, setBoxLabelDoc] = useState<any>(null);
+    const [packBarcodeTemplate, setPackBarcodeTemplate] = useState<any>(null);
+    const [boxBarcodeTemplate, setBoxBarcodeTemplate] = useState<any>(null);
+    const [boxNetWeight, setBoxNetWeight] = useState(0);
+
+    const [unitsInBox, setUnitsInBox] = useState(0);
+    const [boxesInPallet, setBoxesInPallet] = useState(0);
+    const [totalUnits, setTotalUnits] = useState(0);
+    const [currentBoxId, setCurrentBoxId] = useState<number | null>(null);
+    const [lastPrinted, setLastPrinted] = useState<{ doc: any, data: any } | null>(null);
+
+    const [stationNumber, setStationNumber] = useState<string | null>(null);
+    const [isStable, setIsStable] = useState(false);
+
+    // Printer config (loaded from saved settings)
+    const [printerConfig, setPrinterConfig] = useState<any>({
+        packPrinter: '',
+        boxPrinter: '',
+        autoPrintOnStable: false
+    });
+
+    // Auto-print refs to prevent duplicate prints
+    const autoPrintFiredRef = useRef(false);
+    const isPrintingRef = useRef(false);
+    const weightRef = useRef('0.000');
+    const componentReadyRef = useRef(false);
+
+    // --- EFFECTS ---
+    useEffect(() => {
+        const loadStationInfo = async () => {
+            try {
+                const info = await window.electron.invoke('get-station-info');
+                if (info) {
+                    if (info.station_number) setStationNumber(info.station_number);
+                }
+
+                // Get latest records from history
+                const latest = await window.electron.invoke('get-latest-counters');
+                console.log('Latest Counters from DB:', latest);
+                if (latest) {
+                    if (latest.totalUnits !== undefined) setTotalUnits(latest.totalUnits);
+                    // Extract numeric part of box number if it's formatted
+                    const boxNum = parseInt(latest.lastBoxNumber.replace(/^\D+/g, ''), 10) || 0;
+                    setBoxesInPallet(boxNum);
+                }
+            } catch (e) {
+                console.error('Failed to load station info', e);
+            }
+        };
+        loadStationInfo();
+
+        // Delay enabling auto-print to avoid firing on startup
+        const readyTimer = setTimeout(() => { componentReadyRef.current = true; }, 2000);
+        return () => clearTimeout(readyTimer);
+    }, []);
+
+
+
+    // --- HELPER FUNCTIONS ---
     const getGrossWeight = () => {
-        return (parseFloat(weight) + (selectedProduct?.portion_weight || 0) / 1000).toFixed(3);
+        if (!selectedProduct) return weight;
+        const currentWeight = parseFloat(weight);
+        // Try to find container first
+        if (selectedProduct.portion_container_id) {
+            const container = containers.find(c => c.id === selectedProduct.portion_container_id);
+            if (container) {
+                return (currentWeight + container.weight / 1000).toFixed(3);
+            }
+        }
+        // Fallback to direct portion_weight if present
+        return (currentWeight + (selectedProduct.portion_weight || 0) / 1000).toFixed(3);
     };
 
-    const getLabelData = () => {
+    const getLabelData = (overrideWeight?: number, isBoxLabel: boolean = false, overrideUnits?: number) => {
+        const currentWeightVal = overrideWeight !== undefined ? overrideWeight : parseFloat(weight);
         const now = new Date();
         const expDays = selectedProduct?.exp_date || 0;
         const expDate = new Date();
@@ -21,83 +103,177 @@ const WeighingStation = () => {
             return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
         };
 
-        return {
+        const formatFullDate = (d: Date) => {
+            const day = String(d.getDate()).padStart(2, '0');
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const year = d.getFullYear();
+            return `${day}.${month}.${year}`;
+        };
+
+        let extra = {};
+        try {
+            if (selectedProduct?.extra_data) {
+                // console.log('DEBUG: Parsing extra_data for', selectedProduct.name, typeof selectedProduct.extra_data, selectedProduct.extra_data);
+                if (typeof selectedProduct.extra_data === 'string') {
+                    extra = JSON.parse(selectedProduct.extra_data);
+                } else if (typeof selectedProduct.extra_data === 'object') {
+                    extra = selectedProduct.extra_data;
+                }
+            }
+        } catch (e) {
+            console.error('Failed to parse extra_data', e);
+        }
+
+        // Calculate Weights
+        const weightNettoPack = currentWeightVal;
+        const portionContainer = containers.find(c => c.id === selectedProduct?.portion_container_id);
+        const weightBruttoPack = weightNettoPack + (portionContainer?.weight || 0) / 1000;
+
+        // Box Weights
+        // For box label, currentWeightVal passed in IS the total box net weight
+        const effectiveBoxNet = isBoxLabel ? currentWeightVal : (boxNetWeight + weightNettoPack);
+
+        const boxContainer = containers.find(c => c.id === selectedProduct?.box_container_id);
+        const tarePackGrams = portionContainer?.weight || 0;
+        const tareBoxGrams = boxContainer?.weight || 0;
+        // Brutto box = sum of each pack's brutto (net + pack tare) + box container tare
+        // Number of packs: for box label use overrideUnits, otherwise current + 1
+        const packsInThisBox = isBoxLabel
+            ? (overrideUnits !== undefined ? overrideUnits : unitsInBox)
+            : (unitsInBox + 1);
+        const weightBruttoBox = effectiveBoxNet + (packsInThisBox * tarePackGrams / 1000) + (tareBoxGrams / 1000);
+
+        // Pallet Weights (Placeholder logic for now)
+        const weightNettoPallet = effectiveBoxNet * (boxesInPallet + 1);
+        const weightBruttoPallet = weightNettoPallet + 20;
+
+        // Counters
+        const currentUnits = overrideUnits !== undefined ? overrideUnits : unitsInBox;
+
+        const getFormattedCounter = (count: number, labelDoc: any, placeholder: string): string => {
+            // Base: Station + Count
+            const stationPrefix = stationNumber ? String(stationNumber).padStart(2, '0') : '';
+            const countStr = String(count);
+
+            // Check for minLength in template
+            let minLength = 0;
+            const items = labelDoc ? (labelDoc.elements || labelDoc.objects) : null;
+            if (items) {
+                const el = items.find((e: any) => e.type === 'text' && ((e.value && e.value.includes(placeholder)) || (e.text && e.text.includes(placeholder))));
+                if (el && el.minLength) minLength = Number(el.minLength);
+            }
+
+            // Formatting Logic
+            if (minLength > 0) {
+                // If minLength is set, we assume it refers to the TOTAL length of the ID
+                // Format: [StationPrefix][PaddedCounter]
+                // Example: Station 06, Count 1, MinLength 8 -> 06000001
+                const targetCountLength = Math.max(0, minLength - stationPrefix.length);
+                return stationPrefix + countStr.padStart(targetCountLength, '0');
+            } else {
+                // Default: Just concatenate
+                return stationPrefix + countStr;
+            }
+        };
+
+        // Select the template document to use for looking up minLength/formatting rules
+        const activeLabelDoc = isBoxLabel ? boxLabelDoc : labelDoc;
+
+        // For Pack Label
+        let unitNumStr = '';
+        if (stationNumber) {
+            // We use totalUnits for the permanent individual pack number.
+            // unitsInBox is used for "Pack X of Y" statistics.
+            unitNumStr = getFormattedCounter(totalUnits + 1, activeLabelDoc, '{{pack_number}}');
+        } else {
+            // Fallback to local config
+            unitNumStr = numberingConfig?.unit?.enabled
+                ? `${numberingConfig.unit.prefix || ''}${String(totalUnits + 1).padStart(numberingConfig.unit.length, '0')}`
+                : String(totalUnits + 1);
+        }
+
+        // For Box Label
+        let boxNumStr = '';
+        if (stationNumber) {
+            boxNumStr = getFormattedCounter(boxesInPallet + 1, activeLabelDoc, '{{box_number}}');
+        } else {
+            boxNumStr = numberingConfig?.box?.enabled
+                ? `${numberingConfig.box.prefix || ''}${String(boxesInPallet + 1).padStart(numberingConfig.box.length, '0')}`
+                : String(boxesInPallet + 1);
+        }
+
+        const dataObj: any = {
             name: selectedProduct?.name || '',
             article: selectedProduct?.article || '',
             exp_date: String(expDays),
-            weight: weight,
-            weight_brutto: getGrossWeight(),
+
+            // Weights (Strings for text replacement)
+            weight: weightNettoPack.toFixed(3),
+            weight_netto_pack: weightNettoPack.toFixed(3),
+            weight_brutto_pack: weightBruttoPack.toFixed(3),
+            weight_netto_box: effectiveBoxNet.toFixed(3),
+            weight_brutto_box: weightBruttoBox.toFixed(3),
+            weight_netto_pallet: weightNettoPallet.toFixed(3),
+            weight_brutto_pallet: weightBruttoPallet.toFixed(3),
+            weight_brutto_all: weightBruttoPallet.toFixed(3),
+
+            // Dates
             date: formatDate(now),
+            production_date: formatFullDate(now),
             date_exp: formatDate(expDate),
-            ...selectedProduct?.extra_data // Spread any extra data from server
+            exp_date_full: formatFullDate(expDate),
+
+            // Counters
+            pack_number: unitNumStr,
+            box_number: boxNumStr,
+            pack_count: String(currentUnits + (isBoxLabel ? 0 : 1)), // For unit label: current + 1. For box: just total.
+            pack_counter: String(currentUnits + (isBoxLabel ? 0 : 1)), // Alias requested by user
+            box_count: String(boxesInPallet + 1),
+            close_box_counter: selectedProduct?.close_box_counter?.toString() || '',
+
+            // Raw numeric values for barcode generator
+            _raw_weight_netto_pack: weightNettoPack,
+            _raw_weight_brutto_pack: weightBruttoPack,
+            _raw_weight_netto_box: effectiveBoxNet,
+            _raw_weight_brutto_box: weightBruttoBox,
+
+            ...extra
         };
-    };
 
-    useEffect(() => {
-        const removeReadingListener = window.electron.on('scale-reading', (data: any) => {
-            if (data && typeof data === 'object' && 'weight' in data) {
-                setWeight(typeof data.weight === 'number' ? data.weight.toFixed(3) : String(data.weight));
-                return;
-            }
-            const weightStr = typeof data === 'string' ? data : JSON.stringify(data);
-            const match = weightStr.match(/(\d+\.\d+)/);
-            if (match) setWeight(match[1]);
-            else setWeight(weightStr);
-        });
-
-        const removeStatusListener = window.electron.on('scale-status', (s: any) => setStatus(s));
-
-        const removeUpdateListener = window.electron.on('data-updated', () => {
-            console.log('Sync Client: Data updated, refreshing list...');
-            loadProducts(searchQuery);
-        });
-
-        return () => {
-            removeReadingListener();
-            removeStatusListener();
-            removeUpdateListener();
-        };
-    }, []);
-
-    const [products, setProducts] = useState<any[]>([]);
-    const [selectedProduct, setSelectedProduct] = useState<any | null>(null);
-    const [searchQuery, setSearchQuery] = useState('');
-    const [isMenuOpen, setIsMenuOpen] = useState(false);
-
-    useEffect(() => {
-        loadProducts();
-    }, []);
-
-    useEffect(() => {
-        const fetchLabel = async () => {
-            if (selectedProduct?.templates_pack_label) {
+        // Barcode Generation
+        dataObj.barcode = (() => {
+            if (packBarcodeTemplate) {
                 try {
-                    const label = await window.electron.invoke('get-label', selectedProduct.templates_pack_label);
-                    if (label && label.structure) {
-                        setLabelDoc(JSON.parse(label.structure));
-                    }
-                } catch (err) {
-                    console.error('Failed to fetch label template:', err);
-                }
-            } else {
-                setLabelDoc(null);
-            }
-        };
-        fetchLabel();
-    }, [selectedProduct]);
+                    const genData: BarcodeData = {
+                        ...dataObj,
+                        weight_netto_pack: weightNettoPack,
+                        weight_brutto_pack: weightBruttoPack,
+                        weight_netto_box: effectiveBoxNet,
+                        weight_brutto_box: weightBruttoBox,
+                        weight_netto_pallet: weightNettoPallet,
+                        weight_brutto_pallet: weightBruttoPallet,
+                        production_date: now,
+                        exp_date: expDate,
+                        article: selectedProduct?.article,
+                        unit_number: unitNumStr,
+                        box_number: boxNumStr
+                    };
 
-    const handlePrint = async () => {
-        if (!labelDoc) return;
-        const printData = getLabelData();
-        // Invoke a "render and print" process or use invisible window
-        window.electron.invoke('print-label', {
-            silent: true,
-            labelDoc,
-            data: printData
-        });
+                    const generated = generateBarcode(JSON.parse(packBarcodeTemplate.structure).fields, genData);
+                    // console.log('Generated Barcode:', generated);
+                    return generated;
+                } catch (err) {
+                    console.error('Barcode generation failed:', err);
+                    return selectedProduct?.barcode || selectedProduct?.article || '0000000000000';
+                }
+            }
+            return selectedProduct?.barcode || selectedProduct?.article || '0000000000000';
+        })();
+
+        return dataObj;
     };
 
-    const loadProducts = async (query = '') => {
+    const loadProducts = async (query: string = '') => {
         try {
             const list = await window.electron.invoke('get-products', query);
             console.log(`WeighingStation: Loaded ${list.length} products for query "${query}"`);
@@ -107,6 +283,457 @@ const WeighingStation = () => {
         }
     };
 
+    // --- EFFECTS ---
+
+
+
+    // Scale, Status, Sync Listeners
+    useEffect(() => {
+        const removeReadingListener = window.electron.on('scale-reading', (data: any) => {
+            if (data && typeof data === 'object' && 'weight' in data) {
+                const w = typeof data.weight === 'number' ? data.weight : parseFloat(String(data.weight));
+                setWeight(w.toFixed(3));
+                weightRef.current = w.toFixed(3);
+                setIsStable(!!data.stable);
+
+                // Reset auto-print flag when weight drops near zero (product removed)
+                if (w < 0.010) {
+                    autoPrintFiredRef.current = false;
+                }
+                return;
+            }
+            const weightStr = typeof data === 'string' ? data : JSON.stringify(data);
+            const match = weightStr.match(/(\d+\.\d+)/);
+            if (match) { setWeight(match[1]); weightRef.current = match[1]; }
+            else { setWeight(weightStr); weightRef.current = weightStr; }
+        });
+
+        const removeStatusListener = window.electron.on('scale-status', (s: any) => setStatus(s));
+
+        window.electron.invoke('get-scale-status').then((s: string) => {
+            if (s) setStatus(s);
+        });
+
+        const removeUpdateListener = window.electron.on('data-updated', () => {
+            loadProducts(searchQuery);
+        });
+
+        return () => {
+            removeReadingListener();
+            removeStatusListener();
+            removeUpdateListener();
+        };
+    }, [searchQuery]);
+
+    // Auto-update selected product / auto-select on load
+    useEffect(() => {
+        if (products.length === 0) return;
+
+        if (selectedProduct) {
+            // Update existing selection if data changed after sync
+            const updated = products.find(p => p.id === selectedProduct.id);
+            if (updated && JSON.stringify(updated) !== JSON.stringify(selectedProduct)) {
+                setSelectedProduct(updated);
+            }
+        } else {
+            // No product selected yet — try to restore from localStorage or pick first
+            const savedId = localStorage.getItem('lastSelectedProductId');
+            const restored = savedId ? products.find(p => String(p.id) === savedId) : null;
+            setSelectedProduct(restored || products[0]);
+        }
+    }, [products]);
+
+    // Persist selected product ID to localStorage
+    useEffect(() => {
+        if (selectedProduct?.id) {
+            localStorage.setItem('lastSelectedProductId', String(selectedProduct.id));
+        }
+    }, [selectedProduct]);
+
+    // Load printer config
+    useEffect(() => {
+        window.electron.invoke('get-printer-config').then((cfg: any) => {
+            if (cfg) setPrinterConfig(cfg);
+        });
+    }, []);
+
+    // Auto-print on weight stabilization
+    // Only reacts to isStable changes (not every weight reading) to avoid blocking React rendering
+    useEffect(() => {
+        if (
+            !componentReadyRef.current ||
+            !printerConfig.autoPrintOnStable ||
+            !isStable ||
+            !selectedProduct ||
+            !labelDoc ||
+            autoPrintFiredRef.current ||
+            isPrintingRef.current
+        ) return;
+
+        // Check weight from ref (avoids putting weight in deps which would cause effect to fire ~7/sec)
+        const currentWeight = parseFloat(weightRef.current);
+        if (currentWeight <= 0.010) return;
+
+        autoPrintFiredRef.current = true;
+        handlePrint().catch((err) => {
+            console.error('Auto-print failed:', err);
+            isPrintingRef.current = false;
+        });
+    }, [isStable, selectedProduct, labelDoc, printerConfig.autoPrintOnStable]);
+
+    // Initial Data Load
+    useEffect(() => {
+        const loadInitData = async () => {
+            try {
+                const cnts = await window.electron.invoke('get-containers');
+                setContainers(cnts);
+            } catch (e) {
+                console.error('Failed to load containers', e);
+            }
+        };
+        loadInitData();
+    }, []);
+
+    // Config and Product Load
+    useEffect(() => {
+        const loadConfig = async () => {
+            try {
+                const cfg = await window.electron.invoke('get-numbering-config');
+                setNumberingConfig(cfg);
+            } catch (e) {
+                console.error('Failed to load numbering config', e);
+            }
+        };
+        loadConfig();
+        loadProducts();
+    }, []);
+
+    // Fetch Labels & Barcodes
+    useEffect(() => {
+        const fetchLabelsAndBarcodes = async () => {
+            console.log('DEBUG: fetchLabelsAndBarcodes triggered. Selected Product:', selectedProduct ? selectedProduct.name : 'NULL');
+
+            if (!selectedProduct) {
+                setLabelDoc(null);
+                setBoxLabelDoc(null);
+                setPackBarcodeTemplate(null);
+                setBoxBarcodeTemplate(null);
+                return;
+            }
+
+            // 1. Pack Label
+            let pDoc = null;
+            if (selectedProduct.templates_pack_label) {
+                try {
+                    console.log('DEBUG: Fetching Pack Label ID:', selectedProduct.templates_pack_label);
+                    const doc = await window.electron.invoke('get-label', selectedProduct.templates_pack_label);
+                    // console.log('DEBUG: Pack Label Doc:', doc ? 'FOUND' : 'NULL');
+                    if (doc && typeof doc.structure === 'string') {
+                        pDoc = JSON.parse(doc.structure);
+                        setLabelDoc(pDoc);
+                    } else {
+                        console.warn('DEBUG: Pack Label structure invalid or missing');
+                    }
+                } catch (err) {
+                    console.error('Failed to fetch pack label template:', err);
+                }
+            } else {
+                setLabelDoc(null);
+            }
+
+            // 2. Box Label
+            let bDoc = null;
+            if (selectedProduct.templates_box_label) {
+                try {
+                    console.log('DEBUG: Fetching Box Label ID:', selectedProduct.templates_box_label);
+                    const doc = await window.electron.invoke('get-label', selectedProduct.templates_box_label);
+                    // console.log('DEBUG: Box Label Doc:', doc ? 'FOUND' : 'NULL');
+                    if (doc && typeof doc.structure === 'string') {
+                        bDoc = JSON.parse(doc.structure);
+                        setBoxLabelDoc(bDoc);
+                    } else {
+                        console.warn('DEBUG: Box Label structure invalid or missing', doc);
+                    }
+                } catch (err) {
+                    console.error('Failed to fetch box label template:', err);
+                }
+            } else {
+                console.log('DEBUG: No templates_box_label in selectedProduct');
+                setBoxLabelDoc(null);
+            }
+
+            // 3. Fetch Barcode Templates based on Label Definition
+            const fetchBarcode = async (doc: any, setFn: (t: any) => void, labelType: string) => {
+                if (!doc) {
+                    console.log(`DEBUG: No doc for ${labelType}`);
+                    return setFn(null);
+                }
+                // Check for 'elements' (LabelRenderer use) or 'objects' (Legacy/Konva?)
+                const items = doc.elements || doc.objects;
+                if (!items) {
+                    console.log(`DEBUG: No elements/objects in ${labelType} doc`);
+                    return setFn(null);
+                }
+                const barcodeObj = items.find((o: any) => o.type === 'barcode');
+                console.log(`DEBUG: ${labelType} Barcode Object:`, JSON.stringify(barcodeObj));
+
+                if (barcodeObj && barcodeObj.templateId) {
+                    try {
+                        console.log(`DEBUG: Fetching template ${barcodeObj.templateId} for ${labelType}`);
+                        const tmpl = await window.electron.invoke('get-barcode-template', barcodeObj.templateId);
+                        console.log(`DEBUG: Fetched template for ${labelType}:`, tmpl ? 'FOUND' : 'NULL');
+                        setFn(tmpl);
+                    } catch (e) {
+                        console.error('Failed to fetch barcode template:', e);
+                        setFn(null);
+                    }
+                } else {
+                    console.log(`DEBUG: No templateId for ${labelType}`);
+                    setFn(null);
+                }
+            };
+
+            await fetchBarcode(pDoc, (t) => {
+                setPackBarcodeTemplate(t);
+            }, 'PACK');
+            await fetchBarcode(bDoc, setBoxBarcodeTemplate, 'BOX');
+        };
+        fetchLabelsAndBarcodes();
+    }, [selectedProduct]);
+
+    const handleRepeat = async () => {
+        if (!lastPrinted) {
+            setAlertMessage('Нет данных для повторной печати.\n(No label printed yet)');
+            return;
+        }
+        console.log('WeighingStation: Repeating last print...');
+        await window.electron.invoke('print-label', {
+            silent: true,
+            labelDoc: lastPrinted.doc,
+            data: lastPrinted.data
+        });
+    };
+
+    const handleCloseBox = async () => {
+        if (unitsInBox === 0) {
+            setAlertMessage('Нельзя закрыть пустой короб!\n(Box is empty)');
+            return;
+        }
+
+        console.log('WeighingStation: Manual Close Box triggered');
+
+        // Capture current state BEFORE resetting
+        const finalBoxWeight = boxNetWeight;
+        const finalUnitsInBox = unitsInBox;
+
+        // Reset counters for next box
+        setUnitsInBox(0);
+        setBoxNetWeight(0);
+        setBoxesInPallet(prev => prev + 1);
+
+        // Print Box Label
+        if (boxLabelDoc) {
+            const boxLimit = selectedProduct?.close_box_counter || 0;
+
+            // Generate Box Barcode
+            // 1. Get Base Data FIRST to ensure counters (box_number) are consistent
+            const baseData = getLabelData(finalBoxWeight, true, finalUnitsInBox);
+
+            // 2. Generate Box Barcode
+            let boxBarcode = '';
+            if (boxBarcodeTemplate) {
+                try {
+                    const fields = JSON.parse(boxBarcodeTemplate.structure).fields;
+                    console.log('MANUAL CLOSE DEBUG: Template Fields:', JSON.stringify(fields));
+
+                    const boxContainer = containers.find(c => c.id === selectedProduct?.box_container_id);
+                    const brutBox = finalBoxWeight + (boxContainer?.weight || 0) / 1000;
+
+                    const genData = {
+                        weight_netto_box: finalBoxWeight,
+                        weight_brutto_box: brutBox,
+                        production_date: new Date(),
+                        exp_date: new Date(),
+                        // GTIN-14 padding ONLY for box label
+                        article: (selectedProduct?.article || '').padStart(14, '0'),
+                        // Use the SAME box_number as the textual label
+                        box_number: baseData.box_number || ''
+                    } as BarcodeData;
+                    console.log('MANUAL CLOSE DEBUG: Gen Data:', JSON.stringify(genData));
+
+                    boxBarcode = generateBarcode(fields, genData);
+                    console.log('MANUAL CLOSE DEBUG: Generated Barcode:', boxBarcode);
+                } catch (err) {
+                    console.error('MANUAL CLOSE DEBUG: Error generating barcode:', err);
+                }
+            } else {
+                console.log('MANUAL CLOSE DEBUG: No boxBarcodeTemplate found');
+            }
+
+            const boxData = {
+                ...baseData,
+                is_box: true,
+                count: boxLimit,
+                pack_counter: String(finalUnitsInBox), // Actual count in this box
+                weight_netto: finalBoxWeight.toFixed(3),
+                barcode: boxBarcode || baseData.barcode
+            };
+
+            await window.electron.invoke('print-label', {
+                silent: true,
+                labelDoc: boxLabelDoc,
+                data: boxData
+            });
+
+            // Persist Closed Box to DB
+            if (currentBoxId) {
+                const boxContainer = containers.find(c => c.id === selectedProduct?.box_container_id);
+                const brutBox = finalBoxWeight + (boxContainer?.weight || 0) / 1000;
+                await window.electron.invoke('close-box', {
+                    boxId: currentBoxId,
+                    weightNetto: finalBoxWeight,
+                    weightBrutto: brutBox
+                });
+                setCurrentBoxId(null);
+            }
+
+            setLastPrinted({ doc: boxLabelDoc, data: boxData });
+        } else {
+            console.warn('Close Box: No box label template found.');
+            setAlertMessage('Шаблон этикетки короба не найден!');
+        }
+    };
+
+    const handlePrint = async () => {
+        if (!labelDoc) {
+            console.warn('Cannot print: No label template selected');
+            return;
+        }
+        const printData = getLabelData();
+
+        // Print Unit Label
+        isPrintingRef.current = true;
+        try {
+            await window.electron.invoke('print-label', {
+                silent: true,
+                labelDoc,
+                data: printData,
+                printerName: printerConfig.packPrinter || undefined
+            });
+
+            // Persist Pack to DB
+            const recordResult = await window.electron.invoke('record-pack', {
+                number: printData.pack_number,
+                box_number: printData.box_number,
+                nomenclature_id: selectedProduct.id,
+                weight_netto: parseFloat(printData.weight_netto_pack),
+                weight_brutto: parseFloat(printData.weight_brutto_pack),
+                barcode_value: printData.barcode,
+                station_number: stationNumber
+            });
+            if (recordResult.boxId) setCurrentBoxId(recordResult.boxId);
+
+            setLastPrinted({ doc: labelDoc, data: printData });
+        } catch (err) {
+            console.error('Printing/Recording Error:', err);
+            setAlertMessage(`Ошибка: ${err instanceof Error ? err.message : String(err)}`);
+            isPrintingRef.current = false;
+            return;
+        }
+
+        // Update Counters
+        const currentWeight = parseFloat(weight);
+        const newUnitsInBox = unitsInBox + 1;
+        const newBoxNetWeight = boxNetWeight + currentWeight;
+
+        const boxLimit = selectedProduct?.close_box_counter || 999999;
+
+        if (newUnitsInBox >= boxLimit) {
+            // Box is full -> Print Box Label
+            console.log('Box limit reached. Auto-printing box label.');
+
+            // Capture state for box
+            const finalBoxWeight = newBoxNetWeight;
+            const finalUnitsInBox = newUnitsInBox;
+
+            // Update state (RESET)
+            setUnitsInBox(0);
+            setBoxNetWeight(0);
+            setBoxesInPallet(prev => prev + 1);
+            setTotalUnits(prev => prev + 1);
+
+            // Auto-print Box Label if available
+            // Auto-print Box Label if available
+            if (boxLabelDoc) {
+                // 1. Get Base Data FIRST
+                const baseData = getLabelData(finalBoxWeight, true, finalUnitsInBox);
+
+                let boxBarcode = '';
+                // Use boxBarcodeTemplate fetched from label structure
+                if (boxBarcodeTemplate) {
+                    const fields = JSON.parse(boxBarcodeTemplate.structure).fields;
+                    console.log('AUTO-PRINT BOX DEBUG: Template Fields:', JSON.stringify(fields));
+
+                    const boxContainer = containers.find(c => c.id === selectedProduct?.box_container_id);
+                    const brutBox = finalBoxWeight + (boxContainer?.weight || 0) / 1000;
+
+                    const genData = {
+                        weight_netto_box: finalBoxWeight,
+                        weight_brutto_box: brutBox,
+                        production_date: new Date(),
+                        exp_date: new Date(),
+                        // GTIN-14 padding ONLY for box label
+                        article: (selectedProduct?.article || '').padStart(14, '0'),
+                        // Use the SAME box_number as the textual label
+                        box_number: baseData.box_number || ''
+                    } as BarcodeData;
+                    console.log('AUTO-PRINT BOX DEBUG: Gen Data:', JSON.stringify(genData));
+
+                    boxBarcode = generateBarcode(fields, genData);
+                    console.log('AUTO-PRINT BOX DEBUG: Generated Barcode:', boxBarcode);
+                }
+
+                const boxData = {
+                    ...baseData,
+                    is_box: true,
+                    count: boxLimit,
+                    pack_counter: String(finalUnitsInBox),
+                    weight_netto: finalBoxWeight.toFixed(3),
+                    barcode: boxBarcode || baseData.barcode
+                };
+
+                await window.electron.invoke('print-label', {
+                    silent: true,
+                    labelDoc: boxLabelDoc,
+                    data: boxData,
+                    printerName: printerConfig.boxPrinter || undefined
+                });
+
+                // Persist Closed Box to DB (Auto-print case)
+                if (currentBoxId) {
+                    const boxContainer = containers.find(c => c.id === selectedProduct?.box_container_id);
+                    const brutBox = finalBoxWeight + (boxContainer?.weight || 0) / 1000;
+                    await window.electron.invoke('close-box', {
+                        boxId: currentBoxId,
+                        weightNetto: finalBoxWeight,
+                        weightBrutto: brutBox
+                    });
+                    setCurrentBoxId(null);
+                }
+
+                setLastPrinted({ doc: boxLabelDoc, data: boxData });
+            }
+            isPrintingRef.current = false;
+        } else {
+            setUnitsInBox(newUnitsInBox);
+            setBoxNetWeight(newBoxNetWeight);
+            isPrintingRef.current = false;
+            setTotalUnits(prev => prev + 1);
+        }
+    };
+
+
+
     const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
         const query = e.target.value;
         setSearchQuery(query);
@@ -115,6 +742,10 @@ const WeighingStation = () => {
     };
 
     const handleSelectProduct = (product: any) => {
+        if (unitsInBox > 0) {
+            setAlertMessage(t('ws.closeBoxBeforeChange'));
+            return;
+        }
         setSelectedProduct(product);
         setSearchQuery('');
         setIsMenuOpen(false);
@@ -126,21 +757,39 @@ const WeighingStation = () => {
             <div className="col-span-8 bg-neutral-900/50 border border-white/5 rounded-3xl p-8 backdrop-blur shadow-2xl">
                 <div className="flex justify-between items-start mb-8">
                     <div>
-                        <h2 className="text-2xl font-semibold text-white">Weighing Station</h2>
-                        <p className="text-neutral-400 mt-1">Select logic and start weighing</p>
+                        <h2 className="text-2xl font-semibold text-white">{t('ws.title')}</h2>
                     </div>
-                    <div className="px-4 py-2 bg-emerald-500/10 border border-emerald-500/20 rounded-full text-emerald-400 text-sm font-medium flex items-center gap-2">
-                        <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
-                        Scale Active
+                    <div className={`px-4 py-2 rounded-full text-sm font-medium flex items-center gap-2 border ${status === 'connected'
+                        ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+                        : (status === 'reconnecting' || status === 'connecting')
+                            ? 'bg-yellow-500/10 border-yellow-500/20 text-yellow-400'
+                            : 'bg-red-500/10 border-red-500/20 text-red-400'
+                        }`}>
+                        <span className={`w-2 h-2 rounded-full ${status === 'connected' ? 'bg-emerald-500 animate-pulse' :
+                            (status === 'reconnecting' || status === 'connecting') ? 'bg-yellow-500 animate-pulse' :
+                                'bg-red-500'
+                            }`}></span>
+                        {status === 'connected' ? t('ws.scaleStatus.connected') :
+                            (status === 'reconnecting' || status === 'connecting') ? t('ws.scaleStatus.connecting') : t('ws.scaleStatus.disconnected')}
                     </div>
+                    {/* Auto-print indicator */}
+                    {printerConfig.autoPrintOnStable && (
+                        <div className={`ml-4 px-3 py-1 rounded-full text-xs font-medium border flex items-center gap-2 ${autoPrintFiredRef.current
+                            ? 'bg-amber-500/10 border-amber-500/20 text-amber-400'
+                            : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+                            }`}>
+                            <Printer className="w-3 h-3" />
+                            {autoPrintFiredRef.current ? t('ws.printed') : t('ws.autoPrintActive')}
+                        </div>
+                    )}
                 </div>
 
                 <div className="space-y-6 relative">
                     <div onClick={(e) => e.stopPropagation()}>
-                        <label className="block text-sm font-medium text-neutral-400 mb-2">Search Article / SKU</label>
+                        <label className="block text-sm font-medium text-neutral-400 mb-2">{t('ws.search')}</label>
                         <input
                             type="text"
-                            placeholder="Scan or type..."
+                            placeholder="..."
                             value={searchQuery}
                             onChange={handleSearch}
                             onFocus={() => setIsMenuOpen(true)}
@@ -158,7 +807,7 @@ const WeighingStation = () => {
                                         <span className="text-white group-hover:text-emerald-100">{p.name} <span className="text-neutral-500 text-sm ml-2">({p.article})</span></span>
                                     </div>
                                 )) : (
-                                    <div className="px-5 py-3 text-neutral-500 italic">No products found</div>
+                                    <div className="px-5 py-3 text-neutral-500 italic">{t('ws.noProducts')}</div>
                                 )}
                             </div>
                         )}
@@ -167,15 +816,15 @@ const WeighingStation = () => {
                     <div className="p-6 bg-emerald-500/5 border border-emerald-500/10 rounded-2xl min-h-[140px] flex flex-col justify-center">
                         {selectedProduct ? (
                             <>
-                                <h3 className="text-sm uppercase tracking-wider text-emerald-500/60 font-bold mb-2">Selected Product</h3>
+                                <h3 className="text-sm uppercase tracking-wider text-emerald-500/60 font-bold mb-2">{t('products.name')}</h3>
                                 <div className="text-3xl font-bold text-emerald-100">{selectedProduct.name}</div>
                                 <div className="mt-2 flex gap-4 text-emerald-400/60 text-sm font-mono">
-                                    <span>SKU: {selectedProduct.article || 'N/A'}</span>
-                                    <span>EXP: {selectedProduct.exp_date || 'N/A'} DAYS</span>
+                                    <span>{t('products.article')}: {selectedProduct.article || '—'}</span>
+                                    <span>{t('products.expDays').toUpperCase()}: {selectedProduct.exp_date || 0}</span>
                                 </div>
                             </>
                         ) : (
-                            <div className="text-center text-neutral-500 italic">No product selected</div>
+                            <div className="text-center text-neutral-500 italic">{t('ws.selectProduct')}</div>
                         )}
                     </div>
                 </div>
@@ -184,15 +833,21 @@ const WeighingStation = () => {
                 <div className="mt-8 grid grid-cols-2 gap-4">
                     <div className="bg-black/30 border border-white/10 rounded-3xl p-8 text-center relative overflow-hidden group">
                         <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                        <label className="text-xs uppercase tracking-widest text-neutral-500 font-bold">Net Weight</label>
+                        <label className="text-xs uppercase tracking-widest text-neutral-500 font-bold">{t('ws.net')}</label>
                         <div className="text-7xl font-mono text-emerald-400 mt-2 font-light tracking-tighter">
-                            {weight} <span className="text-2xl text-emerald-500/50">kg</span>
+                            {weight} <span className="text-2xl text-emerald-500/50">{t('ws.kg')}</span>
                         </div>
+                        {isStable && (
+                            <div className="mt-2 text-emerald-500/60 text-xs font-bold uppercase tracking-widest animate-pulse flex items-center justify-center gap-2">
+                                <div className="w-1 h-1 rounded-full bg-emerald-500"></div>
+                                {t('ws.stable')}
+                            </div>
+                        )}
                     </div>
                     <div className="bg-black/30 border border-white/10 rounded-3xl p-8 text-center">
-                        <label className="text-xs uppercase tracking-widest text-neutral-500 font-bold">Gross Weight</label>
+                        <label className="text-xs uppercase tracking-widest text-neutral-500 font-bold">{t('ws.gross')}</label>
                         <div className="text-7xl font-mono text-neutral-300 mt-2 font-light tracking-tighter">
-                            {(parseFloat(weight) + (selectedProduct?.portion_weight || 0) / 1000).toFixed(3)} <span className="text-2xl text-neutral-600">kg</span>
+                            {getGrossWeight()} <span className="text-2xl text-neutral-600">{t('ws.kg')}</span>
                         </div>
                     </div>
                 </div>
@@ -205,46 +860,91 @@ const WeighingStation = () => {
                     className="w-full py-8 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 transition-all rounded-3xl font-bold text-2xl shadow-[0_10px_40px_-10px_rgba(16,185,129,0.5)] flex items-center justify-center gap-3 border-t border-white/10"
                 >
                     <Printer className="w-8 h-8" />
-                    PRINT LABEL
+                    {t('ws.print')}
                 </button>
 
                 <div className="grid grid-cols-2 gap-4">
-                    <button className="py-6 bg-neutral-800/50 hover:bg-neutral-800 border border-white/5 hover:border-white/10 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group">
+                    <button
+                        onClick={handleRepeat}
+                        className="py-6 bg-neutral-800/50 hover:bg-neutral-800 border border-white/5 hover:border-white/10 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group"
+                    >
                         <RefreshCw className="w-6 h-6 text-neutral-400 group-hover:text-white transition-colors" />
-                        <span className="text-neutral-400 group-hover:text-white">Repeat</span>
+                        <span className="text-neutral-400 group-hover:text-white uppercase text-xs tracking-widest">{t('ws.reprintSmall')}</span>
                     </button>
-                    <button className="py-6 bg-neutral-800/50 hover:bg-neutral-800 border border-white/5 hover:border-white/10 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group">
+                    <button
+                        onClick={handleCloseBox}
+                        className="py-6 bg-neutral-800/50 hover:bg-neutral-800 border border-white/5 hover:border-white/10 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group"
+                    >
                         <Box className="w-6 h-6 text-neutral-400 group-hover:text-white transition-colors" />
-                        <span className="text-neutral-400 group-hover:text-white">Close Box</span>
+                        <span className="text-neutral-400 group-hover:text-white uppercase text-xs tracking-widest">{t('ws.closeBox')}</span>
                     </button>
                 </div>
 
                 <div className="mt-auto p-6 bg-neutral-900/50 border border-white/5 rounded-3xl backdrop-blur">
-                    <h3 className="text-sm font-semibold mb-4 text-white/60">Session Statistics</h3>
+                    <h3 className="text-sm font-semibold mb-4 text-white/60 uppercase tracking-widest">{t('ws.sessionStats')}</h3>
                     <div className="space-y-3">
                         <div className="flex justify-between text-sm py-2 border-b border-white/5">
-                            <span className="text-neutral-500">Total Weight:</span>
-                            <span className="font-mono text-emerald-400">12.450 kg</span>
+                            <span className="text-neutral-500">{t('ws.packNum')}</span>
+                            <span className="font-mono text-emerald-400">{getLabelData().pack_number || '--'}</span>
                         </div>
                         <div className="flex justify-between text-sm py-2 border-b border-white/5">
-                            <span className="text-neutral-500">Labels Printed:</span>
-                            <span className="font-mono text-white">26</span>
+                            <span className="text-neutral-500">{t('ws.boxNum')}</span>
+                            <span className="font-mono text-emerald-400">{getLabelData(undefined, true).box_number || '--'}</span>
+                        </div>
+                        <div className="flex justify-between text-sm py-2 border-b border-white/5">
+                            <span className="text-neutral-500">{t('ws.inBox')}</span>
+                            <div className="flex items-center gap-2">
+                                <span className="font-mono text-white">{unitsInBox}</span>
+                                <span className="text-neutral-600">/ {selectedProduct?.close_box_counter || '-'}</span>
+                            </div>
+                        </div>
+                        <div className="flex justify-between text-sm py-2 border-b border-white/5">
+                            <span className="text-neutral-500">{t('ws.boxesOnPallet')}</span>
+                            <span className="font-mono text-amber-400">{boxesInPallet}</span>
                         </div>
                         <div className="flex justify-between text-sm py-2">
-                            <span className="text-neutral-500">Box Status:</span>
-                            <span className="font-mono text-amber-400">4 / 10 pack</span>
+                            <span className="text-neutral-500">{t('ws.totalUnits')}</span>
+                            <span className="font-mono text-white">{totalUnits}</span>
                         </div>
                     </div>
 
-                    {/* Debug Info */}
-                    <div className="mt-6 pt-6 border-t border-white/5 text-[10px] font-mono text-neutral-600">
-                        <div>DEBUG INFO:</div>
-                        <div>Weight: {weight}</div>
-                        <div>Portion Weight: {selectedProduct?.portion_weight ?? 'N/A'}</div>
-                        <div>Selected ID: {selectedProduct?.id ?? 'N/A'}</div>
-                    </div>
+
                 </div>
             </div>
+            {/* Custom Alert Modal */}
+            {alertMessage && (
+                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-in fade-in duration-200">
+                    <div className="bg-neutral-900 border border-white/10 rounded-[2rem] p-10 max-w-2xl w-full text-center shadow-2xl relative animate-in zoom-in-95 duration-200">
+                        <button
+                            onClick={() => setAlertMessage(null)}
+                            className="absolute top-6 right-6 p-2 bg-white/5 hover:bg-white/10 rounded-full transition-colors"
+                        >
+                            <X className="w-8 h-8 text-neutral-400" />
+                        </button>
+
+                        <div className="mx-auto w-24 h-24 bg-red-500/10 rounded-full flex items-center justify-center mb-8">
+                            <AlertCircle className="w-12 h-12 text-red-500" />
+                        </div>
+
+                        <h3 className="text-3xl font-bold text-white mb-4">{t('ws.attention')}</h3>
+
+                        <p className="text-xl text-neutral-400 mb-10 whitespace-pre-line leading-relaxed">
+                            {alertMessage}
+                        </p>
+
+                        <button
+                            onClick={() => setAlertMessage(null)}
+                            className="w-full py-6 !bg-neutral-300 hover:!bg-neutral-200 !text-black active:!bg-neutral-400 active:scale-[0.98] transition-all rounded-2xl font-bold text-xl shadow-lg border border-white/20"
+                        >
+                            {t('ws.ok')}
+                        </button>
+                    </div>
+                </div>
+            )}
+
+
+
+            {/* Alert Modal */}
         </div>
     );
 };

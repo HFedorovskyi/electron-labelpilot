@@ -17,8 +17,14 @@ export function startSyncServer() {
             return;
         }
 
-        console.log(`Sync Server: [${req.method}] ${req.url}`);
-        const normalizedUrl = req.url?.endsWith('/') ? req.url.slice(0, -1) : req.url;
+        try {
+            console.log(`Sync Server: [${req.method}] ${req.url || '/'}`);
+        } catch (e) {
+            // Silently ignore log errors (prevents EPIPE crash)
+        }
+
+        const url = req.url || '/';
+        const normalizedUrl = url.endsWith('/') ? url.slice(0, -1) : url;
 
         if (normalizedUrl === '/api/full_sync' && req.method === 'GET') {
             try {

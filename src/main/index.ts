@@ -12,6 +12,18 @@ if (require('electron-squirrel-startup')) {
     app.quit();
 }
 
+// Global error handler for EPIPE errors which are common in Electron main process
+// when console output pipes are closed unexpectedly.
+process.on('uncaughtException', (err: any) => {
+    if (err.code === 'EPIPE') {
+        // Safe to ignore EPIPE as it just means we can't write to stdout/stderr
+        return;
+    }
+    console.error('Uncaught Exception:', err);
+    // Usually we should exit on uncaught exception, but let's try to keep running if possible
+    // process.exit(1); 
+});
+
 let mainWindow: any = null;
 
 function createWindow() {
@@ -29,7 +41,7 @@ function createWindow() {
     scaleManager.setMainWindow(mainWindow);
     discoveryManager.setMainWindow(mainWindow);
 
-    const devUrl = 'http://localhost:5173';
+    const devUrl = 'http://127.0.0.1:5173';
 
     if (!app.isPackaged) {
         mainWindow.loadURL(devUrl);
@@ -40,14 +52,14 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-    const db = initDatabase();
+    initDatabase();
 
-    // Log items with weights
-    const nomRows = db.prepare('SELECT n.*, c.weight as portion_weight FROM nomenclature n LEFT JOIN container c ON n.portion_container_id = c.id LIMIT 5').all();
-    console.log('Main Process: Nomenclature sample with join:', JSON.stringify(nomRows, null, 2));
+    ipcMain.handle('get-station-info', () => {
+        const { getStationInfo } = require('./database');
+        return getStationInfo();
+    });
 
-    const containerRows = db.prepare('SELECT * FROM container LIMIT 5').all();
-    console.log('Main Process: Container sample:', JSON.stringify(containerRows, null, 2));
+
 
     createWindow();
 
@@ -71,8 +83,22 @@ app.whenReady().then(() => {
         return scaleManager.getConfig();
     });
 
+    ipcMain.handle('get-scale-status', () => {
+        return scaleManager.getStatus();
+    });
+
     ipcMain.on('save-scale-config', (_, config) => {
         scaleManager.saveAndConnect(config);
+    });
+
+    ipcMain.handle('get-numbering-config', async () => {
+        const { loadNumberingConfig } = await import('./config');
+        return loadNumberingConfig();
+    });
+
+    ipcMain.on('save-numbering-config', async (_, config) => {
+        const { saveNumberingConfig } = await import('./config');
+        saveNumberingConfig(config);
     });
 
     ipcMain.on('disconnect-scale', () => {
@@ -93,9 +119,14 @@ app.whenReady().then(() => {
         return getProducts(search);
     });
 
+    ipcMain.handle('get-containers', async () => {
+        const { getContainers } = await import('./database');
+        return getContainers();
+    });
+
     // Printing Handlers
     ipcMain.handle('print-label', async (_, options) => {
-        const { silent, labelDoc, data } = options;
+        const { silent, labelDoc, data, printerName } = options;
 
         return new Promise((resolve) => {
             const printWindow = new BrowserWindow({
@@ -108,20 +139,7 @@ app.whenReady().then(() => {
                 },
             });
 
-            // We need a simple HTML to mount the React component or just raw HTML
-            // Since we already have LabelRenderer in the renderer, let's just send the HTML?
-            // Or better: open a window, load a special "print" page that uses the same renderer.
-
-            // For now, let's use a simpler approach: 
-            // The sender window already has the rendered content? No, it has the preview.
-
-
-            // Actually, let's just reuse the existing window for printing if possible, 
-            // but the user wants it to be fast and not hold up the flow.
-
-            // REALISTIC APPROACH: 
-            // Open a hidden window that loads the same app but with a ?print=true route.
-            const devUrl = 'http://localhost:5173';
+            const devUrl = 'http://127.0.0.1:5173';
             const url = app.isPackaged
                 ? `file://${path.join(__dirname, '../dist/index.html')}?print=true`
                 : `${devUrl}?print=true`;
@@ -132,18 +150,25 @@ app.whenReady().then(() => {
                 printWindow.webContents.send('print-data', { labelDoc, data });
             });
 
-            ipcMain.once('ready-to-print', (e) => {
-                if (e.sender === printWindow.webContents) {
-                    printWindow.webContents.print({
+            const readyHandler = (event: any) => {
+                if (event.sender === printWindow.webContents) {
+                    ipcMain.removeListener('ready-to-print', readyHandler);
+                    const printOptions: any = {
                         silent: silent !== false,
                         printBackground: true,
                         margins: { marginType: 'none' }
-                    }, (success) => {
+                    };
+                    // Route to specific printer (supports industrial: TSC, Zebra, Honeywell, CAB, etc.)
+                    if (printerName) {
+                        printOptions.deviceName = printerName;
+                    }
+                    printWindow.webContents.print(printOptions, (success) => {
                         printWindow.close();
                         resolve(success);
                     });
                 }
-            });
+            };
+            ipcMain.on('ready-to-print', readyHandler);
         });
     });
 
@@ -173,9 +198,49 @@ app.whenReady().then(() => {
 
     // Data Sync Handlers
     ipcMain.handle('sync-data', async (_, serverIp) => {
-        // dynamic import to avoid circular dep if any, though likely safe
-        const { syncDataFromServer } = await import('./sync');
-        return await syncDataFromServer(serverIp);
+        const { testConnection } = await import('./sync');
+        return await testConnection(serverIp);
+    });
+
+    // Printer Config Handlers
+    ipcMain.handle('get-printer-config', async () => {
+        const { loadPrinterConfig } = await import('./config');
+        return loadPrinterConfig();
+    });
+
+    ipcMain.on('save-printer-config', async (_, config) => {
+        const { savePrinterConfig } = await import('./config');
+        savePrinterConfig(config);
+    });
+
+    // Database Viewer Handlers
+    ipcMain.handle('get-tables', async () => {
+        const { getTables } = await import('./database');
+        return getTables();
+    });
+
+    ipcMain.handle('get-table-data', async (_, tableName) => {
+        const { getTableData } = await import('./database');
+        return getTableData(tableName);
+    });
+
+    ipcMain.handle('record-pack', async (_, data) => {
+        const { recordPack } = await import('./database');
+        return recordPack(data);
+    });
+
+    ipcMain.handle('close-box', async (_, { boxId, weightNetto, weightBrutto }) => {
+        const { closeBox } = await import('./database');
+        return closeBox(boxId, weightNetto, weightBrutto);
+    });
+
+    ipcMain.handle('get-latest-counters', async () => {
+        const { getLatestCounters } = await import('./database');
+        return getLatestCounters();
+    });
+
+    ipcMain.on('log-to-main', (_event, ...args) => {
+        console.log('[Renderer Log]:', ...args);
     });
 });
 
