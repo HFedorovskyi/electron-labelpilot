@@ -10,11 +10,16 @@ exports.getLabelById = getLabelById;
 exports.getBarcodeTemplateById = getBarcodeTemplateById;
 exports.getTables = getTables;
 exports.getTableData = getTableData;
-exports.getOrCreateClientUUID = getOrCreateClientUUID;
+exports.getClientUUID = getClientUUID;
 exports.getStationInfo = getStationInfo;
 exports.recordPack = recordPack;
 exports.closeBox = closeBox;
 exports.getLatestCounters = getLatestCounters;
+exports.importFullDump = importFullDump;
+exports.getStationIdentity = getStationIdentity;
+exports.updateStationIdentity = updateStationIdentity;
+exports.resetDatabase = resetDatabase;
+exports.getExportData = getExportData;
 const better_sqlite3_1 = __importDefault(require("better-sqlite3"));
 const path_1 = __importDefault(require("path"));
 const electron_1 = require("electron");
@@ -89,9 +94,12 @@ function initDatabase() {
         status TEXT NOT NULL
       );
 
-      CREATE TABLE IF NOT EXISTS uuid (
-        uuid_client TEXT PRIMARY KEY NOT NULL,
-        station_number TEXT
+      CREATE TABLE IF NOT EXISTS station (
+        uuid TEXT PRIMARY KEY NOT NULL,
+        number INTEGER,
+        name TEXT,
+        server_url TEXT,
+        last_sync_time DATETIME
       );
 
 
@@ -213,39 +221,37 @@ function getTableData(tableName) {
     if (!tables.some(t => t.name === tableName)) {
         throw new Error(`Invalid table name: ${tableName}`);
     }
-    return db.prepare(`SELECT * FROM ${tableName}`).all();
+    // Optimize: Limit rows for large tables to prevent memory explosion
+    return db.prepare(`SELECT * FROM ${tableName} ORDER BY id DESC LIMIT 100`).all();
 }
-const crypto_1 = require("crypto");
-function getOrCreateClientUUID() {
+function getClientUUID() {
     const db = initDatabase();
-    const row = db.prepare('SELECT uuid_client FROM uuid LIMIT 1').get();
-    if (row) {
-        return row.uuid_client;
-    }
-    else {
-        const newUuid = (0, crypto_1.randomUUID)();
-        db.prepare('INSERT INTO uuid (uuid_client) VALUES (?)').run(newUuid);
-        console.log('Generated new Client UUID:', newUuid);
-        return newUuid;
-    }
+    const row = db.prepare('SELECT uuid FROM station LIMIT 1').get();
+    return row ? row.uuid : null;
 }
 function getStationInfo() {
     const db = initDatabase();
-    const row = db.prepare('SELECT uuid_client, station_number FROM uuid LIMIT 1').get();
-    // If only uuid exists but no station_number, row returned will have station_number: null
-    return row ? {
-        ...row,
-        station_number: row.station_number || null
-    } : {
-        uuid_client: getOrCreateClientUUID(),
-        station_number: null
-    };
+    const row = db.prepare('SELECT uuid, number FROM station LIMIT 1').get();
+    if (row) {
+        return {
+            uuid_client: row.uuid,
+            station_number: row.number ? String(row.number).padStart(2, '0') : null
+        };
+    }
+    else {
+        return {
+            uuid_client: null,
+            station_number: null
+        };
+    }
 }
 function recordPack(data) {
+    const startTime = Date.now();
     const db = initDatabase();
+    let newBoxCreated = false;
     return db.transaction(() => {
         // 1. Find or create an open box for this nomenclature
-        let box = db.prepare("SELECT id FROM boxes WHERE status = 'Open' AND nomenclature_id = ? ORDER BY id DESC LIMIT 1").get(data.nomenclature_id);
+        let box = db.prepare("SELECT id, number FROM boxes WHERE status = 'Open' AND nomenclature_id = ? ORDER BY id DESC LIMIT 1").get(data.nomenclature_id);
         if (!box) {
             // Need a default pallet if none exists
             let pallet = db.prepare("SELECT id FROM pallet WHERE status = 'Open' ORDER BY id DESC LIMIT 1").get();
@@ -254,15 +260,45 @@ function recordPack(data) {
                 const result = db.prepare('INSERT INTO pallet (number, status) VALUES (?, ?)').run(palletInfo.number, palletInfo.status);
                 pallet = { id: result.lastInsertRowid };
             }
-            const boxResult = db.prepare("INSERT INTO boxes (pallete_id, number, status, nomenclature_id) VALUES (?, ?, 'Open', ?)").run(pallet.id, data.box_number, data.nomenclature_id);
-            box = { id: boxResult.lastInsertRowid };
+            let actualNumber = data.box_number;
+            let boxResult;
+            let attempts = 0;
+            while (attempts < 50) {
+                try {
+                    boxResult = db.prepare("INSERT INTO boxes (pallete_id, number, status, nomenclature_id) VALUES (?, ?, 'Open', ?)").run(pallet.id, actualNumber, data.nomenclature_id);
+                    box = { id: boxResult.lastInsertRowid, number: actualNumber };
+                    newBoxCreated = true;
+                    break;
+                }
+                catch (err) {
+                    if (err.code === 'SQLITE_CONSTRAINT_UNIQUE' || err.message.includes('UNIQUE')) {
+                        attempts++;
+                        // If the number is taken, try to find a new one by incrementing the total count
+                        const nextCount = db.prepare('SELECT COUNT(*) as total FROM boxes').get().total + 1;
+                        // Best effort to preserve formatting if it was just a number
+                        if (/^\d+$/.test(actualNumber)) {
+                            actualNumber = String(nextCount);
+                        }
+                        else {
+                            actualNumber = `${data.box_number}_${attempts}`;
+                        }
+                    }
+                    else {
+                        throw err;
+                    }
+                }
+            }
+            if (!box)
+                throw new Error('Could not find a unique box number after 50 attempts');
         }
         // 2. Insert the pack
         db.prepare(`
       INSERT INTO pack (number, box_id, nomenclature_id, weight_netto, weight_brutto, barcode_value, station_number, status)
       VALUES (?, ?, ?, ?, ?, ?, ?, 'Printed')
     `).run(data.number, box.id, data.nomenclature_id, data.weight_netto, data.weight_brutto, data.barcode_value, data.station_number || null);
-        return { success: true, boxId: box.id };
+        const duration = Date.now() - startTime;
+        console.log(`Database: recordPack completed in ${duration}ms (New box: ${newBoxCreated}, Box Number: ${box.number})`);
+        return { success: true, boxId: box.id, boxNumber: box.number, newBoxCreated };
     })();
 }
 function closeBox(boxId, weightNetto, weightBrutto) {
@@ -272,14 +308,186 @@ function closeBox(boxId, weightNetto, weightBrutto) {
 }
 function getLatestCounters() {
     const db = initDatabase();
-    // We use the uuid table as a starting point, but we could also MAX() from packs/boxes
-    // The user wants to derive it from records.
     const lastPack = db.prepare('SELECT number FROM pack ORDER BY id DESC LIMIT 1').get();
     const lastBox = db.prepare('SELECT number FROM boxes ORDER BY id DESC LIMIT 1').get();
     const totalUnits = db.prepare('SELECT COUNT(*) as total FROM pack').get();
-    return {
+    const totalBoxes = db.prepare('SELECT COUNT(*) as total FROM boxes').get();
+    // Count boxes on the currently open pallet
+    const openPallet = db.prepare("SELECT id FROM pallet WHERE status = 'Open' ORDER BY id DESC LIMIT 1").get();
+    let boxesInPallet = 0;
+    if (openPallet) {
+        const res = db.prepare("SELECT COUNT(*) as count FROM boxes WHERE pallete_id = ?").get(openPallet.id);
+        boxesInPallet = res.count;
+    }
+    const finalCounters = {
         lastPackNumber: lastPack?.number || '0',
         lastBoxNumber: lastBox?.number || '0',
-        totalUnits: totalUnits.total
+        totalUnits: totalUnits.total,
+        totalBoxes: totalBoxes.total,
+        boxesInPallet: boxesInPallet
+    };
+    return finalCounters;
+}
+function importFullDump(payload) {
+    const startTime = Date.now();
+    const db = initDatabase();
+    console.log('Database: Starting full import dump... Keys in payload:', Object.keys(payload));
+    const toPrim = (val) => {
+        if (val === null || val === undefined)
+            return null;
+        if (typeof val === 'object')
+            return val.id ?? null;
+        return val;
+    };
+    // Disable foreign keys temporarily to allow deleting referenced nomenclature
+    db.pragma('foreign_keys = OFF');
+    try {
+        const runImport = db.transaction(() => {
+            // 1. Clear master tables (only what comes from server)
+            db.prepare('DELETE FROM nomenclature').run();
+            db.prepare('DELETE FROM container').run();
+            db.prepare('DELETE FROM barcodes').run();
+            db.prepare('DELETE FROM labels').run();
+            // 2. Insert nomenclature
+            if (payload.nomenclature && Array.isArray(payload.nomenclature)) {
+                const stmt = db.prepare(`
+          INSERT INTO nomenclature (
+            id, name, article, exp_date, portion_container_id, 
+            box_container_id, templates_pack_label, templates_box_label, 
+            close_box_counter, extra_data
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+                for (const item of payload.nomenclature) {
+                    try {
+                        stmt.run(toPrim(item.id), toPrim(item.name), toPrim(item.article), toPrim(item.exp_date) || 0, toPrim(item.portion_container_id) ?? toPrim(item.portion_container) ?? null, toPrim(item.box_container_id) ?? toPrim(item.box_container) ?? null, toPrim(item.templates_pack_label) ?? null, toPrim(item.templates_box_label) ?? null, toPrim(item.close_box_counter) || 0, typeof item.extra_data === 'string' ? item.extra_data : JSON.stringify(item.extra_data || {}));
+                    }
+                    catch (err) {
+                        console.warn(`Skipping nomenclature item ${item.id} due to error:`, err.message);
+                    }
+                }
+            }
+            // 3. Insert containers
+            const containers = payload.containers || payload.container;
+            if (containers && Array.isArray(containers)) {
+                const stmt = db.prepare('INSERT INTO container (id, name, weight) VALUES (?, ?, ?)');
+                for (const item of containers) {
+                    try {
+                        stmt.run(toPrim(item.id), toPrim(item.name), toPrim(item.weight) || 0);
+                    }
+                    catch (err) {
+                        console.warn(`Skipping container item ${item.id} due to error:`, err.message);
+                    }
+                }
+            }
+            // 4. Insert barcodes
+            if (payload.barcodes && Array.isArray(payload.barcodes)) {
+                const stmt = db.prepare('INSERT INTO barcodes (id, name, structure) VALUES (?, ?, ?)');
+                for (const item of payload.barcodes) {
+                    try {
+                        const structure = toPrim(item.structure);
+                        if (!structure) {
+                            console.warn(`Skipping barcode ${item.id} (${item.name}): missing structure`);
+                            continue;
+                        }
+                        stmt.run(toPrim(item.id), toPrim(item.name), structure);
+                    }
+                    catch (err) {
+                        console.warn(`Skipping barcode item ${item.id} due to error:`, err.message);
+                    }
+                }
+            }
+            // 5. Insert labels
+            if (payload.labels && Array.isArray(payload.labels)) {
+                const stmt = db.prepare('INSERT INTO labels (id, name, structure, created_at, updated_at) VALUES (?, ?, ?, ?, ?)');
+                for (const item of payload.labels) {
+                    try {
+                        const structure = toPrim(item.structure);
+                        if (!structure) {
+                            console.warn(`Skipping label ${item.id} (${item.name}): missing structure`);
+                            continue;
+                        }
+                        stmt.run(toPrim(item.id), toPrim(item.name), structure, toPrim(item.created_at), toPrim(item.updated_at));
+                    }
+                    catch (err) {
+                        console.warn(`Skipping label item ${item.id} due to error:`, err.message);
+                    }
+                }
+            }
+            // 6. Update station number if provided
+            if (payload.station_number) {
+                db.prepare('UPDATE station SET number = ?').run(payload.station_number);
+                console.log(`Database: Updated station number to ${payload.station_number}`);
+            }
+            console.log('Database: Import sync completed successfully');
+            return { success: true };
+        });
+        const duration = Date.now() - startTime;
+        console.log(`Database: importFullDump completed in ${duration}ms`);
+        return runImport();
+    }
+    finally {
+        db.pragma('foreign_keys = ON');
+    }
+}
+function getStationIdentity() {
+    const db = initDatabase();
+    return db.prepare('SELECT * FROM station LIMIT 1').get();
+}
+function updateStationIdentity(data) {
+    const db = initDatabase();
+    const existing = getStationIdentity();
+    if (existing) {
+        db.prepare(`
+      UPDATE station 
+      SET uuid = ?, number = ?, name = ?, server_url = ?, last_sync_time = ?
+      WHERE uuid = ?
+    `).run(data.uuid, data.number, data.name, data.server_url, data.last_sync_time || new Date().toISOString(), existing.uuid);
+    }
+    else {
+        db.prepare(`
+      INSERT INTO station (uuid, number, name, server_url, last_sync_time)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(data.uuid, data.number, data.name, data.server_url, data.last_sync_time || new Date().toISOString());
+    }
+}
+function resetDatabase() {
+    const sqliteDb = initDatabase();
+    console.log('Database: PERFORMING FULL RESET...');
+    // Drop all tables
+    const tables = sqliteDb.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all();
+    // Disable foreign keys to allow dropping interdependent tables
+    try {
+        sqliteDb.pragma('foreign_keys = OFF');
+        sqliteDb.transaction(() => {
+            for (const table of tables) {
+                sqliteDb.prepare(`DROP TABLE IF EXISTS ${table.name}`).run();
+            }
+        })();
+    }
+    finally {
+        sqliteDb.pragma('foreign_keys = ON');
+    }
+    // Close and clear the singleton to force a fresh start on next access
+    sqliteDb.close();
+    db = null;
+    console.log('Database: All tables dropped and connection closed. Re-initializing schema...');
+    // Force re-initialization
+    initDatabase();
+    console.log('Database: RESET COMPLETE.');
+}
+function getExportData() {
+    const db = initDatabase();
+    // Gather data for export (e.g., packs, boxes, logs)
+    // For now, we export packs and boxes that have been created locally.
+    // In a real scenario, we might want to filter by date or status.
+    const packs = db.prepare('SELECT * FROM pack').all();
+    const boxes = db.prepare('SELECT * FROM boxes').all();
+    const pallets = db.prepare('SELECT * FROM pallet').all();
+    // We can also add system logs if we had a table for them.
+    return {
+        packs,
+        boxes,
+        pallets,
+        generated_at: new Date().toISOString()
     };
 }

@@ -14,12 +14,10 @@ class DiscoveryManager {
     mode = 'station';
     broadcastInterval = null;
     mainWindow = null;
-    // private discoveredEndpoints: Map<string, any> = new Map();
     constructor() {
         this.socket = dgram_1.default.createSocket({ type: 'udp4', reuseAddr: true });
         this.socket.on('message', (msg, rinfo) => this.handleMessage(msg, rinfo));
         this.socket.on('error', (err) => console.error('Discovery Error:', err));
-        // Bind to random port to avoid conflict with Docker/Server on localhost
         this.socket.bind(0, () => {
             this.socket.setBroadcast(true);
             console.log(`Discovery: Listening on port ${this.socket.address().port}`);
@@ -52,7 +50,7 @@ class DiscoveryManager {
                 const msg = JSON.stringify({
                     type: this.mode === 'server' ? 'LABELPILOT_SERVER' : 'LABELPILOT_STATION',
                     ip: this.getLocalIp(),
-                    uuid: (0, database_1.getOrCreateClientUUID)(),
+                    uuid: (0, database_1.getClientUUID)(),
                     port: 5556,
                     timestamp: Date.now()
                 });
@@ -60,7 +58,6 @@ class DiscoveryManager {
                     if (err)
                         console.error('Discovery Broadcast Error:', err);
                 });
-                // Also send to 127.0.0.1 specifically to pierce Docker Desktop bridge
                 this.socket.send(msg, DISCOVERY_PORT, '127.0.0.1', (err) => {
                     if (err) { /* ignore loopback errors */ }
                 });
@@ -72,13 +69,10 @@ class DiscoveryManager {
     }
     handleMessage(msg, rinfo) {
         try {
-            // Ignore self-messages
             if (this.getLocalIp() === rinfo.address)
                 return;
             const message = JSON.parse(msg.toString());
-            // Only forward relevant messages based on mode
             if (this.mode === 'station' && message.type === 'LABELPILOT_SERVER') {
-                // If message overrides port, use it, else default to 8000 (Django)
                 const serverPort = message.port || 8000;
                 console.log(`Discovery: Found Server at ${rinfo.address}:${serverPort}`);
                 this.mainWindow?.webContents.send('discovery-event', {
@@ -97,9 +91,7 @@ class DiscoveryManager {
                 });
             }
         }
-        catch (e) {
-            // content format error
-        }
+        catch (e) { }
     }
     stop() {
         if (this.broadcastInterval)

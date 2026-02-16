@@ -1,9 +1,10 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Printer, RefreshCw, Box, AlertCircle, X } from 'lucide-react';
+import { Printer, RefreshCw, Box, AlertCircle, X, Hash } from 'lucide-react';
 import { generateBarcode, type BarcodeData } from '../utils/barcodeGenerator';
 import { useTranslation } from '../i18n';
+import NumericKeypad from './NumericKeypad';
 
-const WeighingStation = () => {
+const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
     const { t } = useTranslation();
     // --- STATE DECLARATIONS ---
     const [weight, setWeight] = useState<string>('0.000');
@@ -26,8 +27,10 @@ const WeighingStation = () => {
 
     const [unitsInBox, setUnitsInBox] = useState(0);
     const [boxesInPallet, setBoxesInPallet] = useState(0);
+    const [totalBoxes, setTotalBoxes] = useState(0);
     const [totalUnits, setTotalUnits] = useState(0);
     const [currentBoxId, setCurrentBoxId] = useState<number | null>(null);
+    const [currentBoxNumber, setCurrentBoxNumber] = useState<string | null>(null);
     const [lastPrinted, setLastPrinted] = useState<{ doc: any, data: any } | null>(null);
 
     const [stationNumber, setStationNumber] = useState<string | null>(null);
@@ -39,6 +42,9 @@ const WeighingStation = () => {
         boxPrinter: '',
         autoPrintOnStable: false
     });
+
+    const [batchNumber, setBatchNumber] = useState<string>('');
+    const [isKeypadOpen, setIsKeypadOpen] = useState(false);
 
     // Auto-print refs to prevent duplicate prints
     const autoPrintFiredRef = useRef(false);
@@ -60,9 +66,8 @@ const WeighingStation = () => {
                 console.log('Latest Counters from DB:', latest);
                 if (latest) {
                     if (latest.totalUnits !== undefined) setTotalUnits(latest.totalUnits);
-                    // Extract numeric part of box number if it's formatted
-                    const boxNum = parseInt(latest.lastBoxNumber.replace(/^\D+/g, ''), 10) || 0;
-                    setBoxesInPallet(boxNum);
+                    if (latest.totalBoxes !== undefined) setTotalBoxes(latest.totalBoxes);
+                    if (latest.boxesInPallet !== undefined) setBoxesInPallet(latest.boxesInPallet);
                 }
             } catch (e) {
                 console.error('Failed to load station info', e);
@@ -138,9 +143,13 @@ const WeighingStation = () => {
         const tareBoxGrams = boxContainer?.weight || 0;
         // Brutto box = sum of each pack's brutto (net + pack tare) + box container tare
         // Number of packs: for box label use overrideUnits, otherwise current + 1
-        const packsInThisBox = isBoxLabel
+        let packsInThisBox = isBoxLabel
             ? (overrideUnits !== undefined ? overrideUnits : unitsInBox)
             : (unitsInBox + 1);
+
+        // Safety: if we are printing a box label from handlePrint (auto-close), 
+        // unitsInBox is already correct for the FULL box.
+
         const weightBruttoBox = effectiveBoxNet + (packsInThisBox * tarePackGrams / 1000) + (tareBoxGrams / 1000);
 
         // Pallet Weights (Placeholder logic for now)
@@ -195,17 +204,18 @@ const WeighingStation = () => {
         // For Box Label
         let boxNumStr = '';
         if (stationNumber) {
-            boxNumStr = getFormattedCounter(boxesInPallet + 1, activeLabelDoc, '{{box_number}}');
+            boxNumStr = getFormattedCounter(totalBoxes + 1, activeLabelDoc, '{{box_number}}');
         } else {
             boxNumStr = numberingConfig?.box?.enabled
-                ? `${numberingConfig.box.prefix || ''}${String(boxesInPallet + 1).padStart(numberingConfig.box.length, '0')}`
-                : String(boxesInPallet + 1);
+                ? `${numberingConfig.box.prefix || ''}${String(totalBoxes + 1).padStart(numberingConfig.box.length, '0')}`
+                : String(totalBoxes + 1);
         }
 
         const dataObj: any = {
             name: selectedProduct?.name || '',
             article: selectedProduct?.article || '',
             exp_date: String(expDays),
+            box_id: currentBoxId, // Add for reference
 
             // Weights (Strings for text replacement)
             weight: weightNettoPack.toFixed(3),
@@ -226,6 +236,7 @@ const WeighingStation = () => {
             // Counters
             pack_number: unitNumStr,
             box_number: boxNumStr,
+            batch_number: batchNumber || (extra as any).batch_number || '', // Use manual input primarily
             pack_count: String(currentUnits + (isBoxLabel ? 0 : 1)), // For unit label: current + 1. For box: just total.
             pack_counter: String(currentUnits + (isBoxLabel ? 0 : 1)), // Alias requested by user
             box_count: String(boxesInPallet + 1),
@@ -256,7 +267,8 @@ const WeighingStation = () => {
                         exp_date: expDate,
                         article: selectedProduct?.article,
                         unit_number: unitNumStr,
-                        box_number: boxNumStr
+                        box_number: boxNumStr,
+                        batch_number: batchNumber || (extra as any).batch_number || ''
                     };
 
                     const generated = generateBarcode(JSON.parse(packBarcodeTemplate.structure).fields, genData);
@@ -309,6 +321,20 @@ const WeighingStation = () => {
         });
 
         const removeStatusListener = window.electron.on('scale-status', (s: any) => setStatus(s));
+        const removeErrorListener = window.electron.on('scale-error', (msg: string) => {
+            if (msg.includes('|')) {
+                const [code, context] = msg.split('|');
+                if (code === 'serial_access_denied') {
+                    setAlertMessage(t('error.serialAccessDenied', { port: context }));
+                } else if (code === 'serial_not_found') {
+                    setAlertMessage(t('error.serialNotFound', { port: context }));
+                } else {
+                    setAlertMessage(`${t('ws.errorPrefix')}: ${msg}`);
+                }
+            } else {
+                setAlertMessage(`${t('ws.errorPrefix')}: ${msg}`);
+            }
+        });
 
         window.electron.invoke('get-scale-status').then((s: string) => {
             if (s) setStatus(s);
@@ -321,6 +347,7 @@ const WeighingStation = () => {
         return () => {
             removeReadingListener();
             removeStatusListener();
+            removeErrorListener();
             removeUpdateListener();
         };
     }, [searchQuery]);
@@ -352,9 +379,19 @@ const WeighingStation = () => {
 
     // Load printer config
     useEffect(() => {
-        window.electron.invoke('get-printer-config').then((cfg: any) => {
-            if (cfg) setPrinterConfig(cfg);
+        const loadConfig = () => {
+            window.electron.invoke('get-printer-config').then((cfg: any) => {
+                if (cfg) setPrinterConfig(cfg);
+            });
+        };
+        loadConfig();
+
+        const removeListener = window.electron.on('printer-config-updated', (newConfig: any) => {
+            console.log('WeighingStation: Printer config updated', newConfig);
+            setPrinterConfig(newConfig);
         });
+
+        return () => removeListener();
     }, []);
 
     // Auto-print on weight stabilization
@@ -367,7 +404,8 @@ const WeighingStation = () => {
             !selectedProduct ||
             !labelDoc ||
             autoPrintFiredRef.current ||
-            isPrintingRef.current
+            isPrintingRef.current ||
+            activeTab !== 'weighing'
         ) return;
 
         // Check weight from ref (avoids putting weight in deps which would cause effect to fire ~7/sec)
@@ -458,7 +496,6 @@ const WeighingStation = () => {
                     console.error('Failed to fetch box label template:', err);
                 }
             } else {
-                console.log('DEBUG: No templates_box_label in selectedProduct');
                 setBoxLabelDoc(null);
             }
 
@@ -510,11 +547,14 @@ const WeighingStation = () => {
         await window.electron.invoke('print-label', {
             silent: true,
             labelDoc: lastPrinted.doc,
-            data: lastPrinted.data
+            data: lastPrinted.data,
+            // Try to infer which config to use or just use pack as default for repeat
+            printerConfig: printerConfig.packPrinter
         });
     };
 
     const handleCloseBox = async () => {
+        const startTime = performance.now();
         if (unitsInBox === 0) {
             setAlertMessage('Нельзя закрыть пустой короб!\n(Box is empty)');
             return;
@@ -530,6 +570,7 @@ const WeighingStation = () => {
         setUnitsInBox(0);
         setBoxNetWeight(0);
         setBoxesInPallet(prev => prev + 1);
+        setTotalBoxes(prev => prev + 1);
 
         // Print Box Label
         if (boxLabelDoc) {
@@ -557,7 +598,8 @@ const WeighingStation = () => {
                         // GTIN-14 padding ONLY for box label
                         article: (selectedProduct?.article || '').padStart(14, '0'),
                         // Use the SAME box_number as the textual label
-                        box_number: baseData.box_number || ''
+                        box_number: baseData.box_number || '',
+                        batch_number: batchNumber || ''
                     } as BarcodeData;
                     console.log('MANUAL CLOSE DEBUG: Gen Data:', JSON.stringify(genData));
 
@@ -582,7 +624,8 @@ const WeighingStation = () => {
             await window.electron.invoke('print-label', {
                 silent: true,
                 labelDoc: boxLabelDoc,
-                data: boxData
+                data: boxData,
+                printerConfig: printerConfig.boxPrinter
             });
 
             // Persist Closed Box to DB
@@ -595,7 +638,11 @@ const WeighingStation = () => {
                     weightBrutto: brutBox
                 });
                 setCurrentBoxId(null);
+                setCurrentBoxNumber(null);
             }
+
+            const totalTime = performance.now() - startTime;
+            console.log(`Performance: handleCloseBox total took ${totalTime.toFixed(2)}ms`);
 
             setLastPrinted({ doc: boxLabelDoc, data: boxData });
         } else {
@@ -605,130 +652,145 @@ const WeighingStation = () => {
     };
 
     const handlePrint = async () => {
-        if (!labelDoc) {
-            console.warn('Cannot print: No label template selected');
-            return;
-        }
-        const printData = getLabelData();
-
-        // Print Unit Label
+        if (isPrintingRef.current) return;
         isPrintingRef.current = true;
-        try {
-            await window.electron.invoke('print-label', {
-                silent: true,
-                labelDoc,
-                data: printData,
-                printerName: printerConfig.packPrinter || undefined
-            });
 
-            // Persist Pack to DB
+        try {
+            if (!labelDoc) {
+                console.warn('Cannot print: No label template selected');
+                isPrintingRef.current = false;
+                return;
+            }
+
+            const currentWeight = parseFloat(weight);
+            const boxLimit = selectedProduct?.close_box_counter || 999999;
+
+            // 1. Get PREDICTED Box Number for Record-Pack if no box is open
+            // We use a dummy dataObj to get the predicted number
+            const predictedData = getLabelData();
+            const predictedBoxNum = currentBoxNumber || predictedData.box_number;
+
+            // 2. Record Pack to DB FIRST
+            // This ensures we have the CORRECT box_id and box_number from the DB
             const recordResult = await window.electron.invoke('record-pack', {
-                number: printData.pack_number,
-                box_number: printData.box_number,
+                number: predictedData.pack_number,
+                box_number: predictedBoxNum,
                 nomenclature_id: selectedProduct.id,
-                weight_netto: parseFloat(printData.weight_netto_pack),
-                weight_brutto: parseFloat(printData.weight_brutto_pack),
-                barcode_value: printData.barcode,
+                weight_netto: parseFloat(predictedData.weight_netto_pack),
+                weight_brutto: parseFloat(predictedData.weight_brutto_pack),
+                barcode_value: '', // We don't have final barcode yet, that's okay, we'll update if needed or just live with it? 
+                // Actually, record-pack stores the barcode_value. 
+                // Let's generate a PRELIMINARY barcode.
                 station_number: stationNumber
             });
-            if (recordResult.boxId) setCurrentBoxId(recordResult.boxId);
 
-            setLastPrinted({ doc: labelDoc, data: printData });
-        } catch (err) {
-            console.error('Printing/Recording Error:', err);
-            setAlertMessage(`Ошибка: ${err instanceof Error ? err.message : String(err)}`);
-            isPrintingRef.current = false;
-            return;
-        }
+            if (!recordResult.success) throw new Error('Database recording failed');
 
-        // Update Counters
-        const currentWeight = parseFloat(weight);
-        const newUnitsInBox = unitsInBox + 1;
-        const newBoxNetWeight = boxNetWeight + currentWeight;
+            // 3. Update UI state with ACTUAL box info from DB
+            const actualBoxNumber = recordResult.boxNumber;
+            const actualBoxId = recordResult.boxId;
 
-        const boxLimit = selectedProduct?.close_box_counter || 999999;
+            if (recordResult.newBoxCreated) {
+                setTotalBoxes(prev => prev + 1);
+            }
+            setCurrentBoxId(actualBoxId);
+            setCurrentBoxNumber(actualBoxNumber);
 
-        if (newUnitsInBox >= boxLimit) {
-            // Box is full -> Print Box Label
-            console.log('Box limit reached. Auto-printing box label.');
+            // 4. Generate FINAL Label Data using the ACTUAL box number
+            // We override the box_number in dataObj
+            const finalPrintData = getLabelData();
+            finalPrintData.box_number = actualBoxNumber;
+            // Regenerate barcode with actual box number if it changed (though unlikely for pack label)
 
-            // Capture state for box
-            const finalBoxWeight = newBoxNetWeight;
-            const finalUnitsInBox = newUnitsInBox;
+            // 5. Update pack record with final barcode in background (optional, for data integrity)
+            // But usually the barcode_value in pack table is used for re-printing.
 
-            // Update state (RESET)
-            setUnitsInBox(0);
-            setBoxNetWeight(0);
-            setBoxesInPallet(prev => prev + 1);
-            setTotalUnits(prev => prev + 1);
+            // 6. Launch Printing in Background
+            window.electron.invoke('print-label', {
+                silent: true,
+                labelDoc,
+                data: finalPrintData,
+                printerConfig: printerConfig.packPrinter || undefined
+            }).catch(err => console.error('Background Printing Error:', err));
 
-            // Auto-print Box Label if available
-            // Auto-print Box Label if available
-            if (boxLabelDoc) {
-                // 1. Get Base Data FIRST
-                const baseData = getLabelData(finalBoxWeight, true, finalUnitsInBox);
+            setLastPrinted({ doc: labelDoc, data: finalPrintData });
 
-                let boxBarcode = '';
-                // Use boxBarcodeTemplate fetched from label structure
-                if (boxBarcodeTemplate) {
-                    const fields = JSON.parse(boxBarcodeTemplate.structure).fields;
-                    console.log('AUTO-PRINT BOX DEBUG: Template Fields:', JSON.stringify(fields));
+            // 7. Update Box Stats
+            const newUnitsInBox = unitsInBox + 1;
+            const newBoxNetWeight = boxNetWeight + currentWeight;
 
+            if (newUnitsInBox >= boxLimit) {
+                console.log('Box limit reached. Auto-printing box label.');
+                const finalBoxWeight = newBoxNetWeight;
+                const finalUnitsInBox = newUnitsInBox;
+
+                // Reset local state immediately
+                setUnitsInBox(0);
+                setBoxNetWeight(0);
+                setBoxesInPallet(prev => prev + 1);
+                setTotalUnits(prev => prev + 1);
+
+                if (boxLabelDoc) {
+                    const baseData = getLabelData(finalBoxWeight, true, finalUnitsInBox);
+                    baseData.box_number = actualBoxNumber; // Use the same box number
+
+                    let boxBarcode = '';
+                    if (boxBarcodeTemplate) {
+                        const fields = JSON.parse(boxBarcodeTemplate.structure).fields;
+                        const boxContainer = containers.find(c => c.id === selectedProduct?.box_container_id);
+                        const brutBox = finalBoxWeight + (boxContainer?.weight || 0) / 1000;
+                        const genData = {
+                            weight_netto_box: finalBoxWeight,
+                            weight_brutto_box: brutBox,
+                            production_date: new Date(),
+                            exp_date: new Date(),
+                            article: (selectedProduct?.article || '').padStart(14, '0'),
+                            box_number: actualBoxNumber,
+                            batch_number: batchNumber || ''
+                        } as BarcodeData;
+                        boxBarcode = generateBarcode(fields, genData);
+                    }
+
+                    const boxData = {
+                        ...baseData,
+                        is_box: true,
+                        count: boxLimit,
+                        pack_counter: String(finalUnitsInBox),
+                        weight_netto: finalBoxWeight.toFixed(3),
+                        barcode: boxBarcode || baseData.barcode
+                    };
+
+                    window.electron.invoke('print-label', {
+                        silent: true,
+                        labelDoc: boxLabelDoc,
+                        data: boxData,
+                        printerConfig: printerConfig.boxPrinter || undefined
+                    }).catch(err => console.error('Background Printing Error (Box):', err));
+
+                    // Close box in DB
                     const boxContainer = containers.find(c => c.id === selectedProduct?.box_container_id);
                     const brutBox = finalBoxWeight + (boxContainer?.weight || 0) / 1000;
-
-                    const genData = {
-                        weight_netto_box: finalBoxWeight,
-                        weight_brutto_box: brutBox,
-                        production_date: new Date(),
-                        exp_date: new Date(),
-                        // GTIN-14 padding ONLY for box label
-                        article: (selectedProduct?.article || '').padStart(14, '0'),
-                        // Use the SAME box_number as the textual label
-                        box_number: baseData.box_number || ''
-                    } as BarcodeData;
-                    console.log('AUTO-PRINT BOX DEBUG: Gen Data:', JSON.stringify(genData));
-
-                    boxBarcode = generateBarcode(fields, genData);
-                    console.log('AUTO-PRINT BOX DEBUG: Generated Barcode:', boxBarcode);
-                }
-
-                const boxData = {
-                    ...baseData,
-                    is_box: true,
-                    count: boxLimit,
-                    pack_counter: String(finalUnitsInBox),
-                    weight_netto: finalBoxWeight.toFixed(3),
-                    barcode: boxBarcode || baseData.barcode
-                };
-
-                await window.electron.invoke('print-label', {
-                    silent: true,
-                    labelDoc: boxLabelDoc,
-                    data: boxData,
-                    printerName: printerConfig.boxPrinter || undefined
-                });
-
-                // Persist Closed Box to DB (Auto-print case)
-                if (currentBoxId) {
-                    const boxContainer = containers.find(c => c.id === selectedProduct?.box_container_id);
-                    const brutBox = finalBoxWeight + (boxContainer?.weight || 0) / 1000;
-                    await window.electron.invoke('close-box', {
-                        boxId: currentBoxId,
+                    window.electron.invoke('close-box', {
+                        boxId: actualBoxId,
                         weightNetto: finalBoxWeight,
                         weightBrutto: brutBox
-                    });
-                    setCurrentBoxId(null);
-                }
+                    }).catch(err => console.error('Background DB Error (CloseBox):', err));
 
-                setLastPrinted({ doc: boxLabelDoc, data: boxData });
+                    setCurrentBoxId(null);
+                    setCurrentBoxNumber(null);
+                    setLastPrinted({ doc: boxLabelDoc, data: boxData });
+                }
+            } else {
+                setUnitsInBox(newUnitsInBox);
+                setBoxNetWeight(newBoxNetWeight);
+                setTotalUnits(prev => prev + 1);
             }
+
             isPrintingRef.current = false;
-        } else {
-            setUnitsInBox(newUnitsInBox);
-            setBoxNetWeight(newBoxNetWeight);
+        } catch (err) {
+            console.error('Print Error:', err);
+            setAlertMessage(`Ошибка: ${err instanceof Error ? err.message : String(err)}`);
             isPrintingRef.current = false;
-            setTotalUnits(prev => prev + 1);
         }
     };
 
@@ -747,6 +809,8 @@ const WeighingStation = () => {
             return;
         }
         setSelectedProduct(product);
+        setCurrentBoxId(null);
+        setCurrentBoxNumber(null);
         setSearchQuery('');
         setIsMenuOpen(false);
     };
@@ -789,11 +853,11 @@ const WeighingStation = () => {
                         <label className="block text-sm font-medium text-neutral-400 mb-2">{t('ws.search')}</label>
                         <input
                             type="text"
-                            placeholder="..."
-                            value={searchQuery}
+                            placeholder={selectedProduct ? selectedProduct.name : "..."}
+                            value={isMenuOpen ? searchQuery : (selectedProduct?.name || '')}
                             onChange={handleSearch}
                             onFocus={() => setIsMenuOpen(true)}
-                            className="w-full bg-black/20 border border-white/10 rounded-2xl px-5 py-4 text-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all text-white placeholder-neutral-600"
+                            className="w-full bg-black/20 border border-white/10 rounded-2xl px-5 py-4 text-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all text-white placeholder-neutral-500/50"
                         />
                         {/* Dropdown Menu */}
                         {isMenuOpen && (products.length > 0 || searchQuery !== '') && (
@@ -883,6 +947,20 @@ const WeighingStation = () => {
                 <div className="mt-auto p-6 bg-neutral-900/50 border border-white/5 rounded-3xl backdrop-blur">
                     <h3 className="text-sm font-semibold mb-4 text-white/60 uppercase tracking-widest">{t('ws.sessionStats')}</h3>
                     <div className="space-y-3">
+                        <div
+                            className="flex justify-between items-center p-3 bg-white/5 border border-white/10 rounded-xl group cursor-pointer hover:bg-emerald-500/10 hover:border-emerald-500/30 transition-all active:scale-[0.98]"
+                            onClick={(e) => { e.stopPropagation(); setIsKeypadOpen(true); }}
+                        >
+                            <span className="text-xs uppercase tracking-wider text-neutral-500 font-bold">Партия</span>
+                            <div className="flex items-center gap-3">
+                                <span className="text-xl font-mono font-bold text-white group-hover:text-emerald-400 transition-colors">
+                                    {batchNumber || <span className="text-neutral-700 italic text-sm">Ввести...</span>}
+                                </span>
+                                <div className="p-2 bg-neutral-800 border border-white/10 rounded-lg group-hover:bg-emerald-500/20 group-hover:border-emerald-500/40 transition-colors">
+                                    <Hash className="w-4 h-4 text-emerald-500" />
+                                </div>
+                            </div>
+                        </div>
                         <div className="flex justify-between text-sm py-2 border-b border-white/5">
                             <span className="text-neutral-500">{t('ws.packNum')}</span>
                             <span className="font-mono text-emerald-400">{getLabelData().pack_number || '--'}</span>
@@ -940,6 +1018,16 @@ const WeighingStation = () => {
                         </button>
                     </div>
                 </div>
+            )}
+
+            {/* Numeric Keypad Modal */}
+            {isKeypadOpen && (
+                <NumericKeypad
+                    value={batchNumber}
+                    onUpdate={setBatchNumber}
+                    onClose={() => setIsKeypadOpen(false)}
+                    title="Номер партии"
+                />
             )}
 
 

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Scale, Settings, Package, Database } from 'lucide-react';
+import { Scale, Settings, Package, Database, LogOut } from 'lucide-react';
 import clsx from 'clsx';
 import { useTranslation } from '../i18n';
 
@@ -19,6 +19,10 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, serverStatus
         { id: 'database', labelKey: 'sidebar.database', icon: Database },
         { id: 'settings', labelKey: 'sidebar.settings', icon: Settings },
     ];
+
+    const handleExit = () => {
+        window.electron.send('quit-app', {});
+    };
 
     return (
         <div className="w-64 bg-neutral-900/50 backdrop-blur border-r border-white/5 flex flex-col p-4">
@@ -45,6 +49,16 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, serverStatus
                         {t(item.labelKey)}
                     </button>
                 ))}
+            </div>
+
+            <div className="px-4 pb-4">
+                <button
+                    onClick={handleExit}
+                    className="w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 text-sm font-medium text-red-400 hover:text-red-300 hover:bg-white/5 border border-transparent hover:border-red-500/20"
+                >
+                    <LogOut className="w-5 h-5" />
+                    {t('sidebar.exit')}
+                </button>
             </div>
 
             <div className="mt-auto px-4 py-4 text-xs text-neutral-600 border-t border-white/5 pt-6 space-y-2.5">

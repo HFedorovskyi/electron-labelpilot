@@ -6,9 +6,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.startSyncServer = startSyncServer;
 const http_1 = __importDefault(require("http"));
 const database_1 = require("./database");
-const sync_1 = require("./sync");
 const PORT = 5556;
-function startSyncServer() {
+function startSyncServer(onSyncComplete) {
     const server = http_1.default.createServer((req, res) => {
         // Set CORS headers
         res.setHeader('Access-Control-Allow-Origin', '*');
@@ -54,23 +53,32 @@ function startSyncServer() {
             }
         }
         else if ((normalizedUrl === '/api/sync_db' || normalizedUrl === '/api/full_sync') && req.method === 'POST') {
-            // Import Logic (Push from Server)
             let body = '';
-            req.on('data', chunk => {
+            req.on('data', (chunk) => {
                 body += chunk.toString();
             });
-            req.on('end', () => {
+            req.on('end', async () => {
+                const { processSyncData } = require('./processor');
                 try {
                     const data = JSON.parse(body);
-                    (0, sync_1.importDataToDB)(data);
-                    res.writeHead(200, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ status: 'success', message: 'Data synced successfully' }));
-                    console.log('Sync Server: Imported full data snapshot via POST');
+                    console.log(`Sync Server: Received POST sync request. Type: ${data?.meta?.type || 'Online'}`);
+                    const result = await processSyncData(data);
+                    if (result.success) {
+                        res.writeHead(200, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ success: true, message: 'Sync completed' }));
+                        // Notify that sync is complete
+                        if (onSyncComplete) {
+                            onSyncComplete(result);
+                        }
+                    }
+                    else {
+                        throw new Error(result.message || 'Import failed');
+                    }
                 }
                 catch (err) {
                     console.error('Sync Server Import Error:', err);
                     res.writeHead(500, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ error: err.message }));
+                    res.end(JSON.stringify({ error: err.message || 'Malformed JSON or import error' }));
                 }
             });
         }

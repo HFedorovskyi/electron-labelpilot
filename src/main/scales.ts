@@ -3,6 +3,7 @@ import net from 'net';
 import { BrowserWindow } from 'electron';
 import { PROTOCOLS, type ScaleProtocol, type ScaleReading, getProtocol } from './protocols';
 import { loadScaleConfig, saveScaleConfig, type ScaleConfig } from './config';
+import log from './logger';
 
 class ScaleManager {
     private scalePort: SerialPort | null = null;
@@ -11,6 +12,7 @@ class ScaleManager {
     private currentProtocol: ScaleProtocol | null = null;
     private pollingInterval: NodeJS.Timeout | null = null;
     private config: ScaleConfig | null = null;
+    private isConnecting: boolean = false;
 
     // Stability Logic
     private recentReadings: number[] = [];
@@ -21,11 +23,11 @@ class ScaleManager {
         this.config = loadScaleConfig();
     }
 
-    public init() {
+    public async init() {
         // Auto-connect on startup if configured
         if (this.config) {
-            console.log('ScaleManager: Auto-connecting with saved config...');
-            this.connect(this.config);
+            log.info('ScaleManager: Auto-connecting with saved config...', JSON.stringify(this.config));
+            await this.connect(this.config);
         }
     }
 
@@ -37,13 +39,25 @@ class ScaleManager {
         return this.config;
     }
 
-    public saveAndConnect(config: ScaleConfig) {
+    public async saveAndConnect(config: ScaleConfig) {
         saveScaleConfig(config);
-        this.connect(config);
+        await this.connect(config);
     }
 
     public async listPorts() {
-        return await SerialPort.list();
+        const startTime = Date.now();
+        log.info('[ScaleManager] listPorts started');
+        try {
+            const ports = await SerialPort.list();
+            log.info(`[ScaleManager] listPorts finished. Found ${ports.length} ports:`);
+            ports.forEach(p => {
+                log.info(`  - ${p.path}: ${p.manufacturer || 'Unknown'} (${p.pnpId || ''})`);
+            });
+            return ports;
+        } catch (e) {
+            log.error(`[ScaleManager] listPorts FAILED in ${Date.now() - startTime}ms:`, e);
+            throw e;
+        }
     }
 
     public getStatus() {
@@ -63,64 +77,128 @@ class ScaleManager {
     private lastDataTime: number = 0;
     private watchdogInterval: NodeJS.Timeout | null = null;
 
-    public connect(config: ScaleConfig) {
-        this.disconnect();
-        this.config = config;
-        this.currentProtocol = getProtocol(config.protocolId);
+    public async connect(config: ScaleConfig) {
+        if (this.isConnecting) {
+            log.info('ScaleManager: Already connecting, skipping...');
+            return;
+        }
+        this.isConnecting = true;
 
-        console.log(`ScaleManager: Connecting to ${config.type} using ${this.currentProtocol.name}`);
-        this.emitStatus('reconnecting');
+        try {
+            await this.disconnect();
+            this.config = config;
+            this.currentProtocol = getProtocol(config.protocolId);
 
-        if (config.type === 'serial') {
-            this.connectSerial(config);
-        } else if (config.type === 'simulator') {
-            this.emitStatus('connected');
-            this.startPolling();
-        } else {
-            this.connectTcp(config);
+            console.log(`ScaleManager: Connecting to ${config.type} using ${this.currentProtocol.name}`);
+            this.emitStatus('reconnecting');
+
+            if (config.type === 'serial') {
+                await this.connectSerial(config);
+            } else if (config.type === 'simulator') {
+                this.emitStatus('connected');
+                this.startPolling();
+            } else {
+                this.connectTcp(config);
+            }
+        } finally {
+            this.isConnecting = false;
         }
     }
 
-    private connectSerial(config: ScaleConfig) {
-        if (!config.path) {
+    private async connectSerial(config: ScaleConfig) {
+        const path = config.path;
+        if (!path) {
             console.error('ScaleManager: No serial path provided');
             return;
         }
 
-        try {
-            console.log(`ScaleManager: Opening serial port ${config.path} at ${config.baudRate || 9600}`);
-            this.scalePort = new SerialPort({
-                path: config.path,
-                baudRate: config.baudRate || this.currentProtocol?.defaultBaudRate || 9600
-            });
+        return new Promise<void>((resolve) => {
+            try {
+                const baudRate = config.baudRate || this.currentProtocol?.defaultBaudRate || 9600;
+                const parity = this.currentProtocol?.parity || 'none';
+                const dataBits = this.currentProtocol?.dataBits || 8;
+                const stopBits = this.currentProtocol?.stopBits || 1;
 
-            this.scalePort.on('open', () => {
-                console.log(`ScaleManager: Port ${config.path} OPENED`);
-                // Status is 'connecting' until first data
-                this.emitStatus('connecting');
-                this.startPolling();
-                this.startWatchdog();
-            });
+                log.info(`ScaleManager: Opening ${path} (${baudRate}, ${dataBits}, ${parity}, ${stopBits})`);
 
-            this.scalePort.on('data', (data) => {
-                this.handleData(data);
-            });
+                this.scalePort = new SerialPort({
+                    path: path,
+                    baudRate: baudRate,
+                    parity: parity as any,
+                    dataBits: dataBits as any,
+                    stopBits: stopBits as any,
+                    autoOpen: false,
+                    rtscts: false, // Explicitly disable hardware flow control
+                });
 
-            this.scalePort.on('error', (err) => {
-                console.error('ScaleManager: Serial Port Error:', err.message);
+                this.scalePort.on('open', () => {
+                    log.info(`ScaleManager: Port ${path} OPENED`);
+
+                    // Set control signals (often required for USB adapters and Massa-K)
+                    this.scalePort?.set({ dtr: true, rts: true }, (err) => {
+                        if (err) log.error('ScaleManager: Error setting DTR/RTS:', err.message);
+                        else {
+                            log.info('ScaleManager: DTR/RTS signals set to TRUE');
+                            // Experimental: pulse DTR after open
+                            setTimeout(() => {
+                                this.scalePort?.set({ dtr: false }, () => {
+                                    setTimeout(() => this.scalePort?.set({ dtr: true }), 50);
+                                });
+                            }, 100);
+                        }
+                    });
+
+                    // Status is 'connecting' until first data
+                    this.emitStatus('connecting');
+                    // Delay polling slightly to allow signals to stabilize
+                    setTimeout(() => {
+                        if (this.scalePort?.isOpen) {
+                            log.info('ScaleManager: Starting polling after stabilization delay');
+                            this.startPolling();
+                            this.startWatchdog();
+                        }
+                    }, 200);
+
+                    resolve();
+                });
+
+                this.scalePort.on('data', (data) => {
+                    this.handleData(data);
+                });
+
+                this.scalePort.on('error', (err) => {
+                    log.error('ScaleManager: Serial Port Error:', err.message);
+
+                    // Specific error handling for "Access denied"
+                    if (err.message.includes('Access denied')) {
+                        this.emitError(`serial_access_denied|${config.path}`);
+                    } else if (err.message.includes('File not found')) {
+                        this.emitError(`serial_not_found|${config.path}`);
+                    } else {
+                        this.emitError(err.message);
+                    }
+                    resolve(); // Resolve anyway to unlock isConnecting, error is handled by listeners
+                });
+
+                this.scalePort.on('close', () => {
+                    log.info('ScaleManager: Port CLOSED');
+                    this.emitStatus('disconnected');
+                });
+
+                this.scalePort.open((err) => {
+                    if (err) {
+                        log.error('ScaleManager: Immediate Open Error:', err.message);
+                        // Handled by 'error' listener
+                    }
+                });
+
+
+            } catch (err: any) {
+                console.error('ScaleManager: Failed to create SerialPort:', err.message);
                 this.emitError(err.message);
-            });
-
-            this.scalePort.on('close', () => {
-                console.log('ScaleManager: Port CLOSED');
-                this.emitStatus('disconnected');
-            });
-
-
-        } catch (err: any) {
-            console.error('ScaleManager: Failed to create SerialPort:', err.message);
-            this.emitError(err.message);
-        }
+                resolve();
+            }
+        });
     }
 
     private startWatchdog() {
@@ -179,6 +257,11 @@ class ScaleManager {
 
         this.pollingInterval = setInterval(() => {
             if (this.config?.type === 'serial' && this.scalePort?.isOpen) {
+                if (cmd instanceof Buffer) {
+                    log.debug('ScaleManager: Sending Hex:', cmd.toString('hex').toUpperCase());
+                } else {
+                    log.debug('ScaleManager: Sending Text:', cmd);
+                }
                 this.scalePort.write(cmd, (err) => {
                     if (err) console.error('ScaleManager: Write error:', err);
                 });
@@ -198,6 +281,9 @@ class ScaleManager {
     }
 
     private handleData(data: Buffer) {
+        const hex = data.toString('hex').toUpperCase();
+        log.debug(`ScaleManager: [RAW DATA] ${hex}`);
+
         if (!this.currentProtocol) return;
 
         const reading = this.currentProtocol.parse(data);
@@ -233,7 +319,7 @@ class ScaleManager {
         return protocolReportedStable || isSoftwareStable;
     }
 
-    public disconnect() {
+    public async disconnect() {
         if (this.pollingInterval) {
             clearInterval(this.pollingInterval);
             this.pollingInterval = null;
@@ -244,10 +330,22 @@ class ScaleManager {
             this.watchdogInterval = null;
         }
 
-        if (this.scalePort?.isOpen) {
-            this.scalePort.removeAllListeners();
-            this.scalePort.close();
+        if (this.scalePort) {
+            const port = this.scalePort;
             this.scalePort = null;
+
+            if (port.isOpen) {
+                log.info('ScaleManager: Closing serial port...');
+                return new Promise<void>((resolve) => {
+                    port.close((err) => {
+                        if (err) log.error('ScaleManager: Error closing port:', err);
+                        port.removeAllListeners();
+                        resolve();
+                    });
+                });
+            } else {
+                port.removeAllListeners();
+            }
         }
 
         if (this.tcpClient && !this.tcpClient.destroyed) {

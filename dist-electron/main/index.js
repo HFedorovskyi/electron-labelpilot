@@ -43,6 +43,8 @@ const scales_1 = require("./scales");
 // Import usb_sync
 const usb_sync_1 = require("./usb_sync");
 const discovery_1 = require("./discovery");
+const server_status_1 = require("./server_status");
+const logger_1 = __importDefault(require("./logger")); // Ensure logger is imported
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (require('electron-squirrel-startup')) {
     electron_1.app.quit();
@@ -59,27 +61,55 @@ process.on('uncaughtException', (err) => {
     // process.exit(1); 
 });
 let mainWindow = null;
+let workerWindow = null;
 function createWindow() {
     mainWindow = new electron_1.BrowserWindow({
         width: 1200,
         height: 800,
+        fullscreen: true, // Launch in full screen mode by default
         webPreferences: {
-            preload: path_1.default.join(__dirname, '../preload/index.js'),
+            preload: electron_1.app.isPackaged
+                ? path_1.default.join(electron_1.app.getAppPath(), 'dist-electron/preload/index.js')
+                : path_1.default.join(__dirname, '../preload/index.js'),
             sandbox: false,
             nodeIntegration: false,
             contextIsolation: true,
         },
+        backgroundColor: '#1e1e1e', // Prevent white flash, especially if GPU disabled
     });
     scales_1.scaleManager.setMainWindow(mainWindow);
     discovery_1.discoveryManager.setMainWindow(mainWindow);
+    server_status_1.serverStatusManager.setMainWindow(mainWindow);
     const devUrl = 'http://127.0.0.1:5173';
     if (!electron_1.app.isPackaged) {
         mainWindow.loadURL(devUrl);
         mainWindow.webContents.openDevTools();
     }
     else {
-        mainWindow.loadFile(path_1.default.join(__dirname, '../dist/index.html'));
+        mainWindow.loadFile(path_1.default.join(electron_1.app.getAppPath(), 'dist/index.html'));
     }
+}
+function createWorkerWindow() {
+    workerWindow = new electron_1.BrowserWindow({
+        show: false,
+        webPreferences: {
+            preload: electron_1.app.isPackaged
+                ? path_1.default.join(electron_1.app.getAppPath(), 'dist-electron/preload/index.js')
+                : path_1.default.join(__dirname, '../preload/index.js'),
+            sandbox: false,
+            nodeIntegration: false,
+            contextIsolation: true,
+            backgroundThrottling: false // CRITICAL: Prevent Chrome from slowing down hidden window
+        },
+    });
+    const devUrl = 'http://127.0.0.1:5173';
+    const url = electron_1.app.isPackaged
+        ? `file://${path_1.default.join(electron_1.app.getAppPath(), 'dist/index.html')}?print=true`
+        : `${devUrl}?print=true`;
+    workerWindow.loadURL(url);
+    workerWindow.on('closed', () => {
+        workerWindow = null;
+    });
 }
 electron_1.app.whenReady().then(() => {
     (0, database_1.initDatabase)();
@@ -88,11 +118,13 @@ electron_1.app.whenReady().then(() => {
         return getStationInfo();
     });
     createWindow();
+    createWorkerWindow();
     // Initialize Managers
     scales_1.scaleManager.init();
     // Default to station mode, or load from config if we had it. 
     // For now, default start is silent until UI sets mode.
     discovery_1.discoveryManager.setMode('station');
+    server_status_1.serverStatusManager.startPolling();
     // IPC Handlers
     electron_1.ipcMain.on('set-app-mode', (_, mode) => {
         discovery_1.discoveryManager.setMode(mode);
@@ -136,108 +168,307 @@ electron_1.app.whenReady().then(() => {
         return getContainers();
     });
     // Printing Handlers
+    let printQueue = Promise.resolve();
     electron_1.ipcMain.handle('print-label', async (_, options) => {
-        const { silent, labelDoc, data, printerName } = options;
-        return new Promise((resolve) => {
-            const printWindow = new electron_1.BrowserWindow({
-                show: false,
-                webPreferences: {
-                    preload: path_1.default.join(__dirname, '../preload/index.js'),
-                    sandbox: false,
-                    nodeIntegration: false,
-                    contextIsolation: true,
-                },
-            });
-            const devUrl = 'http://127.0.0.1:5173';
-            const url = electron_1.app.isPackaged
-                ? `file://${path_1.default.join(__dirname, '../dist/index.html')}?print=true`
-                : `${devUrl}?print=true`;
-            printWindow.loadURL(url);
-            printWindow.webContents.on('did-finish-load', () => {
-                printWindow.webContents.send('print-data', { labelDoc, data });
-            });
-            const readyHandler = (event) => {
-                if (event.sender === printWindow.webContents) {
-                    electron_1.ipcMain.removeListener('ready-to-print', readyHandler);
+        // Queue the print request to ensure sequential processing
+        const result = await (printQueue = printQueue.then(async () => {
+            const startTime = Date.now();
+            const { silent, labelDoc, data, printerConfig, printerName } = options;
+            // New Routing Logic: ZPL/TSPL vs Image (Driver)
+            if (printerConfig && typeof printerConfig === 'object' && printerConfig.protocol !== 'image') {
+                try {
+                    const { printerService } = await Promise.resolve().then(() => __importStar(require('./printer/PrinterService')));
+                    await printerService.printLabel(printerConfig, labelDoc, data);
+                    const duration = Date.now() - startTime;
+                    logger_1.default.info(`Printed via PrinterService (${printerConfig.protocol}) to ${printerConfig.name} in ${duration}ms`);
+                    return true;
+                }
+                catch (e) {
+                    logger_1.default.error('PrinterService failed:', e);
+                    return false;
+                }
+            }
+            // IMAGE MODE: Use persistent worker window
+            const targetPrinter = printerName || printerConfig?.driverName;
+            logger_1.default.info(`Image Mode Printing: Target=${targetPrinter || 'Default'}`);
+            // Ensure window exists (should be created on app ready)
+            if (!workerWindow || workerWindow.isDestroyed()) {
+                logger_1.default.info('Worker window missing, recreating...');
+                createWorkerWindow();
+            }
+            return new Promise((resolve) => {
+                const currentWorker = workerWindow;
+                const performPrint = () => {
                     const printOptions = {
                         silent: silent !== false,
                         printBackground: true,
                         margins: { marginType: 'none' }
                     };
-                    // Route to specific printer (supports industrial: TSC, Zebra, Honeywell, CAB, etc.)
-                    if (printerName) {
-                        printOptions.deviceName = printerName;
+                    if (targetPrinter) {
+                        printOptions.deviceName = targetPrinter;
                     }
-                    printWindow.webContents.print(printOptions, (success) => {
-                        printWindow.close();
+                    logger_1.default.info(`Printing to device: ${printOptions.deviceName || 'default'} (Silent: ${silent !== false})`);
+                    currentWorker.webContents.print(printOptions, (success, failureReason) => {
+                        const duration = Date.now() - startTime;
+                        if (success) {
+                            logger_1.default.info(`Print result: SUCCESS (Duration: ${duration}ms)`);
+                        }
+                        else {
+                            logger_1.default.error(`Print result: FAILURE (Duration: ${duration}ms) Reason: ${failureReason}`);
+                        }
                         resolve(success);
+                    });
+                };
+                // One-time listener for this specific print job
+                const readyHandler = (_event) => {
+                    // console.log('Received ready-to-print from renderer');
+                    electron_1.ipcMain.removeListener('ready-to-print', readyHandler);
+                    performPrint();
+                };
+                electron_1.ipcMain.on('ready-to-print', readyHandler);
+                // Wait for load if needed, otherwise send immediately
+                if (currentWorker.webContents.isLoading()) {
+                    logger_1.default.info('Worker is loading, waiting for finish...');
+                    currentWorker.webContents.once('did-finish-load', () => {
+                        currentWorker.webContents.send('print-data', { labelDoc, data });
+                    });
+                }
+                else {
+                    currentWorker.webContents.send('print-data', { labelDoc, data });
+                }
+                // Timeout safety
+                setTimeout(() => {
+                    electron_1.ipcMain.removeListener('ready-to-print', readyHandler);
+                    resolve(false);
+                }, 15000); // 15s timeout
+            });
+        }).catch(err => {
+            logger_1.default.error('Print queue error:', err);
+            return false;
+        }));
+        return result;
+    });
+});
+electron_1.ipcMain.handle('get-printers', async (event) => {
+    const startTime = Date.now();
+    logger_1.default.info('[IPC] get-printers started');
+    try {
+        const win = electron_1.BrowserWindow.fromWebContents(event.sender);
+        const printers = await win?.webContents.getPrintersAsync() || [];
+        logger_1.default.info(`[IPC] get-printers finished in ${Date.now() - startTime}ms. Count: ${printers.length}`);
+        return printers;
+    }
+    catch (e) {
+        logger_1.default.error(`[IPC] get-printers FAILED in ${Date.now() - startTime}ms:`, e);
+        return [];
+    }
+});
+// USB Sync Handlers
+electron_1.ipcMain.handle('usb-export', async (_, { path, data }) => {
+    return (0, usb_sync_1.exportDataToUSB)(path, data);
+});
+electron_1.ipcMain.handle('usb-import', async (_, path) => {
+    return (0, usb_sync_1.importDataFromUSB)(path);
+});
+electron_1.ipcMain.handle('get-label', async (_, id) => {
+    const { getLabelById } = await Promise.resolve().then(() => __importStar(require('./database')));
+    return getLabelById(id);
+});
+electron_1.ipcMain.handle('get-barcode-template', async (_, id) => {
+    const { getBarcodeTemplateById } = await Promise.resolve().then(() => __importStar(require('./database')));
+    return getBarcodeTemplateById(id);
+});
+// Data Sync Handlers
+electron_1.ipcMain.handle('sync-data', async (_, serverIp) => {
+    const { testConnection } = await Promise.resolve().then(() => __importStar(require('./sync')));
+    logger_1.default.info(`Attempting to sync data with server: ${serverIp}`);
+    return await testConnection(serverIp);
+});
+electron_1.ipcMain.handle('get-server-status', () => {
+    return server_status_1.serverStatusManager.getStatus();
+});
+// Printer Config Handlers
+electron_1.ipcMain.handle('get-printer-config', async () => {
+    const { loadPrinterConfig } = await Promise.resolve().then(() => __importStar(require('./config')));
+    return loadPrinterConfig();
+});
+electron_1.ipcMain.on('save-printer-config', async (_, config) => {
+    logger_1.default.info('[IPC] save-printer-config started', {
+        packProtocol: config.packPrinter?.protocol,
+        boxProtocol: config.boxPrinter?.protocol,
+        autoPrint: config.autoPrintOnStable
+    });
+    const startTime = Date.now();
+    try {
+        const { savePrinterConfig } = await Promise.resolve().then(() => __importStar(require('./config')));
+        savePrinterConfig(config);
+        // Reload printer service
+        const { printerService } = await Promise.resolve().then(() => __importStar(require('./printer/PrinterService')));
+        printerService.reloadConfig();
+        // Broadcast update to all windows
+        electron_1.BrowserWindow.getAllWindows().forEach(win => {
+            win.webContents.send('printer-config-updated', config);
+        });
+        // Restart polling to pick up new IP immediately if it changed
+        server_status_1.serverStatusManager.startPolling();
+        logger_1.default.info(`[IPC] save-printer-config finished in ${Date.now() - startTime}ms`);
+    }
+    catch (e) {
+        logger_1.default.error(`[IPC] save-printer-config FAILED in ${Date.now() - startTime}ms:`, e);
+    }
+});
+electron_1.ipcMain.handle('test-print', async (_event, config) => {
+    logger_1.default.info('[IPC] test-print started', { protocol: config.protocol, name: config.name });
+    const startTime = Date.now();
+    if (config.protocol === 'image') {
+        const testDoc = {
+            id: 'test',
+            name: 'Test Label',
+            widthMm: config.widthMm || 58,
+            heightMm: config.heightMm || 40,
+            canvas: { width: 400, height: 300, background: '#ffffff' },
+            elements: [
+                { id: '1', type: 'text', text: 'TEST PRINT', x: 50, y: 50, fontSize: 30, fontWeight: 'bold' },
+                { id: '2', type: 'text', text: `Printer: ${config.name}`, x: 50, y: 100, fontSize: 16 },
+                { id: '3', type: 'text', text: `Protocol: ${config.protocol}`, x: 50, y: 130, fontSize: 16 },
+                { id: '4', type: 'barcode', value: 'TEST123456', x: 50, y: 180, w: 300, h: 80, barcodeType: 'code128' }
+            ]
+        };
+        const testData = { batch_number: 'TEST' };
+        if (!workerWindow) {
+            logger_1.default.info('[IPC] test-print: creating worker window');
+            createWorkerWindow();
+        }
+        const currentWorker = workerWindow;
+        return new Promise((resolve) => {
+            const readyHandler = (ev) => {
+                if (ev.sender === currentWorker.webContents) {
+                    electron_1.ipcMain.removeListener('ready-to-print', readyHandler);
+                    const printOptions = {
+                        silent: false,
+                        printBackground: true,
+                        margins: { marginType: 'none' },
+                        deviceName: config.driverName || ''
+                    };
+                    logger_1.default.info('[IPC] test-print: calling webContents.print');
+                    currentWorker.webContents.print(printOptions, (success) => {
+                        logger_1.default.info(`[IPC] test-print (image) finished in ${Date.now() - startTime}ms. Success: ${success}`);
+                        resolve({ success });
                     });
                 }
             };
             electron_1.ipcMain.on('ready-to-print', readyHandler);
+            currentWorker.webContents.send('print-data', { labelDoc: testDoc, data: testData });
         });
-    });
-    electron_1.ipcMain.handle('get-printers', async (event) => {
-        const win = electron_1.BrowserWindow.fromWebContents(event.sender);
-        return win?.webContents.getPrintersAsync() || [];
-    });
-    // USB Sync Handlers
-    electron_1.ipcMain.handle('usb-export', async (_, { path, data }) => {
-        return (0, usb_sync_1.exportDataToUSB)(path, data);
-    });
-    electron_1.ipcMain.handle('usb-import', async (_, path) => {
-        return (0, usb_sync_1.importDataFromUSB)(path);
-    });
-    electron_1.ipcMain.handle('get-label', async (_, id) => {
-        const { getLabelById } = await Promise.resolve().then(() => __importStar(require('./database')));
-        return getLabelById(id);
-    });
-    electron_1.ipcMain.handle('get-barcode-template', async (_, id) => {
-        const { getBarcodeTemplateById } = await Promise.resolve().then(() => __importStar(require('./database')));
-        return getBarcodeTemplateById(id);
-    });
-    // Data Sync Handlers
-    electron_1.ipcMain.handle('sync-data', async (_, serverIp) => {
-        const { syncDataFromServer } = await Promise.resolve().then(() => __importStar(require('./sync')));
-        return await syncDataFromServer(serverIp);
-    });
-    // Printer Config Handlers
-    electron_1.ipcMain.handle('get-printer-config', async () => {
-        const { loadPrinterConfig } = await Promise.resolve().then(() => __importStar(require('./config')));
-        return loadPrinterConfig();
-    });
-    electron_1.ipcMain.on('save-printer-config', async (_, config) => {
-        const { savePrinterConfig } = await Promise.resolve().then(() => __importStar(require('./config')));
-        savePrinterConfig(config);
-    });
-    // Database Viewer Handlers
-    electron_1.ipcMain.handle('get-tables', async () => {
-        const { getTables } = await Promise.resolve().then(() => __importStar(require('./database')));
-        return getTables();
-    });
-    electron_1.ipcMain.handle('get-table-data', async (_, tableName) => {
-        const { getTableData } = await Promise.resolve().then(() => __importStar(require('./database')));
-        return getTableData(tableName);
-    });
-    electron_1.ipcMain.handle('record-pack', async (_, data) => {
-        const { recordPack } = await Promise.resolve().then(() => __importStar(require('./database')));
-        return recordPack(data);
-    });
-    electron_1.ipcMain.handle('close-box', async (_, { boxId, weightNetto, weightBrutto }) => {
-        const { closeBox } = await Promise.resolve().then(() => __importStar(require('./database')));
-        return closeBox(boxId, weightNetto, weightBrutto);
-    });
-    electron_1.ipcMain.handle('get-latest-counters', async () => {
-        const { getLatestCounters } = await Promise.resolve().then(() => __importStar(require('./database')));
-        return getLatestCounters();
-    });
-    electron_1.ipcMain.on('log-to-main', (_event, ...args) => {
-        console.log('[Renderer Log]:', ...args);
-    });
+    }
+    const { printerService } = await Promise.resolve().then(() => __importStar(require('./printer/PrinterService')));
+    try {
+        await printerService.testPrint(config);
+        logger_1.default.info(`[IPC] test-print (${config.protocol}) finished in ${Date.now() - startTime}ms`);
+        return { success: true };
+    }
+    catch (error) {
+        logger_1.default.error(`[IPC] test-print FAILED in ${Date.now() - startTime}ms:`, error);
+        return { success: false, message: error.message };
+    }
+});
+// Database Viewer Handlers
+electron_1.ipcMain.handle('get-tables', async () => {
+    const { getTables } = await Promise.resolve().then(() => __importStar(require('./database')));
+    return getTables();
+});
+electron_1.ipcMain.handle('get-table-data', async (_, tableName) => {
+    const { getTableData } = await Promise.resolve().then(() => __importStar(require('./database')));
+    return getTableData(tableName);
+});
+electron_1.ipcMain.handle('record-pack', async (_, data) => {
+    const { recordPack } = await Promise.resolve().then(() => __importStar(require('./database')));
+    return recordPack(data);
+});
+electron_1.ipcMain.handle('close-box', async (_, { boxId, weightNetto, weightBrutto }) => {
+    const { closeBox } = await Promise.resolve().then(() => __importStar(require('./database')));
+    return closeBox(boxId, weightNetto, weightBrutto);
+});
+electron_1.ipcMain.handle('get-latest-counters', async () => {
+    const { getLatestCounters } = await Promise.resolve().then(() => __importStar(require('./database')));
+    return getLatestCounters();
+});
+electron_1.ipcMain.on('log-to-main', (_event, ...args) => {
+    console.log('[Renderer Log]:', ...args);
+});
+electron_1.ipcMain.on('renderer-ready', () => {
+    server_status_1.serverStatusManager.notifyReady();
+});
+// --- Identity & Offline Sync Handlers ---
+electron_1.ipcMain.handle('get-identity', () => {
+    const { loadIdentity } = require('./identity');
+    return loadIdentity();
+});
+electron_1.ipcMain.handle('import-identity-file', async () => {
+    const { dialog } = require('electron');
+    const { importIdentityFile } = require('./identity');
+    try {
+        const result = await dialog.showOpenDialog({
+            title: 'Select Identity File (.lpi)',
+            filters: [{ name: 'LabelPilot Identity', extensions: ['lpi'] }],
+            properties: ['openFile']
+        });
+        if (result.canceled || result.filePaths.length === 0) {
+            return { success: false, message: 'Cancelled' };
+        }
+        const identity = await importIdentityFile(result.filePaths[0]);
+        return { success: true, identity };
+    }
+    catch (error) {
+        console.error('Identity Import Error:', error);
+        return { success: false, message: error.message };
+    }
+});
+electron_1.ipcMain.handle('offline-import', async () => {
+    const { importOfflineUpdate } = require('./offline_sync');
+    return await importOfflineUpdate();
+});
+electron_1.ipcMain.handle('offline-export', async () => {
+    const { exportOfflineData } = require('./offline_sync');
+    return await exportOfflineData();
+});
+electron_1.ipcMain.handle('get-next-sequence', (_, type) => {
+    const { getNextSequence } = require('./sequence');
+    try {
+        return { success: true, number: getNextSequence(type) };
+    }
+    catch (error) {
+        return { success: false, message: error.message };
+    }
+});
+electron_1.ipcMain.handle('reset-database', async () => {
+    const { resetDatabase } = require('./database');
+    const { deleteIdentity } = require('./identity');
+    try {
+        resetDatabase();
+        deleteIdentity();
+        return { success: true, message: 'Database reset successfully' };
+    }
+    catch (error) {
+        console.error('Failed to reset database:', error);
+        return { success: false, message: error.message };
+    }
+});
+electron_1.ipcMain.on('open-logs-folder', () => {
+    const logsPath = path_1.default.join(electron_1.app.getPath('userData'), 'logs');
+    electron_1.shell.openPath(logsPath);
+});
+electron_1.ipcMain.on('quit-app', () => {
+    electron_1.app.quit();
 });
 // Import and start Sync Server
 const server_1 = require("./server");
-(0, server_1.startSyncServer)();
+// Register ipc handlers
+(0, server_1.startSyncServer)((data) => {
+    if (mainWindow) {
+        mainWindow.webContents.send('sync-complete', { success: true, ...data });
+    }
+});
 electron_1.app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') {
         electron_1.app.quit();

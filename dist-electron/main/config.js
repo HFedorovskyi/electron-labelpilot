@@ -79,11 +79,24 @@ function saveNumberingConfig(config) {
         console.error('Failed to save numbering config:', error);
     }
 }
+const DEFAULT_DEVICE_CONFIG = {
+    id: 'default',
+    active: false,
+    name: 'Not Configured',
+    connection: 'windows_driver',
+    protocol: 'image',
+    port: 9100,
+    baudRate: 9600,
+    dpi: 203,
+    widthMm: 58,
+    heightMm: 40
+};
 const DEFAULT_PRINTER_CONFIG = {
-    packPrinter: '',
-    boxPrinter: '',
+    packPrinter: { ...DEFAULT_DEVICE_CONFIG, id: 'pack_default', name: 'Pack Printer' },
+    boxPrinter: { ...DEFAULT_DEVICE_CONFIG, id: 'box_default', name: 'Box Printer' },
     autoPrintOnStable: false,
-    serverIp: ''
+    serverIp: '',
+    language: 'ru'
 };
 function getPrinterConfigPath() {
     return path_1.default.join(electron_1.app.getPath('userData'), PRINTER_CONFIG_FILE);

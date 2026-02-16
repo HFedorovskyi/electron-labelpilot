@@ -91,18 +91,64 @@ export function saveNumberingConfig(config: NumberingConfig): void {
 
 // --- Printer Configuration ---
 
-export interface PrinterConfig {
-    packPrinter: string;   // printer name for pack/unit labels
-    boxPrinter: string;    // printer name for box labels
-    autoPrintOnStable: boolean; // auto-print when weight stabilizes
-    serverIp: string;      // Manual server IP override
+export type ConnectionType = 'tcp' | 'serial' | 'windows_driver';
+export type PrinterProtocol = 'zpl' | 'tspl' | 'image';
+
+export interface PrinterDeviceConfig {
+    id: string;
+    active: boolean;
+    name: string;          // User-friendly display name
+    connection: ConnectionType;
+    protocol: PrinterProtocol;
+
+    // Connection Details
+    ip?: string;           // For TCP
+    port?: number;         // For TCP (default 9100)
+
+    serialPort?: string;   // For Serial (e.g., COM1)
+    baudRate?: number;     // For Serial (default 9600)
+
+    driverName?: string;   // For Windows Driver (exact system printer name)
+
+    // Physical Details
+    dpi?: 203 | 300 | 600; // Printer resolution (critical for ZPL)
+    widthMm?: number;      // Label width in mm
+    heightMm?: number;     // Label height in mm
+
+    darkness?: number;     // Print darkness (0-30)
+    printSpeed?: number;   // Print speed (2-12)
 }
 
+export interface PrinterConfig {
+    // Specialized Printer Roles
+    packPrinter: PrinterDeviceConfig;
+    boxPrinter: PrinterDeviceConfig;
+
+    // Global Settings
+    autoPrintOnStable: boolean;
+    serverIp: string;
+    language: string;
+}
+
+const DEFAULT_DEVICE_CONFIG: PrinterDeviceConfig = {
+    id: 'default',
+    active: false,
+    name: 'Not Configured',
+    connection: 'windows_driver',
+    protocol: 'image',
+    port: 9100,
+    baudRate: 9600,
+    dpi: 203,
+    widthMm: 58,
+    heightMm: 40
+};
+
 const DEFAULT_PRINTER_CONFIG: PrinterConfig = {
-    packPrinter: '',
-    boxPrinter: '',
+    packPrinter: { ...DEFAULT_DEVICE_CONFIG, id: 'pack_default', name: 'Pack Printer' },
+    boxPrinter: { ...DEFAULT_DEVICE_CONFIG, id: 'box_default', name: 'Box Printer' },
     autoPrintOnStable: false,
-    serverIp: ''
+    serverIp: '',
+    language: 'ru'
 };
 
 export function getPrinterConfigPath(): string {
