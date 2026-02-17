@@ -1,13 +1,18 @@
-name: Release Client
+name: Build & Release Client
 
 on:
   push:
     tags:
-      - 'client-v*'   # срабатывает только на теги клиента
+      - 'v*'    # срабатывает на git tag v1.2.0
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Версия клиента (например: 1.2.0)'
+        required: true
 
 jobs:
   build:
-    runs-on: windows-latest  # обязательно Windows для EXE
+    runs-on: windows-latest    # обязательно Windows для EXE
 
     steps:
       - name: Checkout
@@ -18,28 +23,54 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Get version
+        id: get_version
+        run: |
+          if ("${{ inputs.version }}" -ne "") {
+            echo "VERSION=${{ inputs.version }}" >> $env:GITHUB_OUTPUT
+          } else {
+            $tag = "${{ github.ref_name }}"
+            $version = $tag -replace '^v', ''
+            echo "VERSION=$version" >> $env:GITHUB_OUTPUT
+          }
+        shell: pwsh
+
       - name: Install dependencies
         run: npm install
 
-      - name: Build EXE
+      - name: Build Electron EXE
         run: npm run build
-        # electron-builder сам создаст EXE в папке dist/
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # electron-builder автоматически создаст EXE в папке dist/
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.exe
-          # Создаст Release с тегом и прикрепит EXE
+          tag_name: v${{ steps.get_version.outputs.VERSION }}
+          name: "LabelPilot Client v${{ steps.get_version.outputs.VERSION }}"
+          files: |
+            dist/*.exe
+            dist/latest.yml
+          draft: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Notify website
         run: |
-          curl -X POST https://твой-сайт.ru/api/webhook/new-release \
-            -H "Content-Type: application/json" \
-            -H "X-Secret: ${{ secrets.WEBHOOK_SECRET }}" \
-            -d '{
-              "type": "client",
-              "version": "${{ github.ref_name }}",
-              "tag": "${{ github.ref_name }}"
-            }'
+          $version = "${{ steps.get_version.outputs.VERSION }}"
+          $body = @{
+            type = "client"
+            version = $version
+            changelog = "Client release v$version"
+          } | ConvertTo-Json
+          
+          Invoke-RestMethod -Uri "${{ secrets.SITE_URL }}/api/webhook/new-release" `
+            -Method POST `
+            -Headers @{
+              "Content-Type" = "application/json"
+              "X-Webhook-Secret" = "${{ secrets.WEBHOOK_SECRET }}"
+            } `
+            -Body $body
+        shell: pwsh
+        continue-on-error: true  # не падаем если сайт недоступен
