@@ -50,8 +50,8 @@ jobs:
           tag_name: v${{ steps.get_version.outputs.VERSION }}
           name: "LabelPilot Client v${{ steps.get_version.outputs.VERSION }}"
           files: |
-            dist/*.exe
-            dist/latest.yml
+            dist-build/*.exe
+            dist-build/latest.yml
           draft: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
