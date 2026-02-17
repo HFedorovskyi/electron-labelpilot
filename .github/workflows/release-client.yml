@@ -1,0 +1,45 @@
+name: Release Client
+
+on:
+  push:
+    tags:
+      - 'client-v*'   # срабатывает только на теги клиента
+
+jobs:
+  build:
+    runs-on: windows-latest  # обязательно Windows для EXE
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build EXE
+        run: npm run build
+        # electron-builder сам создаст EXE в папке dist/
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.exe
+          # Создаст Release с тегом и прикрепит EXE
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Notify website
+        run: |
+          curl -X POST https://твой-сайт.ru/api/webhook/new-release \
+            -H "Content-Type: application/json" \
+            -H "X-Secret: ${{ secrets.WEBHOOK_SECRET }}" \
+            -d '{
+              "type": "client",
+              "version": "${{ github.ref_name }}",
+              "tag": "${{ github.ref_name }}"
+            }'
