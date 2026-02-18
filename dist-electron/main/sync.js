@@ -3,64 +3,69 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.testConnectionFull = testConnectionFull;
 exports.testConnection = testConnection;
 const axios_1 = __importDefault(require("axios"));
+const compatibility_1 = require("./updater/compatibility");
+const logger_1 = __importDefault(require("./logger"));
 /**
- * testConnection: Lightweight server check.
- * Uses the server's new /api/v1/stations/ping/ endpoint.
+ * testConnection: Lightweight server check with version info.
+ * Uses /api/v1/stations/ping/ and returns full ServerInfo.
+ * The server should respond with: { status, server_version, min_client_version }
  */
-async function testConnection(serverIp) {
-    if (!serverIp)
-        throw new Error('Server IP not provided');
-    // Default Port is 8000 (Django server)
+async function testConnectionFull(serverIp) {
+    if (!serverIp) {
+        return { online: false, compatible: true };
+    }
     const baseUrl = `http://${serverIp}:8000/api/v1`;
     try {
-        // Get Local UUID for the ping (identification)
         const { getClientUUID } = require('./database');
         const uuid = getClientUUID();
         if (!uuid) {
-            try {
-                console.log('Connection Test: Station is unconfigured (no UUID). Skipping ping.');
-            }
-            catch (e) { }
-            return false;
+            logger_1.default.info('Connection Test: Station is unconfigured (no UUID). Skipping ping.');
+            return { online: false, compatible: true };
         }
-        // Log locally for debugging
-        try {
-            console.log(`Connection Test: Pinging ${baseUrl}/stations/ping/?station_uuid=${uuid}`);
-        }
-        catch (e) { }
+        logger_1.default.info(`Connection Test: Pinging ${baseUrl}/stations/ping/?station_uuid=${uuid}`);
         const response = await axios_1.default.get(`${baseUrl}/stations/ping/`, {
             params: { station_uuid: uuid },
             timeout: 3000
         });
-        // Verify LabelPilot specific response
         if (response.data && response.data.status === 'online') {
-            try {
-                console.log('Connection Test: SUCCESS (LabelPilot Server identified)');
+            const serverVersion = response.data.server_version;
+            const minClientVersion = response.data.min_client_version;
+            // Level 2 compatibility check
+            const compatResult = (0, compatibility_1.checkOnlineCompatibility)(minClientVersion);
+            if (!compatResult.compatible) {
+                logger_1.default.warn(`Connection Test: Client is outdated. ${compatResult.reason}`);
             }
-            catch (e) { }
-            return true;
+            else {
+                logger_1.default.info(`Connection Test: SUCCESS. Server v${serverVersion ?? 'unknown'}`);
+            }
+            return {
+                online: true,
+                serverVersion,
+                minClientVersion,
+                compatible: compatResult.compatible,
+                compatibilityReason: compatResult.reason,
+            };
         }
-        try {
-            console.warn('Connection Test: Unexpected response format:', response.data);
-        }
-        catch (e) { }
-        return false;
+        logger_1.default.warn('Connection Test: Unexpected response format:', response.data);
+        return { online: false, compatible: true };
     }
     catch (err) {
         if (err.response) {
-            try {
-                console.error(`Connection Test Server Error: ${err.response.status}`);
-            }
-            catch (e) { }
+            logger_1.default.error(`Connection Test Server Error: ${err.response.status}`);
         }
         else {
-            try {
-                console.error('Connection Test Error:', err.message);
-            }
-            catch (e) { }
+            logger_1.default.error('Connection Test Error:', err.message);
         }
-        return false;
+        return { online: false, compatible: true };
     }
+}
+/**
+ * Legacy boolean wrapper — keeps existing callers working unchanged.
+ */
+async function testConnection(serverIp) {
+    const info = await testConnectionFull(serverIp);
+    return info.online;
 }

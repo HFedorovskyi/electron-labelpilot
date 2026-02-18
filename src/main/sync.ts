@@ -1,4 +1,15 @@
 import axios from 'axios';
+import { checkOnlineCompatibility } from './updater/compatibility';
+import log from './logger';
+
+export interface ServerInfo {
+    online: boolean;
+    serverVersion?: string;
+    minClientVersion?: string;
+    /** True if the current client version satisfies the server's requirement */
+    compatible: boolean;
+    compatibilityReason?: string;
+}
 
 export interface SyncData {
     barcodes?: any[];
@@ -13,47 +24,71 @@ export interface SyncData {
 }
 
 /**
- * testConnection: Lightweight server check.
- * Uses the server's new /api/v1/stations/ping/ endpoint.
+ * testConnection: Lightweight server check with version info.
+ * Uses /api/v1/stations/ping/ and returns full ServerInfo.
+ * The server should respond with: { status, server_version, min_client_version }
  */
-export async function testConnection(serverIp: string): Promise<boolean> {
-    if (!serverIp) throw new Error('Server IP not provided');
+export async function testConnectionFull(serverIp: string): Promise<ServerInfo> {
+    if (!serverIp) {
+        return { online: false, compatible: true };
+    }
 
-    // Default Port is 8000 (Django server)
     const baseUrl = `http://${serverIp}:8000/api/v1`;
 
     try {
-        // Get Local UUID for the ping (identification)
         const { getClientUUID } = require('./database');
         const uuid = getClientUUID();
 
         if (!uuid) {
-            try { console.log('Connection Test: Station is unconfigured (no UUID). Skipping ping.'); } catch (e) { }
-            return false;
+            log.info('Connection Test: Station is unconfigured (no UUID). Skipping ping.');
+            return { online: false, compatible: true };
         }
 
-        // Log locally for debugging
-        try { console.log(`Connection Test: Pinging ${baseUrl}/stations/ping/?station_uuid=${uuid}`); } catch (e) { }
+        log.info(`Connection Test: Pinging ${baseUrl}/stations/ping/?station_uuid=${uuid}`);
 
         const response = await axios.get(`${baseUrl}/stations/ping/`, {
             params: { station_uuid: uuid },
             timeout: 3000
         });
 
-        // Verify LabelPilot specific response
         if (response.data && response.data.status === 'online') {
-            try { console.log('Connection Test: SUCCESS (LabelPilot Server identified)'); } catch (e) { }
-            return true;
+            const serverVersion: string | undefined = response.data.server_version;
+            const minClientVersion: string | undefined = response.data.min_client_version;
+
+            // Level 2 compatibility check
+            const compatResult = checkOnlineCompatibility(minClientVersion);
+
+            if (!compatResult.compatible) {
+                log.warn(`Connection Test: Client is outdated. ${compatResult.reason}`);
+            } else {
+                log.info(`Connection Test: SUCCESS. Server v${serverVersion ?? 'unknown'}`);
+            }
+
+            return {
+                online: true,
+                serverVersion,
+                minClientVersion,
+                compatible: compatResult.compatible,
+                compatibilityReason: compatResult.reason,
+            };
         }
 
-        try { console.warn('Connection Test: Unexpected response format:', response.data); } catch (e) { }
-        return false;
+        log.warn('Connection Test: Unexpected response format:', response.data);
+        return { online: false, compatible: true };
     } catch (err: any) {
         if (err.response) {
-            try { console.error(`Connection Test Server Error: ${err.response.status}`); } catch (e) { }
+            log.error(`Connection Test Server Error: ${err.response.status}`);
         } else {
-            try { console.error('Connection Test Error:', err.message); } catch (e) { }
+            log.error('Connection Test Error:', err.message);
         }
-        return false;
+        return { online: false, compatible: true };
     }
+}
+
+/**
+ * Legacy boolean wrapper — keeps existing callers working unchanged.
+ */
+export async function testConnection(serverIp: string): Promise<boolean> {
+    const info = await testConnectionFull(serverIp);
+    return info.online;
 }

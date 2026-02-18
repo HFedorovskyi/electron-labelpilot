@@ -4,6 +4,7 @@ import { importFullDump, updateStationIdentity } from './database';
 import { loadPrinterConfig, savePrinterConfig } from './config';
 import { t } from './i18n';
 import log from './logger';
+import { checkSyncFileCompatibility } from './updater/compatibility';
 
 function extractIpFromUrl(url: string): string {
     try {
@@ -28,6 +29,14 @@ export async function processSyncData(data: any): Promise<{ success: boolean; me
     // 1. Basic Validation
     if (!data.station || !data.payload || !data.meta) {
         throw new Error('Invalid unified data format: Missing core sections (station, payload, or meta).');
+    }
+
+    // 1b. Compatibility check (Level 1 — offline .lps file)
+    // This is the primary guard: if the server requires a newer client, block
+    // the import BEFORE touching the database.
+    const compatResult = checkSyncFileCompatibility(data.meta.min_client_version);
+    if (!compatResult.compatible) {
+        throw new Error(compatResult.reason);
     }
 
     const currentIdentity = loadIdentity();

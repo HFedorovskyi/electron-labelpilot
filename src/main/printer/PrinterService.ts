@@ -2,7 +2,7 @@ import { loadPrinterConfig, type PrinterDeviceConfig } from '../config';
 import type { IConnectionStrategy, PrinterState } from './types';
 import { BrowserWindow } from 'electron';
 import { TcpStrategy, SerialStrategy, SpoolerStrategy } from './strategies';
-import { ZplGenerator, type LabelDoc } from './generator';
+import { ZplGenerator, CanvasBitmapGenerator, type LabelDoc, type ILabelGenerator } from './generator';
 
 class PrinterService {
     private strategies: Map<string, IConnectionStrategy> = new Map();
@@ -143,9 +143,19 @@ class PrinterService {
     }
 
     public async printLabel(config: PrinterDeviceConfig, doc: LabelDoc, data: any): Promise<void> {
-        // 1. Generate ZPL
-        const generator = new ZplGenerator();
-        const zplBuffer = await generator.generate(doc, data, {
+        // 1. Select generator by protocol
+        let generator: ILabelGenerator;
+        switch (config.protocol) {
+            case 'image':
+                generator = new CanvasBitmapGenerator();
+                break;
+            case 'zpl':
+            default:
+                generator = new ZplGenerator();
+                break;
+        }
+
+        const buffer = await generator.generate(doc, data, {
             dpi: config.dpi || 203,
             darkness: config.darkness,
             printSpeed: config.printSpeed,
@@ -165,7 +175,7 @@ class PrinterService {
 
         try {
             await strategy.connect(config);
-            await strategy.send(zplBuffer);
+            await strategy.send(buffer);
         } finally {
             try {
                 await strategy.disconnect();

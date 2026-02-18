@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Save, RefreshCw, Settings as SettingsIcon, Printer, Languages } from 'lucide-react';
 import PrinterSettings from './PrinterSettings';
+import UpdateSettings from './UpdateSettings';
 import { useTranslation, type Lang } from '../i18n';
 
 interface SerialPortInfo {
@@ -455,6 +456,9 @@ const Settings = () => {
                         </button>
                     </div>
                 </div>
+
+                {/* ── Updates ── */}
+                <UpdateSettings />
 
                 {/* ── Danger Zone ── */}
                 <div className="p-6 bg-red-500/5 border border-red-500/10 rounded-2xl">

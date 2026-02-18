@@ -1,7 +1,7 @@
 {
   "name": "electron-labelpilot",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.1",
   "main": "dist-electron/main/index.js",
   "scripts": {
     "dev": "vite",
@@ -19,6 +19,13 @@
     "directories": {
       "output": "dist-build"
     },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "HFedorovskyi",
+        "repo": "electron-labelpilot"
+      }
+    ],
     "files": [
       "dist-electron/**/*",
       "dist/**/*",
@@ -46,6 +53,7 @@
     ]
   },
   "dependencies": {
+    "@napi-rs/canvas": "^0.1.93",
     "@types/bwip-js": "^3.2.3",
     "axios": "^1.13.4",
     "better-sqlite3": "^12.6.2",
@@ -54,6 +62,7 @@
     "clsx": "^2.1.1",
     "electron-log": "^5.4.3",
     "electron-squirrel-startup": "^1.0.1",
+    "electron-updater": "^6.8.3",
     "jsbarcode": "^3.12.3",
     "lucide-react": "^0.563.0",
     "react": "^19.2.0",

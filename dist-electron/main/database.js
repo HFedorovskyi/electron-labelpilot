@@ -23,6 +23,7 @@ exports.getExportData = getExportData;
 const better_sqlite3_1 = __importDefault(require("better-sqlite3"));
 const path_1 = __importDefault(require("path"));
 const electron_1 = require("electron");
+const migrations_1 = require("./migrations");
 let db = null;
 function initDatabase() {
     if (db)
@@ -120,6 +121,7 @@ function initDatabase() {
     `);
     });
     init();
+    (0, migrations_1.runMigrations)(db);
     runSelfRepairMigration(db);
     return db;
 }
