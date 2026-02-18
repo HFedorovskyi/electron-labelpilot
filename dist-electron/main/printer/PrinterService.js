@@ -132,9 +132,18 @@ class PrinterService {
         }
     }
     async printLabel(config, doc, data) {
-        // 1. Generate ZPL
-        const generator = new generator_1.ZplGenerator();
-        const zplBuffer = await generator.generate(doc, data, {
+        // 1. Select generator by protocol
+        let generator;
+        switch (config.protocol) {
+            case 'image':
+                generator = new generator_1.CanvasBitmapGenerator();
+                break;
+            case 'zpl':
+            default:
+                generator = new generator_1.ZplGenerator();
+                break;
+        }
+        const buffer = await generator.generate(doc, data, {
             dpi: config.dpi || 203,
             darkness: config.darkness,
             printSpeed: config.printSpeed,
@@ -158,7 +167,7 @@ class PrinterService {
             throw new Error('Invalid connection type');
         try {
             await strategy.connect(config);
-            await strategy.send(zplBuffer);
+            await strategy.send(buffer);
         }
         finally {
             try {

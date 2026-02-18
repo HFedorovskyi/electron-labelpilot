@@ -45,6 +45,7 @@ const usb_sync_1 = require("./usb_sync");
 const discovery_1 = require("./discovery");
 const server_status_1 = require("./server_status");
 const logger_1 = __importDefault(require("./logger")); // Ensure logger is imported
+const UpdateService_1 = require("./updater/UpdateService");
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (require('electron-squirrel-startup')) {
     electron_1.app.quit();
@@ -121,6 +122,10 @@ electron_1.app.whenReady().then(() => {
     createWorkerWindow();
     // Initialize Managers
     scales_1.scaleManager.init();
+    // Initialize auto-updater
+    (0, UpdateService_1.initUpdater)(mainWindow);
+    // Refresh server version cache for pre-update compat checks
+    (0, UpdateService_1.refreshServerVersion)().catch(() => { });
     // Default to station mode, or load from config if we had it. 
     // For now, default start is silent until UI sets mode.
     discovery_1.discoveryManager.setMode('station');
@@ -174,8 +179,13 @@ electron_1.app.whenReady().then(() => {
         const result = await (printQueue = printQueue.then(async () => {
             const startTime = Date.now();
             const { silent, labelDoc, data, printerConfig, printerName } = options;
-            // New Routing Logic: ZPL/TSPL vs Image (Driver)
-            if (printerConfig && typeof printerConfig === 'object' && printerConfig.protocol !== 'image') {
+            // ── DIAGNOSTIC: Log what we received to understand routing ──
+            logger_1.default.info(`[print-label] Routing: protocol=${printerConfig?.protocol}, connection=${printerConfig?.connection}, name=${printerConfig?.name}`);
+            // New Routing Logic: Use PrinterService for all protocols (zpl, image, tspl)
+            // when we have a structured printerConfig with a direct connection (TCP/Serial).
+            // Fall through to legacy webContents.print() only for windows_driver without protocol support.
+            if (printerConfig && typeof printerConfig === 'object' &&
+                (printerConfig.protocol !== 'image' || printerConfig.connection === 'tcp' || printerConfig.connection === 'serial')) {
                 try {
                     const { printerService } = await Promise.resolve().then(() => __importStar(require('./printer/PrinterService')));
                     await printerService.printLabel(printerConfig, labelDoc, data);
@@ -280,9 +290,10 @@ electron_1.ipcMain.handle('get-barcode-template', async (_, id) => {
 });
 // Data Sync Handlers
 electron_1.ipcMain.handle('sync-data', async (_, serverIp) => {
-    const { testConnection } = await Promise.resolve().then(() => __importStar(require('./sync')));
+    const { testConnectionFull } = await Promise.resolve().then(() => __importStar(require('./sync')));
     logger_1.default.info(`Attempting to sync data with server: ${serverIp}`);
-    return await testConnection(serverIp);
+    const info = await testConnectionFull(serverIp);
+    return info.online;
 });
 electron_1.ipcMain.handle('get-server-status', () => {
     return server_status_1.serverStatusManager.getStatus();
@@ -460,6 +471,40 @@ electron_1.ipcMain.on('open-logs-folder', () => {
 });
 electron_1.ipcMain.on('quit-app', () => {
     electron_1.app.quit();
+});
+// --- Updater IPC Handlers ---
+electron_1.ipcMain.handle('updater:get-version', () => electron_1.app.getVersion());
+electron_1.ipcMain.handle('updater:check', async () => {
+    return await (0, UpdateService_1.checkForUpdates)();
+});
+electron_1.ipcMain.handle('updater:download', async () => {
+    await (0, UpdateService_1.downloadUpdate)();
+    return { success: true };
+});
+electron_1.ipcMain.handle('updater:install', async () => {
+    await (0, UpdateService_1.installUpdate)();
+    return { success: true };
+});
+electron_1.ipcMain.handle('updater:install-offline', async () => {
+    const result = await electron_1.dialog.showOpenDialog({
+        title: 'Выберите установщик LabelPilot (.exe)',
+        filters: [{ name: 'LabelPilot Installer', extensions: ['exe'] }],
+        properties: ['openFile'],
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+        return { success: false, message: 'Отменено' };
+    }
+    return await (0, UpdateService_1.installOfflineUpdate)(result.filePaths[0]);
+});
+electron_1.ipcMain.handle('updater:list-backups', async () => {
+    return await (0, UpdateService_1.getBackups)();
+});
+electron_1.ipcMain.handle('updater:rollback', async (_, backupId) => {
+    return await (0, UpdateService_1.rollbackToBackup)(backupId);
+});
+electron_1.ipcMain.handle('updater:refresh-server-version', async () => {
+    await (0, UpdateService_1.refreshServerVersion)();
+    return { success: true };
 });
 // Import and start Sync Server
 const server_1 = require("./server");

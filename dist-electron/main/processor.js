@@ -9,6 +9,7 @@ const database_1 = require("./database");
 const config_1 = require("./config");
 const i18n_1 = require("./i18n");
 const logger_1 = __importDefault(require("./logger"));
+const compatibility_1 = require("./updater/compatibility");
 function extractIpFromUrl(url) {
     try {
         const parsed = new URL(url);
@@ -27,6 +28,13 @@ async function processSyncData(data) {
     // 1. Basic Validation
     if (!data.station || !data.payload || !data.meta) {
         throw new Error('Invalid unified data format: Missing core sections (station, payload, or meta).');
+    }
+    // 1b. Compatibility check (Level 1 — offline .lps file)
+    // This is the primary guard: if the server requires a newer client, block
+    // the import BEFORE touching the database.
+    const compatResult = (0, compatibility_1.checkSyncFileCompatibility)(data.meta.min_client_version);
+    if (!compatResult.compatible) {
+        throw new Error(compatResult.reason);
     }
     const currentIdentity = (0, identity_1.loadIdentity)();
     // 2. Identity Lock & Validation

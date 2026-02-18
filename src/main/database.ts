@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import { app } from 'electron';
+import { runMigrations } from './migrations';
 
 let db: Database.Database | null = null;
 
@@ -105,6 +106,7 @@ export function initDatabase() {
 
 
   init();
+  runMigrations(db!);
   runSelfRepairMigration(db!);
   return db;
 }

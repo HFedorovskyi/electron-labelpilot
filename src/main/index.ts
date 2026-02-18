@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, dialog } from 'electron';
 import path from 'path';
 import { initDatabase } from './database';
 import { scaleManager } from './scales';
@@ -8,6 +8,16 @@ import { exportDataToUSB, importDataFromUSB } from './usb_sync';
 import { discoveryManager } from './discovery';
 import { serverStatusManager } from './server_status';
 import log from './logger'; // Ensure logger is imported
+import {
+    initUpdater,
+    checkForUpdates,
+    downloadUpdate,
+    installUpdate,
+    installOfflineUpdate,
+    rollbackToBackup,
+    getBackups,
+    refreshServerVersion,
+} from './updater/UpdateService';
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (require('electron-squirrel-startup')) {
@@ -101,6 +111,11 @@ app.whenReady().then(() => {
     // Initialize Managers
     scaleManager.init();
 
+    // Initialize auto-updater
+    initUpdater(mainWindow);
+    // Refresh server version cache for pre-update compat checks
+    refreshServerVersion().catch(() => { });
+
     // Default to station mode, or load from config if we had it. 
     // For now, default start is silent until UI sets mode.
     discoveryManager.setMode('station');
@@ -169,8 +184,14 @@ app.whenReady().then(() => {
             const startTime = Date.now();
             const { silent, labelDoc, data, printerConfig, printerName } = options;
 
-            // New Routing Logic: ZPL/TSPL vs Image (Driver)
-            if (printerConfig && typeof printerConfig === 'object' && printerConfig.protocol !== 'image') {
+            // ── DIAGNOSTIC: Log what we received to understand routing ──
+            log.info(`[print-label] Routing: protocol=${printerConfig?.protocol}, connection=${printerConfig?.connection}, name=${printerConfig?.name}`);
+
+            // New Routing Logic: Use PrinterService for all protocols (zpl, image, tspl)
+            // when we have a structured printerConfig with a direct connection (TCP/Serial).
+            // Fall through to legacy webContents.print() only for windows_driver without protocol support.
+            if (printerConfig && typeof printerConfig === 'object' &&
+                (printerConfig.protocol !== 'image' || printerConfig.connection === 'tcp' || printerConfig.connection === 'serial')) {
                 try {
                     const { printerService } = await import('./printer/PrinterService');
                     await printerService.printLabel(printerConfig, labelDoc, data);
@@ -289,9 +310,10 @@ ipcMain.handle('get-barcode-template', async (_, id) => {
 
 // Data Sync Handlers
 ipcMain.handle('sync-data', async (_, serverIp) => {
-    const { testConnection } = await import('./sync');
+    const { testConnectionFull } = await import('./sync');
     log.info(`Attempting to sync data with server: ${serverIp}`);
-    return await testConnection(serverIp);
+    const info = await testConnectionFull(serverIp);
+    return info.online;
 });
 
 ipcMain.handle('get-server-status', () => {
@@ -495,6 +517,49 @@ ipcMain.on('open-logs-folder', () => {
 
 ipcMain.on('quit-app', () => {
     app.quit();
+});
+
+// --- Updater IPC Handlers ---
+
+ipcMain.handle('updater:get-version', () => app.getVersion());
+
+ipcMain.handle('updater:check', async () => {
+    return await checkForUpdates();
+});
+
+ipcMain.handle('updater:download', async () => {
+    await downloadUpdate();
+    return { success: true };
+});
+
+ipcMain.handle('updater:install', async () => {
+    await installUpdate();
+    return { success: true };
+});
+
+ipcMain.handle('updater:install-offline', async () => {
+    const result = await dialog.showOpenDialog({
+        title: 'Выберите установщик LabelPilot (.exe)',
+        filters: [{ name: 'LabelPilot Installer', extensions: ['exe'] }],
+        properties: ['openFile'],
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+        return { success: false, message: 'Отменено' };
+    }
+    return await installOfflineUpdate(result.filePaths[0]);
+});
+
+ipcMain.handle('updater:list-backups', async () => {
+    return await getBackups();
+});
+
+ipcMain.handle('updater:rollback', async (_, backupId: string) => {
+    return await rollbackToBackup(backupId);
+});
+
+ipcMain.handle('updater:refresh-server-version', async () => {
+    await refreshServerVersion();
+    return { success: true };
 });
 
 // Import and start Sync Server
