@@ -1,7 +1,7 @@
 {
   "name": "electron-labelpilot",
   "private": true,
-  "version": "1.0.9",
+  "version": "1.1.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/HFedorovskyi/electron-labelpilot.git"
@@ -44,7 +44,8 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true
+      "createDesktopShortcut": true,
+      "artifactName": "${productName}-Setup-${version}.${ext}"
     },
     "extraResources": [
       {
