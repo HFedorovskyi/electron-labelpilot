@@ -50,10 +50,15 @@ function configureAutoUpdater(mainWindow: BrowserWindow | null) {
     // Enable development mode update testing if dev-app-update.yml exists
     const devConfigPath = path.join(app.getAppPath(), 'dev-app-update.yml');
     if (fs.existsSync(devConfigPath)) {
-        log.info(`[Updater] Found dev update config at: ${devConfigPath}`);
-        autoUpdater.updateConfigPath = devConfigPath;
-        // @ts-ignore — forceDevUpdateConfig is internal but useful for testing
-        autoUpdater.forceDevUpdateConfig = true;
+        log.info(`[Updater] Potential dev config found at: ${devConfigPath}`);
+        if (!app.isPackaged || autoUpdater.forceDevUpdateConfig) {
+            log.info(`[Updater] APPLYING dev update config from: ${devConfigPath}`);
+            autoUpdater.updateConfigPath = devConfigPath;
+            // @ts-ignore
+            autoUpdater.forceDevUpdateConfig = true;
+        } else {
+            log.info(`[Updater] Ignoring dev config because app is packaged and forceDevUpdateConfig is false.`);
+        }
     }
 
     autoUpdater.on('update-available', (info: UpdateInfo) => {
@@ -84,7 +89,9 @@ function configureAutoUpdater(mainWindow: BrowserWindow | null) {
     });
 
     autoUpdater.on('error', (err: Error) => {
-        log.error('[Updater] Error:', err);
+        log.error('[Updater] Error during update check/download:', err);
+        // Log more details if available
+        if (err.stack) log.error(`[Updater] Stack trace: ${err.stack}`);
         mainWindow?.webContents.send('updater:error', { message: err.message });
     });
 }

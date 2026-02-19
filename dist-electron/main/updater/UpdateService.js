@@ -47,14 +47,14 @@ function configureAutoUpdater(mainWindow) {
         electron_updater_1.autoUpdater.forceDevUpdateConfig = true;
     }
     electron_updater_1.autoUpdater.on('update-available', (info) => {
-        logger_1.default.info(`[Updater] Update available: v${info.version}`);
+        logger_1.default.info(`[Updater] Update available: v${info.version}. Release date: ${info.releaseDate}`);
         mainWindow?.webContents.send('updater:update-available', {
             version: info.version,
             releaseNotes: info.releaseNotes,
         });
     });
-    electron_updater_1.autoUpdater.on('update-not-available', () => {
-        logger_1.default.info('[Updater] No update available.');
+    electron_updater_1.autoUpdater.on('update-not-available', (info) => {
+        logger_1.default.info(`[Updater] No update available. Current version: ${electron_1.app.getVersion()}. Latest on server: ${info.version}`);
         mainWindow?.webContents.send('updater:no-update');
     });
     electron_updater_1.autoUpdater.on('download-progress', (progress) => {
@@ -89,8 +89,10 @@ function initUpdater(mainWindow) {
  */
 async function checkForUpdates() {
     try {
+        logger_1.default.info(`[Updater] Checking for updates... (Current version: ${electron_1.app.getVersion()})`);
         const result = await electron_updater_1.autoUpdater.checkForUpdates();
         if (!result || !result.updateInfo) {
+            logger_1.default.info('[Updater] Check finished: no update info returned.');
             return { available: false };
         }
         const newVersion = result.updateInfo.version;

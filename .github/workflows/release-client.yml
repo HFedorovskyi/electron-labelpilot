@@ -46,27 +46,12 @@ jobs:
       - name: Build Electron main process
         run: npm run electron:build
 
+      - name: List build artifacts
+        run: ls -R dist-build/
+        shell: pwsh
+
       - name: Build & Publish Electron Distributables
         run: npx electron-builder --win --publish always
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        # npm run electron:dist runs electron-builder, which handles building and uploading to GitHub Releases
-
-      - name: Notify website
-        run: |
-          $version = "${{ steps.get_version.outputs.VERSION }}"
-          $body = @{
-            type = "client"
-            version = $version
-            changelog = "Client release v$version"
-          } | ConvertTo-Json
-          
-          Invoke-RestMethod -Uri "${{ secrets.SITE_URL }}/api/webhook/new-release" `
-            -Method POST `
-            -Headers @{
-              "Content-Type" = "application/json"
-              "X-Webhook-Secret" = "${{ secrets.WEBHOOK_SECRET }}"
-            } `
-            -Body $body
-        shell: pwsh
-        continue-on-error: true  # не падаем если сайт недоступен
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # electron-builder will detect v* tag and publish to that release
