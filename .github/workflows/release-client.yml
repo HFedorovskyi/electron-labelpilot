@@ -46,8 +46,10 @@ jobs:
       - name: Build Electron main process
         run: npm run electron:build
 
-      - name: List build artifacts
-        run: ls -R dist-build/
+      - name: List intermediate artifacts
+        run: |
+          ls -R dist/
+          ls -R dist-electron/
         shell: pwsh
 
       - name: Build & Publish Electron Distributables
