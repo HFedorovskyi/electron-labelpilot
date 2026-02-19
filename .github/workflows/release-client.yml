@@ -13,6 +13,8 @@ on:
 jobs:
   build:
     runs-on: windows-latest    # обязательно Windows для EXE
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout
@@ -38,23 +40,17 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Build Electron EXE
+      - name: Build renderer (Vite)
         run: npm run build
+
+      - name: Build Electron main process
+        run: npm run electron:build
+
+      - name: Build & Publish Electron Distributables
+        run: npx electron-builder --win --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        # electron-builder автоматически создаст EXE в папке dist/
-
-      - name: Upload to GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ steps.get_version.outputs.VERSION }}
-          name: "LabelPilot Client v${{ steps.get_version.outputs.VERSION }}"
-          files: |
-            dist-build/*.exe
-            dist-build/latest.yml
-          draft: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # npm run electron:dist runs electron-builder, which handles building and uploading to GitHub Releases
 
       - name: Notify website
         run: |

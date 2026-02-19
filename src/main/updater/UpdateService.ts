@@ -57,15 +57,15 @@ function configureAutoUpdater(mainWindow: BrowserWindow | null) {
     }
 
     autoUpdater.on('update-available', (info: UpdateInfo) => {
-        log.info(`[Updater] Update available: v${info.version}`);
+        log.info(`[Updater] Update available: v${info.version}. Release date: ${info.releaseDate}`);
         mainWindow?.webContents.send('updater:update-available', {
             version: info.version,
             releaseNotes: info.releaseNotes,
         });
     });
 
-    autoUpdater.on('update-not-available', () => {
-        log.info('[Updater] No update available.');
+    autoUpdater.on('update-not-available', (info: UpdateInfo) => {
+        log.info(`[Updater] No update available. Current version: ${app.getVersion()}. Latest on server: ${info.version}`);
         mainWindow?.webContents.send('updater:no-update');
     });
 
@@ -106,8 +106,10 @@ export function initUpdater(mainWindow: BrowserWindow | null) {
  */
 export async function checkForUpdates(): Promise<UpdateCheckResult> {
     try {
+        log.info(`[Updater] Checking for updates... (Current version: ${app.getVersion()})`);
         const result = await autoUpdater.checkForUpdates();
         if (!result || !result.updateInfo) {
+            log.info('[Updater] Check finished: no update info returned.');
             return { available: false };
         }
 
