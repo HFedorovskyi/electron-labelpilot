@@ -47,6 +47,15 @@ function configureAutoUpdater(mainWindow: BrowserWindow | null) {
     autoUpdater.autoDownload = false;
     autoUpdater.autoInstallOnAppQuit = false;
 
+    // Enable development mode update testing if dev-app-update.yml exists
+    const devConfigPath = path.join(app.getAppPath(), 'dev-app-update.yml');
+    if (fs.existsSync(devConfigPath)) {
+        log.info(`[Updater] Found dev update config at: ${devConfigPath}`);
+        autoUpdater.updateConfigPath = devConfigPath;
+        // @ts-ignore — forceDevUpdateConfig is internal but useful for testing
+        autoUpdater.forceDevUpdateConfig = true;
+    }
+
     autoUpdater.on('update-available', (info: UpdateInfo) => {
         log.info(`[Updater] Update available: v${info.version}`);
         mainWindow?.webContents.send('updater:update-available', {

@@ -1,6 +1,10 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.printerService = void 0;
+const logger_1 = __importDefault(require("../logger"));
 const config_1 = require("../config");
 const strategies_1 = require("./strategies");
 const generator_1 = require("./generator");
@@ -132,6 +136,8 @@ class PrinterService {
         }
     }
     async printLabel(config, doc, data) {
+        logger_1.default.info(`PrinterService: Printing label. Protocol: ${config.protocol}. Data keys: ${Object.keys(data).join(', ')}`);
+        logger_1.default.info(`PrinterService: Sample Data: name="${data.name}", weight="${data.weight_netto_pack}", prod_date="${data.production_date}"`);
         // 1. Select generator by protocol
         let generator;
         switch (config.protocol) {

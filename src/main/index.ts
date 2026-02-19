@@ -116,6 +116,7 @@ app.whenReady().then(() => {
     // Refresh server version cache for pre-update compat checks
     refreshServerVersion().catch(() => { });
 
+    // --- TEMPORARY VERIFICATION TRIGGER REMOVED ---
     // Default to station mode, or load from config if we had it. 
     // For now, default start is silent until UI sets mode.
     discoveryManager.setMode('station');
@@ -251,13 +252,17 @@ app.whenReady().then(() => {
                 ipcMain.on('ready-to-print', readyHandler);
 
                 // Wait for load if needed, otherwise send immediately
+                const payload = { labelDoc, data };
+                log.info(`[print-label] Sending payload to worker. Data keys: ${Object.keys(data).join(', ')}`);
+                // log.info(`[print-label] Data sample: ${JSON.stringify(data).substring(0, 200)}...`);
+
                 if (currentWorker.webContents.isLoading()) {
                     log.info('Worker is loading, waiting for finish...');
                     currentWorker.webContents.once('did-finish-load', () => {
-                        currentWorker.webContents.send('print-data', { labelDoc, data });
+                        currentWorker.webContents.send('print-data', payload);
                     });
                 } else {
-                    currentWorker.webContents.send('print-data', { labelDoc, data });
+                    currentWorker.webContents.send('print-data', payload);
                 }
 
                 // Timeout safety
@@ -419,6 +424,12 @@ ipcMain.handle('get-tables', async () => {
     return getTables();
 });
 
+ipcMain.handle('get-all-labels', async () => {
+    const { initDatabase } = await import('./database');
+    const db = initDatabase();
+    return db.prepare('SELECT * FROM labels').all();
+});
+
 ipcMain.handle('get-table-data', async (_, tableName) => {
     const { getTableData } = await import('./database');
     return getTableData(tableName);
@@ -440,7 +451,7 @@ ipcMain.handle('get-latest-counters', async () => {
 });
 
 ipcMain.on('log-to-main', (_event, ...args) => {
-    console.log('[Renderer Log]:', ...args);
+    log.info('[Renderer Log]:', ...args);
 });
 
 

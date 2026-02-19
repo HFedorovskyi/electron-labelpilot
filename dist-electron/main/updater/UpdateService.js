@@ -38,6 +38,14 @@ function configureAutoUpdater(mainWindow) {
     electron_updater_1.autoUpdater.logger = logger_1.default;
     electron_updater_1.autoUpdater.autoDownload = false;
     electron_updater_1.autoUpdater.autoInstallOnAppQuit = false;
+    // Enable development mode update testing if dev-app-update.yml exists
+    const devConfigPath = path_1.default.join(electron_1.app.getAppPath(), 'dev-app-update.yml');
+    if (fs_1.default.existsSync(devConfigPath)) {
+        logger_1.default.info(`[Updater] Found dev update config at: ${devConfigPath}`);
+        electron_updater_1.autoUpdater.updateConfigPath = devConfigPath;
+        // @ts-ignore — forceDevUpdateConfig is internal but useful for testing
+        electron_updater_1.autoUpdater.forceDevUpdateConfig = true;
+    }
     electron_updater_1.autoUpdater.on('update-available', (info) => {
         logger_1.default.info(`[Updater] Update available: v${info.version}`);
         mainWindow?.webContents.send('updater:update-available', {

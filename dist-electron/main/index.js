@@ -126,6 +126,7 @@ electron_1.app.whenReady().then(() => {
     (0, UpdateService_1.initUpdater)(mainWindow);
     // Refresh server version cache for pre-update compat checks
     (0, UpdateService_1.refreshServerVersion)().catch(() => { });
+    // --- TEMPORARY VERIFICATION TRIGGER REMOVED ---
     // Default to station mode, or load from config if we had it. 
     // For now, default start is silent until UI sets mode.
     discovery_1.discoveryManager.setMode('station');
@@ -237,14 +238,17 @@ electron_1.app.whenReady().then(() => {
                 };
                 electron_1.ipcMain.on('ready-to-print', readyHandler);
                 // Wait for load if needed, otherwise send immediately
+                const payload = { labelDoc, data };
+                logger_1.default.info(`[print-label] Sending payload to worker. Data keys: ${Object.keys(data).join(', ')}`);
+                // log.info(`[print-label] Data sample: ${JSON.stringify(data).substring(0, 200)}...`);
                 if (currentWorker.webContents.isLoading()) {
                     logger_1.default.info('Worker is loading, waiting for finish...');
                     currentWorker.webContents.once('did-finish-load', () => {
-                        currentWorker.webContents.send('print-data', { labelDoc, data });
+                        currentWorker.webContents.send('print-data', payload);
                     });
                 }
                 else {
-                    currentWorker.webContents.send('print-data', { labelDoc, data });
+                    currentWorker.webContents.send('print-data', payload);
                 }
                 // Timeout safety
                 setTimeout(() => {
@@ -388,6 +392,11 @@ electron_1.ipcMain.handle('get-tables', async () => {
     const { getTables } = await Promise.resolve().then(() => __importStar(require('./database')));
     return getTables();
 });
+electron_1.ipcMain.handle('get-all-labels', async () => {
+    const { initDatabase } = await Promise.resolve().then(() => __importStar(require('./database')));
+    const db = initDatabase();
+    return db.prepare('SELECT * FROM labels').all();
+});
 electron_1.ipcMain.handle('get-table-data', async (_, tableName) => {
     const { getTableData } = await Promise.resolve().then(() => __importStar(require('./database')));
     return getTableData(tableName);
@@ -405,7 +414,7 @@ electron_1.ipcMain.handle('get-latest-counters', async () => {
     return getLatestCounters();
 });
 electron_1.ipcMain.on('log-to-main', (_event, ...args) => {
-    console.log('[Renderer Log]:', ...args);
+    logger_1.default.info('[Renderer Log]:', ...args);
 });
 electron_1.ipcMain.on('renderer-ready', () => {
     server_status_1.serverStatusManager.notifyReady();

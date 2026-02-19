@@ -116,11 +116,11 @@ function runSelfRepairMigration(db: Database.Database) {
   try {
     const products = db.prepare('SELECT id, extra_data FROM nomenclature').all() as any[];
     const updateStmt = db.prepare('UPDATE nomenclature SET extra_data = ? WHERE id = ?');
-    const mapping: Record<string, string> = {
-      'protein': 'белки',
-      'fat': 'жиры',
-      'carbohydrates': 'углеводы',
-      'energy': 'ккал'
+    const mapping: Record<string, string[]> = {
+      'protein': ['белки', 'Белки'],
+      'fat': ['жиры', 'Жиры'],
+      'carbohydrates': ['углеводы', 'Углеводы'],
+      'energy': ['ккал', 'Энергетическая ценность']
     };
     let outputCount = 0;
     for (const prod of products) {
@@ -128,13 +128,29 @@ function runSelfRepairMigration(db: Database.Database) {
       try {
         let extra: any = JSON.parse(prod.extra_data);
         let changed = false;
-        for (const [eng, rus] of Object.entries(mapping)) {
-          if (extra[eng] && !extra[rus]) {
-            extra[rus] = String(extra[eng]).replace('g', 'г').replace('kcal', '');
-            changed = true;
+        for (const [eng, targets] of Object.entries(mapping)) {
+          // If we have the English key, make sure ALL target Russian keys are present
+          if (extra[eng] !== undefined) {
+            for (const rus of targets) {
+              if (extra[rus] === undefined) {
+                extra[rus] = String(extra[eng]).replace('g', 'г').replace('kcal', '');
+                changed = true;
+              }
+            }
+          }
+          // Also sync between existing Russian keys if one is missing
+          const primaryRus = targets[0];
+          if (extra[primaryRus] !== undefined) {
+            for (const rus of targets.slice(1)) {
+              if (extra[rus] === undefined) {
+                extra[rus] = extra[primaryRus];
+                changed = true;
+              }
+            }
           }
         }
         if (changed) {
+          console.log(`Migration: Repairing nomenclature ${prod.id} (${prod.name}). Keys: ${Object.keys(extra).join(', ')}`);
           updateStmt.run(JSON.stringify(extra), prod.id);
           outputCount++;
         }

@@ -1,7 +1,7 @@
 {
   "name": "electron-labelpilot",
   "private": true,
-  "version": "1.0.2",
+  "version": "1.0.3",
   "main": "dist-electron/main/index.js",
   "scripts": {
     "dev": "vite",
@@ -46,6 +46,13 @@
       {
         "from": "resources/printer",
         "to": "printer",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "resources/fonts",
+        "to": "fonts",
         "filter": [
           "**/*"
         ]

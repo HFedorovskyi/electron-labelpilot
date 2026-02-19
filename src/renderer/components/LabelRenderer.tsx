@@ -15,9 +15,21 @@ const LabelRenderer = ({ doc, data, preview = false }: LabelRendererProps) => {
 
     const processText = (text: string) => {
         if (!text) return '';
+
+        // Prepare lowercase data map
+        const lowerData: Record<string, any> = {};
+        for (const [key, val] of Object.entries(data)) {
+            lowerData[key.toLowerCase()] = val;
+        }
+
         return text.replace(/{{\s*([^{}]+)\s*}}/g, (match, key) => {
             const trimmedKey = key.trim();
-            return data[trimmedKey] !== undefined ? String(data[trimmedKey]) : match;
+            const lowerK = trimmedKey.toLowerCase();
+
+            if (data[trimmedKey] !== undefined) return String(data[trimmedKey]);
+            if (lowerData[lowerK] !== undefined) return String(lowerData[lowerK]);
+
+            return match;
         });
     };
 
@@ -62,10 +74,15 @@ const LabelElement = ({ el, processText }: { el: any; processText: (t: string) =
             return 'flex-start';
         };
 
+        console.log(`[LabelRenderer] Rendering text element ${el.id} at (${el.x}, ${el.y}) w=${el.w} h=${el.h}. Text: "${(processText(el.text) || '').substring(0, 30)}..."`);
+        const processedText = processText(el.text);
+
         return (
             <div
                 style={{
                     ...commonStyle,
+                    height: 'auto', // Allow it to grow
+                    minHeight: `${el.h}px`,
                     fontFamily: el.fontFamily || 'Inter, sans-serif',
                     fontSize: `${el.fontSize}px`,
                     color: el.color || '#000000',
@@ -74,13 +91,16 @@ const LabelElement = ({ el, processText }: { el: any; processText: (t: string) =
                     textAlign: el.textAlign || 'left',
                     textDecoration: el.textDecoration || 'none',
                     display: 'flex',
-                    alignItems: 'center',
+                    alignItems: 'flex-start', // Top alignment is safer for overflow
                     justifyContent: getJustifyContent(el.textAlign),
                     whiteSpace: 'pre-wrap',
                     wordBreak: 'break-word',
+                    // Explicitly set tight line-height for label accuracy
+                    lineHeight: '1.2',
+                    overflow: 'visible',
                 }}
             >
-                {processText(el.text)}
+                {processedText}
             </div>
         );
     }

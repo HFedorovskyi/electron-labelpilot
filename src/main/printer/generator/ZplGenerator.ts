@@ -31,14 +31,15 @@ export class ZplGenerator implements ILabelGenerator {
 
         let printWidth: number;
         let labelLength: number;
-        let scale: number = 1;
+        let scaleX: number = 1;
+        let scaleY: number = 1;
 
         if (targetWidthMm) {
             // Case A: We have physical dimensions.
             printWidth = Math.round(targetWidthMm * dpi / 25.4);
             // If canvas.width is just dots at 96 DPI or some arbitrary number, we scale it to fit the print width.
             if (doc.canvas.width > 0) {
-                scale = printWidth / doc.canvas.width;
+                scaleX = printWidth / doc.canvas.width;
             }
         } else {
             // Case B: No physical dimensions. Infer from canvas.
@@ -46,20 +47,24 @@ export class ZplGenerator implements ILabelGenerator {
 
             // If source is 203 DPI and target is 203 DPI, scale should be 1.
             // If source is 96 DPI and target is 203 DPI, scale is 203/96.
-            scale = dpi / sourceDpi;
+            scaleX = dpi / sourceDpi;
 
-            printWidth = Math.round(doc.canvas.width * scale);
+            printWidth = Math.round(doc.canvas.width * scaleX);
         }
 
         if (targetHeightMm) {
             labelLength = Math.round(targetHeightMm * dpi / 25.4);
+            if (doc.canvas.height > 0) {
+                scaleY = labelLength / doc.canvas.height;
+            }
         } else {
-            // Scale height using same ratio
-            labelLength = Math.round(doc.canvas.height * scale);
+            // Scale height using same ratio as width if height not specified
+            scaleY = scaleX;
+            labelLength = Math.round(doc.canvas.height * scaleY);
         }
 
-        console.log(`ZplGenerator: DPI=${dpi}, TargetWidthMm=${targetWidthMm}, CanvasW=${doc.canvas.width}, SourceDPI=${doc.canvas?.dpi}`);
-        console.log(`ZplGenerator: Calculated PrintWidth=${printWidth}, LabelLength=${labelLength}, Scale=${scale}`);
+        console.log(`ZplGenerator: DPI=${dpi}, TargetWidthMm=${targetWidthMm}, TargetHeightMm=${targetHeightMm}, CanvasW=${doc.canvas.width}, CanvasH=${doc.canvas.height}`);
+        console.log(`ZplGenerator: Calculated PrintWidth=${printWidth}, LabelLength=${labelLength}, ScaleX=${scaleX.toFixed(4)}, ScaleY=${scaleY.toFixed(4)}`);
 
         let zpl = '^XA\n'; // Start Format
         zpl += `^PW${printWidth}\n`; // Print Width
@@ -79,25 +84,37 @@ export class ZplGenerator implements ILabelGenerator {
         zpl += '^CI28\n'; // UTF-8 Encoding support
 
         for (const el of doc.elements) {
-            zpl += await this.processElement(el, data, scale);
+            zpl += await this.processElement(el, data, scaleX, scaleY);
         }
 
         zpl += '^XZ'; // End Format
         return Buffer.from(zpl, 'utf-8');
     }
 
-    private async processElement(el: LabelElement, data: Record<string, any>, scale: number): Promise<string> {
+    private async processElement(el: LabelElement, data: Record<string, any>, scaleX: number, scaleY: number): Promise<string> {
         // Variable substitution
         const processText = (text: string) => {
             if (!text) return '';
+
+            // Prepare a lowercase map for case-insensitive lookup
+            const lowerData: Record<string, any> = {};
+            for (const [key, val] of Object.entries(data)) {
+                lowerData[key.toLowerCase()] = val;
+            }
+
             return text.replace(/{{\s*([^{}]+)\s*}}/g, (match, key) => {
                 const trimmedKey = key.trim();
-                return data[trimmedKey] !== undefined ? String(data[trimmedKey]) : match;
+                const lowerK = trimmedKey.toLowerCase();
+
+                if (data[trimmedKey] !== undefined) return String(data[trimmedKey]);
+                if (lowerData[lowerK] !== undefined) return String(lowerData[lowerK]);
+
+                return match;
             });
         };
 
-        const x = Math.round(el.x * scale);
-        const y = Math.round(el.y * scale);
+        const x = Math.round(el.x * scaleX);
+        const y = Math.round(el.y * scaleY);
 
         // Rotation mapping
         // N = 0, R = 90, I = 180, B = 270
@@ -112,8 +129,8 @@ export class ZplGenerator implements ILabelGenerator {
             case 'text':
                 const textVal = processText(el.text || '');
                 const fontSize = el.fontSize || 12;
-                const h = Math.round(fontSize * scale);
-                const w = el.w ? Math.round(el.w * scale) : undefined;
+                const h = Math.round(fontSize * scaleY);
+                const w = el.w ? Math.round(el.w * scaleX) : undefined;
 
                 // Native ZPL font with alignment support via ^FB
                 if (w) {
@@ -135,10 +152,10 @@ export class ZplGenerator implements ILabelGenerator {
                 break;
 
             case 'rect':
-                let wRect = Math.round(el.w * scale);
-                let hRect = Math.round(el.h * scale);
-                const border = Math.round((el.borderWidth || 1) * scale);
-                const radius = Math.round((el.borderRadius || 0) * scale);
+                let wRect = Math.round(el.w * scaleX);
+                let hRect = Math.round(el.h * scaleY);
+                const border = Math.round((el.borderWidth || 1) * scaleX);
+                const radius = Math.round((el.borderRadius || 0) * scaleX);
 
                 // For a Box, ZPL doesn't strictly rotate the box shape with a flag in ^GB.
                 // However, we can swap W/H if we want to "rotate" the frame itself.
@@ -160,8 +177,8 @@ export class ZplGenerator implements ILabelGenerator {
 
             case 'barcode':
                 const bcVal = processText(el.value || '');
-                const height = Math.round(el.h * scale);
-                const moduleWidth = Math.max(2, Math.round(2 * (scale / 2.1)));
+                const height = Math.round(el.h * scaleY);
+                const moduleWidth = Math.max(2, Math.round(2 * (scaleX / 2.1)));
 
                 const type = (el.barcodeType || 'code128').toLowerCase();
 
@@ -172,7 +189,7 @@ export class ZplGenerator implements ILabelGenerator {
                     cmd += `^BC${orient},${height},${showText},N,N^FD${bcVal}^FS\n`;
                 } else if (type.includes('qr') || type === 'gs-1') {
                     // ^BQ o, 2, mag
-                    const magnification = Math.max(3, Math.round(scale * 2));
+                    const magnification = Math.max(3, Math.round(scaleX * 2));
                     cmd += `^BQ${orient},2,${magnification}`;
                     cmd += `^FDQA,${bcVal}^FS\n`;
                 } else if (type.includes('ean13')) {
@@ -180,7 +197,7 @@ export class ZplGenerator implements ILabelGenerator {
                     cmd += `^BY${moduleWidth},3.0,${height}`;
                     cmd += `^BE${orient},${height},${showText},N^FD${bcVal}^FS\n`;
                 } else if (type.includes('datamatrix')) {
-                    const mag = Math.max(3, Math.round(scale * 2));
+                    const mag = Math.max(3, Math.round(scaleX * 2));
                     cmd += `^BX${orient},${mag},200`;
                     cmd += `^FD${bcVal}^FS\n`;
                 } else {

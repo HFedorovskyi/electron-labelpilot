@@ -1,3 +1,4 @@
+import log from '../logger';
 import { loadPrinterConfig, type PrinterDeviceConfig } from '../config';
 import type { IConnectionStrategy, PrinterState } from './types';
 import { BrowserWindow } from 'electron';
@@ -143,6 +144,8 @@ class PrinterService {
     }
 
     public async printLabel(config: PrinterDeviceConfig, doc: LabelDoc, data: any): Promise<void> {
+        log.info(`PrinterService: Printing label. Protocol: ${config.protocol}. Data keys: ${Object.keys(data).join(', ')}`);
+        log.info(`PrinterService: Sample Data: name="${data.name}", weight="${data.weight_netto_pack}", prod_date="${data.production_date}"`);
         // 1. Select generator by protocol
         let generator: ILabelGenerator;
         switch (config.protocol) {

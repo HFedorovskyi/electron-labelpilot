@@ -251,6 +251,11 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
             ...extra
         };
 
+        console.log('DEBUG: Generated Label Data:', dataObj);
+        if (window.electron && window.electron.send) {
+            window.electron.send('log-to-main', `DEBUG Renderer: Data keys: ${Object.keys(dataObj).join(', ')}`);
+        }
+
         // Barcode Generation
         dataObj.barcode = (() => {
             if (packBarcodeTemplate) {
@@ -298,6 +303,15 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
     // --- EFFECTS ---
 
 
+
+    // Label Structure Diagnostic
+    useEffect(() => {
+        window.electron.invoke('get-all-labels').then((labels: any) => {
+            window.electron.send('log-to-main', `DEBUG: Full Labels Dump: ${JSON.stringify(labels)}`);
+        }).catch(err => {
+            console.error('Failed to dump labels', err);
+        });
+    }, []);
 
     // Scale, Status, Sync Listeners
     useEffect(() => {

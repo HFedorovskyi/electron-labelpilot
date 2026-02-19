@@ -25,6 +25,8 @@ export interface LabelElement {
     barcodeType?: string;
     value?: string;
     showText?: boolean;
+    imageData?: string; // Pre-rendered barcode image from server
+    moduleWidth?: number; // Explicit module width for barcodes
 }
 
 export interface LabelDoc {
@@ -35,6 +37,13 @@ export interface LabelDoc {
         heightCm?: number;
         dpi?: number;
         background?: string;
+        printedZones?: {
+            id: string;
+            label: string;
+            side: string;
+            sizeMm: number;
+            color?: string;
+        }[];
     };
     dpi?: number;
     widthMm?: number;

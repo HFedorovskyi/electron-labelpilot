@@ -24,6 +24,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Sync package.json version with tag
+        shell: powershell
+        run: |
+          $version = $env:GITHUB_REF_NAME.TrimStart('v')
+          Write-Host "Syncing version to: $version"
+          npm version $version --no-git-tag-version
+
       - name: Build renderer (Vite)
         run: npm run build
 
