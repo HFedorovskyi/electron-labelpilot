@@ -16,6 +16,10 @@ jobs:
     permissions:
       contents: write
 
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -52,9 +56,16 @@ jobs:
           ls -R dist-electron/
         shell: pwsh
 
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+
       - name: Build & Publish Electron Distributables
         run: npx electron-builder --win --publish always
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        # electron-builder will detect v* tag and publish to that release
+        # electron-builder will detect v* tag and publish to the release created above
