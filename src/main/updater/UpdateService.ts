@@ -62,6 +62,13 @@ function configureAutoUpdater(mainWindow: BrowserWindow | null) {
     }
 
     autoUpdater.on('update-available', (info: UpdateInfo) => {
+        const currentVersion = app.getVersion();
+        if (info.version === currentVersion) {
+            log.info(`[Updater] Update available event fired, but versions match (${currentVersion}). Ignoring.`);
+            mainWindow?.webContents.send('updater:no-update');
+            return;
+        }
+
         log.info(`[Updater] Update available: v${info.version}. Release date: ${info.releaseDate}`);
         mainWindow?.webContents.send('updater:update-available', {
             version: info.version,
