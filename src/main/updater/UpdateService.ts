@@ -134,6 +134,16 @@ export async function checkForUpdates(): Promise<UpdateCheckResult> {
 
         const newVersion = result.updateInfo.version;
 
+        // Robust version comparison to prevent loop
+        const currentVersion = app.getVersion();
+        const cleanNew = newVersion.replace(/^v/, '').trim();
+        const cleanCurrent = currentVersion.replace(/^v/, '').trim();
+
+        if (cleanNew === cleanCurrent) {
+            log.info(`[Updater] check returned v${newVersion}, but matches current v${currentVersion}. Treating as up-to-date.`);
+            return { available: false };
+        }
+
         // Pre-update compatibility check (Level 3)
         const compat = checkPreUpdateCompatibility(newVersion, lastKnownServerVersion);
 
