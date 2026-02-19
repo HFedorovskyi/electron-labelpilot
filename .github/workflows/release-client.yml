@@ -56,8 +56,14 @@ jobs:
           ls -R dist-electron/
         shell: pwsh
 
-      - name: Create Release
-        id: create_release
+      - name: Build & Package
+        run: npx electron-builder --win --publish never
+
+      - name: List final artifacts
+        run: ls -R dist-build/
+        shell: pwsh
+
+      - name: Create Release & Upload Assets
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
@@ -65,7 +71,9 @@ jobs:
           name: Release ${{ github.ref_name }}
           draft: false
           prerelease: false
-
-      - name: Build & Publish Electron Distributables
-        run: npx electron-builder --win --publish always
-        # electron-builder will detect v* tag and publish to the release created above
+          files: |
+            dist-build/*.exe
+            dist-build/latest.yml
+            dist-build/*.blockmap
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
