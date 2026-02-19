@@ -63,8 +63,13 @@ function configureAutoUpdater(mainWindow: BrowserWindow | null) {
 
     autoUpdater.on('update-available', (info: UpdateInfo) => {
         const currentVersion = app.getVersion();
-        if (info.version === currentVersion) {
-            log.info(`[Updater] Update available event fired, but versions match (${currentVersion}). Ignoring.`);
+
+        // Clean versions for comparison (remove 'v' prefix if present, trim whitespace)
+        const cleanCurrent = currentVersion.replace(/^v/, '').trim();
+        const cleanInfo = (info.version || '').replace(/^v/, '').trim();
+
+        if (cleanCurrent === cleanInfo) {
+            log.info(`[Updater] Update available event fired, but versions match (${cleanCurrent}). Ignoring.`);
             mainWindow?.webContents.send('updater:no-update');
             return;
         }
