@@ -46,8 +46,6 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "installerIcon": "resources/icons/app-icon.png",
-      "uninstallerIcon": "resources/icons/app-icon.png",
       "artifactName": "${productName}-Setup-${version}.${ext}"
     },
     "extraResources": [
