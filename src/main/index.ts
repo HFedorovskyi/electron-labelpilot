@@ -445,6 +445,21 @@ ipcMain.handle('close-box', async (_, { boxId, weightNetto, weightBrutto }) => {
     return closeBox(boxId, weightNetto, weightBrutto);
 });
 
+ipcMain.handle('get-open-pallet-content', async () => {
+    const { getOpenPalletContent } = await import('./database');
+    return getOpenPalletContent();
+});
+
+ipcMain.handle('delete-pack', async (_, packId) => {
+    const { deletePack } = await import('./database');
+    return deletePack(packId);
+});
+
+ipcMain.handle('delete-box', async (_, boxId) => {
+    const { deleteBox } = await import('./database');
+    return deleteBox(boxId);
+});
+
 ipcMain.handle('get-latest-counters', async () => {
     const { getLatestCounters } = await import('./database');
     return getLatestCounters();

@@ -41,12 +41,27 @@ function configureAutoUpdater(mainWindow) {
     // Enable development mode update testing if dev-app-update.yml exists
     const devConfigPath = path_1.default.join(electron_1.app.getAppPath(), 'dev-app-update.yml');
     if (fs_1.default.existsSync(devConfigPath)) {
-        logger_1.default.info(`[Updater] Found dev update config at: ${devConfigPath}`);
-        electron_updater_1.autoUpdater.updateConfigPath = devConfigPath;
-        // @ts-ignore — forceDevUpdateConfig is internal but useful for testing
-        electron_updater_1.autoUpdater.forceDevUpdateConfig = true;
+        logger_1.default.info(`[Updater] Potential dev config found at: ${devConfigPath}`);
+        if (!electron_1.app.isPackaged || electron_updater_1.autoUpdater.forceDevUpdateConfig) {
+            logger_1.default.info(`[Updater] APPLYING dev update config from: ${devConfigPath}`);
+            electron_updater_1.autoUpdater.updateConfigPath = devConfigPath;
+            // @ts-ignore
+            electron_updater_1.autoUpdater.forceDevUpdateConfig = true;
+        }
+        else {
+            logger_1.default.info(`[Updater] Ignoring dev config because app is packaged and forceDevUpdateConfig is false.`);
+        }
     }
     electron_updater_1.autoUpdater.on('update-available', (info) => {
+        const currentVersion = electron_1.app.getVersion();
+        // Clean versions for comparison (remove 'v' prefix if present, trim whitespace)
+        const cleanCurrent = currentVersion.replace(/^v/, '').trim();
+        const cleanInfo = (info.version || '').replace(/^v/, '').trim();
+        if (cleanCurrent === cleanInfo) {
+            logger_1.default.info(`[Updater] Update available event fired, but versions match (${cleanCurrent}). Ignoring.`);
+            mainWindow?.webContents.send('updater:no-update');
+            return;
+        }
         logger_1.default.info(`[Updater] Update available: v${info.version}. Release date: ${info.releaseDate}`);
         mainWindow?.webContents.send('updater:update-available', {
             version: info.version,
@@ -70,7 +85,10 @@ function configureAutoUpdater(mainWindow) {
         mainWindow?.webContents.send('updater:downloaded', { version: info.version });
     });
     electron_updater_1.autoUpdater.on('error', (err) => {
-        logger_1.default.error('[Updater] Error:', err);
+        logger_1.default.error('[Updater] Error during update check/download:', err);
+        // Log more details if available
+        if (err.stack)
+            logger_1.default.error(`[Updater] Stack trace: ${err.stack}`);
         mainWindow?.webContents.send('updater:error', { message: err.message });
     });
 }
@@ -96,6 +114,14 @@ async function checkForUpdates() {
             return { available: false };
         }
         const newVersion = result.updateInfo.version;
+        // Robust version comparison to prevent loop
+        const currentVersion = electron_1.app.getVersion();
+        const cleanNew = newVersion.replace(/^v/, '').trim();
+        const cleanCurrent = currentVersion.replace(/^v/, '').trim();
+        if (cleanNew === cleanCurrent) {
+            logger_1.default.info(`[Updater] check returned v${newVersion}, but matches current v${currentVersion}. Treating as up-to-date.`);
+            return { available: false };
+        }
         // Pre-update compatibility check (Level 3)
         const compat = (0, compatibility_1.checkPreUpdateCompatibility)(newVersion, lastKnownServerVersion);
         return {

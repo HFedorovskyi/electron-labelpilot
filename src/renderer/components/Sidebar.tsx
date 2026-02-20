@@ -2,6 +2,7 @@ import React from 'react';
 import { Scale, Settings, Package, Database, LogOut } from 'lucide-react';
 import clsx from 'clsx';
 import { useTranslation } from '../i18n';
+import packageJson from '../../../package.json';
 
 interface SidebarProps {
     activeTab: string;
@@ -89,8 +90,8 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, serverStatus
 
                 {/* Software Version */}
                 <div className="pt-2 opacity-70 flex justify-between items-center text-[10px] border-t border-white/5 mt-1">
-                    <span className="text-emerald-500 font-bold tracking-widest uppercase">v2.0.0</span>
-                    <span className="italic text-neutral-500">(Electron)</span>
+                    <span className="text-emerald-500 font-bold tracking-widest uppercase">v{packageJson.version}</span>
+                    <span className="font-bold tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-cyan-400">LabelPilot</span>
                 </div>
             </div>
         </div>

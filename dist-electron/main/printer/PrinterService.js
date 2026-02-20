@@ -136,8 +136,9 @@ class PrinterService {
         }
     }
     async printLabel(config, doc, data) {
-        logger_1.default.info(`PrinterService: Printing label. Protocol: ${config.protocol}. Data keys: ${Object.keys(data).join(', ')}`);
-        logger_1.default.info(`PrinterService: Sample Data: name="${data.name}", weight="${data.weight_netto_pack}", prod_date="${data.production_date}"`);
+        const startTotal = performance.now();
+        logger_1.default.info(`PrinterService: === START PRINTING LABEL ===`);
+        logger_1.default.info(`PrinterService: Protocol: ${config.protocol}. Printer: ${config.name} (${config.connection})`);
         // 1. Select generator by protocol
         let generator;
         switch (config.protocol) {
@@ -149,6 +150,7 @@ class PrinterService {
                 generator = new generator_1.ZplGenerator();
                 break;
         }
+        const startGen = performance.now();
         const buffer = await generator.generate(doc, data, {
             dpi: config.dpi || 203,
             darkness: config.darkness,
@@ -156,6 +158,8 @@ class PrinterService {
             widthMm: config.widthMm,
             heightMm: config.heightMm
         });
+        const genTime = performance.now() - startGen;
+        logger_1.default.info(`PrinterService: Label generation took ${genTime.toFixed(2)}ms. Buffer size: ${buffer.length} bytes.`);
         // 2. Send via Strategy
         let strategy = null;
         switch (config.connection) {
@@ -169,18 +173,30 @@ class PrinterService {
                 strategy = new strategies_1.SpoolerStrategy();
                 break;
         }
-        if (!strategy)
+        if (!strategy) {
+            logger_1.default.error(`PrinterService: Invalid connection type: ${config.connection}`);
             throw new Error('Invalid connection type');
+        }
         try {
+            const startSend = performance.now();
             await strategy.connect(config);
             await strategy.send(buffer);
+            const sendTime = performance.now() - startSend;
+            const totalTime = performance.now() - startTotal;
+            logger_1.default.info(`PrinterService: Sending to printer took ${sendTime.toFixed(2)}ms.`);
+            logger_1.default.info(`PrinterService: === PRINT SUCCESS (${totalTime.toFixed(2)}ms total) ===`);
+        }
+        catch (err) {
+            logger_1.default.error(`PrinterService: === PRINT FAILED ===`);
+            logger_1.default.error(`PrinterService: Error details:`, err);
+            throw err;
         }
         finally {
             try {
                 await strategy.disconnect();
             }
             catch (e) {
-                console.error('Error disconnecting strategy', e);
+                logger_1.default.error('PrinterService: Error disconnecting strategy', e);
             }
         }
     }

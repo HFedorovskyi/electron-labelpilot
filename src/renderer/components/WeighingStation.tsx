@@ -1,8 +1,10 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Printer, RefreshCw, Box, AlertCircle, X, Hash } from 'lucide-react';
+import { Printer, RefreshCw, Box, AlertCircle, X, Hash, Layers, Calendar } from 'lucide-react';
 import { generateBarcode, type BarcodeData } from '../utils/barcodeGenerator';
 import { useTranslation } from '../i18n';
 import NumericKeypad from './NumericKeypad';
+import DeleteItemsModal from './DeleteItemsModal';
+import DatePickerModal from './DatePickerModal';
 
 const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
     const { t } = useTranslation();
@@ -45,6 +47,9 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
 
     const [batchNumber, setBatchNumber] = useState<string>('');
     const [isKeypadOpen, setIsKeypadOpen] = useState(false);
+    const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+    const [labelingDate, setLabelingDate] = useState<Date>(new Date());
+    const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
 
     // Auto-print refs to prevent duplicate prints
     const autoPrintFiredRef = useRef(false);
@@ -99,9 +104,9 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
 
     const getLabelData = (overrideWeight?: number, isBoxLabel: boolean = false, overrideUnits?: number) => {
         const currentWeightVal = overrideWeight !== undefined ? overrideWeight : parseFloat(weight);
-        const now = new Date();
+        const now = labelingDate;
         const expDays = selectedProduct?.exp_date || 0;
-        const expDate = new Date();
+        const expDate = new Date(now);
         expDate.setDate(now.getDate() + expDays);
 
         const formatDate = (d: Date) => {
@@ -604,11 +609,14 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
                     const boxContainer = containers.find(c => c.id === selectedProduct?.box_container_id);
                     const brutBox = finalBoxWeight + (boxContainer?.weight || 0) / 1000;
 
+                    const expDateBox = new Date(labelingDate);
+                    expDateBox.setDate(labelingDate.getDate() + (selectedProduct?.exp_date || 0));
+
                     const genData = {
                         weight_netto_box: finalBoxWeight,
                         weight_brutto_box: brutBox,
-                        production_date: new Date(),
-                        exp_date: new Date(),
+                        production_date: labelingDate,
+                        exp_date: expDateBox,
                         // GTIN-14 padding ONLY for box label
                         article: (selectedProduct?.article || '').padStart(14, '0'),
                         // Use the SAME box_number as the textual label
@@ -753,11 +761,14 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
                         const fields = JSON.parse(boxBarcodeTemplate.structure).fields;
                         const boxContainer = containers.find(c => c.id === selectedProduct?.box_container_id);
                         const brutBox = finalBoxWeight + (boxContainer?.weight || 0) / 1000;
+                        const expDateBox = new Date(labelingDate);
+                        expDateBox.setDate(labelingDate.getDate() + (selectedProduct?.exp_date || 0));
+
                         const genData = {
                             weight_netto_box: finalBoxWeight,
                             weight_brutto_box: brutBox,
-                            production_date: new Date(),
-                            exp_date: new Date(),
+                            production_date: labelingDate,
+                            exp_date: expDateBox,
                             article: (selectedProduct?.article || '').padStart(14, '0'),
                             box_number: actualBoxNumber,
                             batch_number: batchNumber || ''
@@ -956,6 +967,13 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
                         <Box className="w-6 h-6 text-neutral-400 group-hover:text-white transition-colors" />
                         <span className="text-neutral-400 group-hover:text-white uppercase text-xs tracking-widest">{t('ws.closeBox')}</span>
                     </button>
+                    <button
+                        onClick={() => setIsDeleteModalOpen(true)}
+                        className="py-6 bg-neutral-800/50 hover:bg-red-900/30 border border-white/5 hover:border-red-500/30 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group"
+                    >
+                        <Layers className="w-6 h-6 text-neutral-400 group-hover:text-red-400 transition-colors" />
+                        <span className="text-neutral-400 group-hover:text-red-400 uppercase text-xs tracking-widest">Удаление</span>
+                    </button>
                 </div>
 
                 <div className="mt-auto p-6 bg-neutral-900/50 border border-white/5 rounded-3xl backdrop-blur">
@@ -963,7 +981,14 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
                     <div className="space-y-3">
                         <div
                             className="flex justify-between items-center p-3 bg-white/5 border border-white/10 rounded-xl group cursor-pointer hover:bg-emerald-500/10 hover:border-emerald-500/30 transition-all active:scale-[0.98]"
-                            onClick={(e) => { e.stopPropagation(); setIsKeypadOpen(true); }}
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                if (unitsInBox > 0) {
+                                    setAlertMessage(t('ws.closeBoxBeforeChange'));
+                                    return;
+                                }
+                                setIsKeypadOpen(true);
+                            }}
                         >
                             <span className="text-xs uppercase tracking-wider text-neutral-500 font-bold">Партия</span>
                             <div className="flex items-center gap-3">
@@ -972,6 +997,27 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
                                 </span>
                                 <div className="p-2 bg-neutral-800 border border-white/10 rounded-lg group-hover:bg-emerald-500/20 group-hover:border-emerald-500/40 transition-colors">
                                     <Hash className="w-4 h-4 text-emerald-500" />
+                                </div>
+                            </div>
+                        </div>
+                        <div
+                            className="flex justify-between items-center p-3 bg-white/5 border border-white/10 rounded-xl group cursor-pointer hover:bg-emerald-500/10 hover:border-emerald-500/30 transition-all active:scale-[0.98]"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                if (unitsInBox > 0) {
+                                    setAlertMessage(t('ws.closeBoxBeforeChange'));
+                                    return;
+                                }
+                                setIsDatePickerOpen(true);
+                            }}
+                        >
+                            <span className="text-xs uppercase tracking-wider text-neutral-500 font-bold">Дата марк.</span>
+                            <div className="flex items-center gap-3">
+                                <span className="text-xl font-mono font-bold text-white group-hover:text-emerald-400 transition-colors">
+                                    {labelingDate.toLocaleDateString('ru-RU')}
+                                </span>
+                                <div className="p-2 bg-neutral-800 border border-white/10 rounded-lg group-hover:bg-emerald-500/20 group-hover:border-emerald-500/40 transition-colors">
+                                    <Calendar className="w-4 h-4 text-emerald-500" />
                                 </div>
                             </div>
                         </div>
@@ -1043,6 +1089,45 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
                     title="Номер партии"
                 />
             )}
+
+            {isDatePickerOpen && (
+                <DatePickerModal
+                    value={labelingDate}
+                    onUpdate={setLabelingDate}
+                    onClose={() => setIsDatePickerOpen(false)}
+                    title="Дата маркировки"
+                />
+            )}
+
+            <DeleteItemsModal
+                isOpen={isDeleteModalOpen}
+                onClose={() => setIsDeleteModalOpen(false)}
+                onDeleted={async () => {
+                    // Refresh counters
+                    const latest = await window.electron.invoke('get-latest-counters');
+                    if (latest) {
+                        setTotalUnits(latest.totalUnits);
+                        setTotalBoxes(latest.totalBoxes);
+                        setUnitsInBox(latest.unitsInBox);
+                        setBoxesInPallet(latest.boxesInPallet);
+                    }
+
+                    // We also need to refresh local state if the current box/pack was deleted
+                    const openContent = await window.electron.invoke('get-open-pallet-content');
+                    if (openContent && openContent.openBox) {
+                        // setUnitsInBox(openContent.packsInCurrentBox?.length || 0); // Already set by get-latest-counters
+                        setCurrentBoxId(openContent.openBox.id);
+                        setCurrentBoxNumber(openContent.openBox.number);
+                        setBoxNetWeight(openContent.openBox.weight_netto || 0);
+                    } else {
+                        // No open box
+                        // setUnitsInBox(0); // Already set by get-latest-counters
+                        setCurrentBoxId(null);
+                        setCurrentBoxNumber(null);
+                        setBoxNetWeight(0);
+                    }
+                }}
+            />
 
 
 

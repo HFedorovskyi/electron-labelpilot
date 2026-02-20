@@ -20,6 +20,9 @@ exports.getStationIdentity = getStationIdentity;
 exports.updateStationIdentity = updateStationIdentity;
 exports.resetDatabase = resetDatabase;
 exports.getExportData = getExportData;
+exports.getOpenPalletContent = getOpenPalletContent;
+exports.deletePack = deletePack;
+exports.deleteBox = deleteBox;
 const better_sqlite3_1 = __importDefault(require("better-sqlite3"));
 const path_1 = __importDefault(require("path"));
 const electron_1 = require("electron");
@@ -334,15 +337,26 @@ function getLatestCounters() {
     const openPallet = db.prepare("SELECT id FROM pallet WHERE status = 'Open' ORDER BY id DESC LIMIT 1").get();
     let boxesInPallet = 0;
     if (openPallet) {
-        const res = db.prepare("SELECT COUNT(*) as count FROM boxes WHERE pallete_id = ?").get(openPallet.id);
+        const res = db.prepare("SELECT COUNT(*) as count FROM boxes WHERE pallete_id = ? AND status != 'Deleted'").get(openPallet.id);
         boxesInPallet = res.count;
+    }
+    // Count packs in the currently open box
+    // We need to find the open box first. Logic similar to recordPack but read-only.
+    // Ideally, an open box belongs to the open pallet, but strictly speaking it just needs status='Open'.
+    // Let's find the most recent open box.
+    const openBox = db.prepare("SELECT id FROM boxes WHERE status = 'Open' ORDER BY id DESC LIMIT 1").get();
+    let unitsInBox = 0;
+    if (openBox) {
+        const res = db.prepare("SELECT COUNT(*) as count FROM pack WHERE box_id = ? AND status != 'Deleted'").get(openBox.id);
+        unitsInBox = res.count;
     }
     const finalCounters = {
         lastPackNumber: lastPack?.number || '0',
         lastBoxNumber: lastBox?.number || '0',
         totalUnits: totalUnits.total,
         totalBoxes: totalBoxes.total,
-        boxesInPallet: boxesInPallet
+        boxesInPallet: boxesInPallet,
+        unitsInBox: unitsInBox
     };
     return finalCounters;
 }
@@ -508,4 +522,94 @@ function getExportData() {
         pallets,
         generated_at: new Date().toISOString()
     };
+}
+// --- Deletion Logic ---
+function getOpenPalletContent() {
+    const db = initDatabase();
+    // 1. Get Open Pallet
+    const pallet = db.prepare("SELECT * FROM pallet WHERE status = 'Open' ORDER BY id DESC LIMIT 1").get();
+    if (!pallet)
+        return null;
+    // 2. Get Open Box (if any)
+    const openBox = db.prepare("SELECT * FROM boxes WHERE pallete_id = ? AND status = 'Open' ORDER BY id DESC LIMIT 1").get(pallet.id);
+    // 3. Get All Boxes in Pallet (for list view)
+    const boxes = db.prepare("SELECT * FROM boxes WHERE pallete_id = ? ORDER BY id DESC").all(pallet.id);
+    // 4. Get Packs in Current Open Box (if available)
+    let currentBoxPacks = [];
+    if (openBox) {
+        currentBoxPacks = db.prepare("SELECT * FROM pack WHERE box_id = ? ORDER BY id DESC").all(openBox.id);
+    }
+    return {
+        pallet,
+        openBox,
+        boxesInPallet: boxes,
+        packsInCurrentBox: currentBoxPacks
+    };
+}
+function deletePack(packId) {
+    const db = initDatabase();
+    return db.transaction(() => {
+        // 1. Get Pack and verify it's in an open box
+        const pack = db.prepare("SELECT * FROM pack WHERE id = ?").get(packId);
+        if (!pack)
+            throw new Error("Pack not found");
+        if (pack.status === 'Deleted')
+            throw new Error("Pack already deleted");
+        const box = db.prepare("SELECT * FROM boxes WHERE id = ?").get(pack.box_id);
+        if (!box)
+            throw new Error("Box not found"); // Should not happen
+        if (box.status !== 'Open')
+            throw new Error("Cannot delete pack from a closed box");
+        // 2. Mark Pack as Deleted
+        db.prepare("UPDATE pack SET status = 'Deleted' WHERE id = ?").run(packId);
+        // 3. Update Box Weights (Subtract)
+        const newBoxNet = Math.max(0, (box.weight_netto || 0) - pack.weight_netto);
+        const newBoxBrut = Math.max(0, (box.weight_brutto || 0) - pack.weight_brutto);
+        db.prepare("UPDATE boxes SET weight_netto = ?, weight_brutto = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(newBoxNet, newBoxBrut, box.id);
+        // 4. Update Pallet Weights (Subtract)
+        // Note: Pallet weights are usually calculated on the fly or closed, but if we maintain running total:
+        // This part depends on if we track pallet weight live. The schema has weight fields.
+        // Let's assume we do update them if they exist.
+        const pallet = db.prepare("SELECT * FROM pallet WHERE id = ?").get(box.pallete_id);
+        if (pallet) {
+            // Only update if pallet has weights (it might be null initially)
+            const currentPalletNet = pallet.weight_netto || 0;
+            const currentPalletBrut = pallet.weight_brutto || 0;
+            // Subtract only if the box weight hasn't been fully finalized/stamped? 
+            // Actually, if we reduce box weight, we should reduce pallet weight.
+            const newPalletNet = Math.max(0, currentPalletNet - pack.weight_netto);
+            const newPalletBrut = Math.max(0, currentPalletBrut - pack.weight_brutto);
+            db.prepare("UPDATE pallet SET weight_netto = ?, weight_brutto = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(newPalletNet, newPalletBrut, pallet.id);
+        }
+        return { success: true, boxId: box.id };
+    })();
+}
+function deleteBox(boxId) {
+    const db = initDatabase();
+    return db.transaction(() => {
+        // 1. Get Box and verify it's in an open pallet
+        const box = db.prepare("SELECT * FROM boxes WHERE id = ?").get(boxId);
+        if (!box)
+            throw new Error("Box not found");
+        if (box.status === 'Deleted')
+            throw new Error("Box already deleted");
+        const pallet = db.prepare("SELECT * FROM pallet WHERE id = ?").get(box.pallete_id);
+        if (!pallet)
+            throw new Error("Pallet not found");
+        if (pallet.status !== 'Open')
+            throw new Error("Cannot delete box from a closed pallet");
+        // 2. Mark Box as Deleted
+        db.prepare("UPDATE boxes SET status = 'Deleted', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(boxId);
+        // 3. Mark all Packs in Box as Deleted
+        db.prepare("UPDATE pack SET status = 'Deleted' WHERE box_id = ?").run(boxId);
+        // 4. Update Pallet Weights (Subtract Box Weight)
+        // Note: A box has its own weight (contents + box tare).
+        // If the box is deleted, we remove its entire contribution to the pallet.
+        const currentPalletNet = pallet.weight_netto || 0;
+        const currentPalletBrut = pallet.weight_brutto || 0;
+        const newPalletNet = Math.max(0, currentPalletNet - (box.weight_netto || 0));
+        const newPalletBrut = Math.max(0, currentPalletBrut - (box.weight_brutto || 0));
+        db.prepare("UPDATE pallet SET weight_netto = ?, weight_brutto = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(newPalletNet, newPalletBrut, pallet.id);
+        return { success: true, palletId: pallet.id };
+    })();
 }

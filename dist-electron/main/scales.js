@@ -230,10 +230,10 @@ class ScaleManager {
         this.pollingInterval = setInterval(() => {
             if (this.config?.type === 'serial' && this.scalePort?.isOpen) {
                 if (cmd instanceof Buffer) {
-                    logger_1.default.debug('ScaleManager: Sending Hex:', cmd.toString('hex').toUpperCase());
+                    // log.debug('ScaleManager: Sending Hex:', cmd.toString('hex').toUpperCase());
                 }
                 else {
-                    logger_1.default.debug('ScaleManager: Sending Text:', cmd);
+                    // log.debug('ScaleManager: Sending Text:', cmd);
                 }
                 this.scalePort.write(cmd, (err) => {
                     if (err)
@@ -257,7 +257,7 @@ class ScaleManager {
     }
     handleData(data) {
         const hex = data.toString('hex').toUpperCase();
-        logger_1.default.debug(`ScaleManager: [RAW DATA] ${hex}`);
+        // log.debug(`ScaleManager: [RAW DATA] ${hex}`);
         if (!this.currentProtocol)
             return;
         const reading = this.currentProtocol.parse(data);

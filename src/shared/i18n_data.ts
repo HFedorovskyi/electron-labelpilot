@@ -126,6 +126,8 @@ export const translations: Record<Lang, Record<string, string>> = {
         'ws.attention': 'Внимание',
         'ws.ok': 'ПОНЯТНО',
         'ws.stationNumber': 'Номер станции',
+        'ws.cancel': 'Отмена',
+        'ws.delete': 'Удалить',
 
         // Products
         'products.title': 'Номенклатура',
@@ -149,6 +151,28 @@ export const translations: Record<Lang, Record<string, string>> = {
         'error.identityLocked': 'Станция заблокирована (UUID: {uuid}, №: {number}). Невозможно перезаписать идентификатором другой станции {newUuid} / {newNumber}. Пожалуйста, используйте "Сброс базы данных" в настройках, если вам нужно переинициализировать эту станцию.',
         'error.serialAccessDenied': 'Порт {port} занят другой программой или фоновым процессом. Пожалуйста, закройте другие программы или проверьте Диспетчер задач.',
         'error.serialNotFound': 'Порт {port} не найден.',
+
+        // Deletion Modal
+        'delete.title': 'Удаление',
+        'delete.currentBoxTab': 'Упаковки (в текущем коробе)',
+        'delete.currentPalletTab': 'Короба (на текущей паллете)',
+        'delete.confirmPack': 'Вы уверены, что хотите удалить эту упаковку?',
+        'delete.confirmBox': 'Вы уверены, что хотите удалить этот короб? Все упаковки внутри также будут помечены удаленными.',
+        'delete.errorLoad': 'Ошибка загрузки данных',
+        'delete.errorDeletePack': 'Ошибка удаления упаковки: ',
+        'delete.errorDeleteBox': 'Ошибка удаления короба: ',
+        'delete.currentBox': 'Текущий короб:',
+        'delete.totalPacks': 'Всего упаковок:',
+        'delete.currentPallet': 'Текущая паллета:',
+        'delete.totalBoxes': 'Всего коробов:',
+        'delete.weight': 'Вес:',
+        'delete.deleted': 'УДАЛЕНО',
+        'delete.open': 'ОТКРЫТ',
+        'delete.closed': 'ЗАКРЫТ',
+        'delete.loading': 'Загрузка...',
+        'delete.noOpenBox': 'Нет открытого короба',
+        'delete.noOpenPallet': 'Нет открытой паллеты',
+
     },
 
     en: {
@@ -274,6 +298,8 @@ export const translations: Record<Lang, Record<string, string>> = {
         'ws.attention': 'Attention',
         'ws.ok': 'OK, GOT IT',
         'ws.stationNumber': 'Station Number',
+        'ws.cancel': 'Cancel',
+        'ws.delete': 'Delete',
 
         // Products
         'products.title': 'Products',
@@ -297,6 +323,27 @@ export const translations: Record<Lang, Record<string, string>> = {
         'error.identityLocked': 'Station identity is locked (UUID: {uuid}, No: {number}). Cannot overwrite with different station identity {newUuid} / {newNumber}. Please use "Reset Database" in settings if you need to re-initialize this station.',
         'error.serialAccessDenied': 'Port {port} is in use by another program or a ghost process. Please close other programs or check Task Manager.',
         'error.serialNotFound': 'Port {port} not found.',
+
+        // Deletion Modal
+        'delete.title': 'Manage Weights',
+        'delete.currentBoxTab': 'Current Box (Packs)',
+        'delete.currentPalletTab': 'Current Pallet (Boxes)',
+        'delete.noOpenBox': 'No open box currently. Start weighing to create one.',
+        'delete.currentBox': 'Current Box:',
+        'delete.totalPacks': 'Total Packs:',
+        'delete.weight': 'Weight:',
+        'delete.deleted': 'DELETED',
+        'delete.confirmPack': 'Are you sure you want to delete this pack?',
+        'delete.currentPallet': 'Current Pallet:',
+        'delete.totalBoxes': 'Total Boxes:',
+        'delete.open': 'OPEN',
+        'delete.closed': 'CLOSED',
+        'delete.confirmBox': 'Are you sure you want to delete this box? This will also mark all packs inside as deleted.',
+        'delete.noOpenPallet': 'No open pallet currently.',
+        'delete.loading': 'Loading...',
+        'delete.errorLoad': 'Failed to load data',
+        'delete.errorDeletePack': 'Failed to delete pack: ',
+        'delete.errorDeleteBox': 'Failed to delete box: ',
     },
 
     de: {
@@ -422,6 +469,8 @@ export const translations: Record<Lang, Record<string, string>> = {
         'ws.attention': 'Achtung',
         'ws.ok': 'OK, VERSTANDEN',
         'ws.stationNumber': 'Stationsnummer',
+        'ws.cancel': 'Abbrechen',
+        'ws.delete': 'Löschen',
 
         // Products
         'products.title': 'Produkte',
@@ -445,5 +494,26 @@ export const translations: Record<Lang, Record<string, string>> = {
         'error.identityLocked': 'Stationsidentität ist gesperrt (UUID: {uuid}, Nr.: {number}). Kann nicht mit einer anderen Stationsidentität {newUuid} / {newNumber} überschrieben werden. Bitte verwenden Sie "Datenbank zurücksetzen" in den Einstellungen, wenn Sie diese Station neu initialisieren müssen.',
         'error.serialAccessDenied': 'Port {port} wird von einem anderen Programm oder einem Hintergrundprozess verwendet. Bitte schließen Sie andere Programme oder prüfen Sie den Task-Manager.',
         'error.serialNotFound': 'Port {port} wurde nicht gefunden.',
+
+        // Deletion Modal
+        'delete.title': 'Gewichte verwalten',
+        'delete.currentBoxTab': 'Aktueller Karton (Packungen)',
+        'delete.currentPalletTab': 'Aktuelle Palette (Kartons)',
+        'delete.noOpenBox': 'Derzeit kein offener Karton. Beginnen Sie mit dem Wiegen, um einen zu erstellen.',
+        'delete.currentBox': 'Aktueller Karton:',
+        'delete.totalPacks': 'Packungen gesamt:',
+        'delete.weight': 'Gewicht:',
+        'delete.deleted': 'GELÖSCHT',
+        'delete.confirmPack': 'Sind Sie sicher, dass Sie diese Packung löschen möchten?',
+        'delete.currentPallet': 'Aktuelle Palette:',
+        'delete.totalBoxes': 'Kartons gesamt:',
+        'delete.open': 'OFFEN',
+        'delete.closed': 'GESCHLOSSEN',
+        'delete.confirmBox': 'Sind Sie sicher, dass Sie diesen Karton löschen möchten? Dadurch werden auch alle darin enthaltenen Packungen als gelöscht markiert.',
+        'delete.noOpenPallet': 'Derzeit keine offene Palette.',
+        'delete.loading': 'Laden...',
+        'delete.errorLoad': 'Fehler beim Laden der Daten',
+        'delete.errorDeletePack': 'Fehler beim Löschen der Packung: ',
+        'delete.errorDeleteBox': 'Fehler beim Löschen des Kartons: ',
     },
 };

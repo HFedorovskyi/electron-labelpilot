@@ -409,6 +409,18 @@ electron_1.ipcMain.handle('close-box', async (_, { boxId, weightNetto, weightBru
     const { closeBox } = await Promise.resolve().then(() => __importStar(require('./database')));
     return closeBox(boxId, weightNetto, weightBrutto);
 });
+electron_1.ipcMain.handle('get-open-pallet-content', async () => {
+    const { getOpenPalletContent } = await Promise.resolve().then(() => __importStar(require('./database')));
+    return getOpenPalletContent();
+});
+electron_1.ipcMain.handle('delete-pack', async (_, packId) => {
+    const { deletePack } = await Promise.resolve().then(() => __importStar(require('./database')));
+    return deletePack(packId);
+});
+electron_1.ipcMain.handle('delete-box', async (_, boxId) => {
+    const { deleteBox } = await Promise.resolve().then(() => __importStar(require('./database')));
+    return deleteBox(boxId);
+});
 electron_1.ipcMain.handle('get-latest-counters', async () => {
     const { getLatestCounters } = await Promise.resolve().then(() => __importStar(require('./database')));
     return getLatestCounters();
