@@ -309,32 +309,10 @@ export class CanvasBitmapGenerator implements ILabelGenerator {
         const w = el.w ? Math.round(el.w * scaleX) : undefined;
         const h = el.h ? Math.round(el.h * scaleY) : undefined;
 
-        let fontSize = Math.round((el.fontSize || 12) * scaleY);
+        let fontSize = (el.fontSize || 12) * scaleY;
         const fontFamily = el.fontFamily || 'Arial';
         const weight = el.fontWeight ? (typeof el.fontWeight === 'number' && el.fontWeight >= 600 ? 'bold' : (el.fontWeight === 'bold' ? 'bold' : 'normal')) : 'normal';
         const style = el.fontStyle || 'normal';
-
-        // Initial font setup
-        ctx.font = `${style} ${weight} ${fontSize}px "${fontFamily}", "Arial", sans-serif`;
-
-        // ADAPTIVE SCALING: Check if text fits in width. If not, reduce font size up to 70% of original.
-        // This handles cases where server font (Arial) is wider than client font (Inter).
-        if (w) {
-            const originalFontSize = fontSize;
-            let textWidth = ctx.measureText(text).width;
-
-            // Heuristic: If it's overflowing but not massively (max 1.5x), try to shrink it.
-            // If it's huge overflow (like ingredients), we probably want wrapping.
-            if (textWidth > w && textWidth < w * 1.5) {
-                log.info(`[CanvasBitmapGenerator] Text "${el.id}" overflow: ${textWidth.toFixed(1)} > ${w}. Attempting to shrink...`);
-                while (textWidth > w && fontSize > originalFontSize * 0.7) {
-                    fontSize--;
-                    ctx.font = `${style} ${weight} ${fontSize}px "${fontFamily}", "Arial", sans-serif`;
-                    textWidth = ctx.measureText(text).width;
-                }
-                log.info(`[CanvasBitmapGenerator] Shrunk "${el.id}" to ${fontSize}px (was ${originalFontSize}px). New width: ${textWidth.toFixed(1)}`);
-            }
-        }
 
         ctx.font = `${style} ${weight} ${fontSize}px "${fontFamily}", "Arial", sans-serif`;
         ctx.fillStyle = '#000000';
