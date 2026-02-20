@@ -256,7 +256,7 @@ class ScaleManager {
         }, interval);
     }
     handleData(data) {
-        const hex = data.toString('hex').toUpperCase();
+        // const hex = data.toString('hex').toUpperCase();
         // log.debug(`ScaleManager: [RAW DATA] ${hex}`);
         if (!this.currentProtocol)
             return;

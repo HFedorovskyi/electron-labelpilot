@@ -4,7 +4,7 @@ import { Printer, Network, Usb, Monitor, RefreshCw, Activity } from 'lucide-reac
 
 // Replicating types from main/config.ts since we can't import directly from main in renderer easily without shared types
 export type ConnectionType = 'tcp' | 'serial' | 'windows_driver';
-export type PrinterProtocol = 'zpl' | 'tspl' | 'image';
+export type PrinterProtocol = 'zpl' | 'tspl' | 'image' | 'browser';
 
 export interface PrinterDeviceConfig {
     id: string;
@@ -101,10 +101,11 @@ const PrinterSettings = ({ title, config, onChange, systemPrinters, serialPorts 
                 {/* Protocol Selection */}
                 <div>
                     <label className="block text-sm text-neutral-400 mb-2">Протокол печати</label>
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-3 gap-2">
                         {[
-                            { id: 'zpl', icon: Activity, label: 'ZPL (Raw)', desc: 'Для Zebra/TSC' },
-                            { id: 'image', icon: Monitor, label: 'Driver (Image)', desc: 'Для всех принтеров' }
+                            { id: 'zpl', icon: Activity, label: 'ZPL (Классика)', desc: 'Шрифты принтера' },
+                            { id: 'image', icon: Activity, label: 'ZPL (Точный)', desc: 'Текст в векторе' },
+                            { id: 'browser', icon: Monitor, label: 'Windows (Любой)', desc: 'Без ZPL' }
                         ].map((proto) => (
                             <button
                                 key={proto.id}

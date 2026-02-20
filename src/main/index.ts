@@ -188,11 +188,9 @@ app.whenReady().then(() => {
             // ── DIAGNOSTIC: Log what we received to understand routing ──
             log.info(`[print-label] Routing: protocol=${printerConfig?.protocol}, connection=${printerConfig?.connection}, name=${printerConfig?.name}`);
 
-            // New Routing Logic: Use PrinterService for all protocols (zpl, image, tspl)
-            // when we have a structured printerConfig with a direct connection (TCP/Serial).
-            // Fall through to legacy webContents.print() only for windows_driver without protocol support.
-            if (printerConfig && typeof printerConfig === 'object' &&
-                (printerConfig.protocol !== 'image' || printerConfig.connection === 'tcp' || printerConfig.connection === 'serial')) {
+            // New Routing Logic: Use PrinterService for all native protocols (zpl, image/hybrid_zpl, tspl)
+            // Fall through to legacy webContents.print() only for "browser" protocol.
+            if (printerConfig && typeof printerConfig === 'object' && printerConfig.protocol !== 'browser') {
                 try {
                     const { printerService } = await import('./printer/PrinterService');
                     await printerService.printLabel(printerConfig, labelDoc, data);
@@ -363,7 +361,7 @@ ipcMain.handle('test-print', async (_event, config) => {
     log.info('[IPC] test-print started', { protocol: config.protocol, name: config.name });
     const startTime = Date.now();
 
-    if (config.protocol === 'image') {
+    if (config.protocol === 'browser') {
         const testDoc = {
             id: 'test',
             name: 'Test Label',

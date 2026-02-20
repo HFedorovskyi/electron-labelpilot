@@ -240,6 +240,16 @@ export class CanvasBitmapGenerator implements ILabelGenerator {
         log.info(`[CanvasBitmapGenerator] Optimized Timing: static=${t3 - (t2 as any)}ms dynamic=${t4 - (t3 as any)}ms zpl=${t5 - (t4 as any)}ms TOTAL=${t5 - t0}ms`);
         log.info(`[CanvasBitmapGenerator] Layered ZPL: Background=${bgName}, Static=${staticCompressed.length}chars, DynamicBits=${hasDynamicBits}, NativeBC=${barcodeCommands.length}`);
 
+        // ── DEBUG: Dump ZPL to file ──────────────────────────────────
+        try {
+            const fs = require('fs');
+            const debugPath = path.join(app.getPath('logs'), `debug_label_${Date.now()}.zpl`);
+            fs.writeFileSync(debugPath, zpl);
+            log.info(`[CanvasBitmapGenerator] DEBUG: Dumped generated ZPL to ${debugPath}`);
+        } catch (e) {
+            log.error(`[CanvasBitmapGenerator] DEBUG: Failed to dump ZPL`, e);
+        }
+
         return buf;
     }
 
@@ -514,7 +524,7 @@ export class CanvasBitmapGenerator implements ILabelGenerator {
             const mag = el.moduleWidth || Math.max(3, Math.round(scaleX * 2));
             cmd += `^BQ${orient},2,${mag}`;
             cmd += `^FDQA,${bcVal}^FS\n`;
-        } else if (type.includes('ean13')) {
+        } else if (type.includes('ean13') || type.includes('ean13_kz')) {
             const showText = el.showText ? 'Y' : 'N';
             cmd += `^BY${moduleWidth},3.0,${height}`;
             cmd += `^BE${orient},${height},${showText},N^FD${bcVal}^FS\n`;

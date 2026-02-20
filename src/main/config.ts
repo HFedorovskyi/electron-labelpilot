@@ -92,7 +92,7 @@ export function saveNumberingConfig(config: NumberingConfig): void {
 // --- Printer Configuration ---
 
 export type ConnectionType = 'tcp' | 'serial' | 'windows_driver';
-export type PrinterProtocol = 'zpl' | 'tspl' | 'image';
+export type PrinterProtocol = 'zpl' | 'tspl' | 'image' | 'browser';
 
 export interface PrinterDeviceConfig {
     id: string;

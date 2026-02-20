@@ -145,7 +145,7 @@ const BarcodeElement = ({ el, processText, style }: { el: any; processText: (t: 
 
                 const getBwipType = (type: any) => {
                     const t = String(type).toLowerCase();
-                    if (t === '21' || t === 'ean13') return 'ean13';
+                    if (t === '21' || t === 'ean13' || t === 'ean13_kz') return 'ean13';
                     if (t === '22' || t === 'ean8') return 'ean8';
                     if (t === '23' || t === 'code128') return 'code128';
                     if (t === 'qr' || t === 'qrcode') return 'qrcode';
