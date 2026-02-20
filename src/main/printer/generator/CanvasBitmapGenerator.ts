@@ -80,7 +80,7 @@ export class CanvasBitmapGenerator implements ILabelGenerator {
     async generate(doc: LabelDoc, data: Record<string, any>, options: GeneratorOptions): Promise<Buffer> {
         const t0 = Date.now();
 
-        const dpi = doc.dpi || options.dpi || 203;
+        const dpi = options.dpi || doc.dpi || 203;
         const srcDpi = doc.canvas?.dpi || 96;
 
         // ── Physical dimensions (mm → dots) ──────────────────────────
