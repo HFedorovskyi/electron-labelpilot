@@ -171,7 +171,7 @@ class ZplGenerator {
                     cmd += `^BQ${orient},2,${magnification}`;
                     cmd += `^FDQA,${bcVal}^FS\n`;
                 }
-                else if (type.includes('ean13')) {
+                else if (type.includes('ean13') || type.includes('ean13_kz')) {
                     const showText = el.showText ? 'Y' : 'N';
                     cmd += `^BY${moduleWidth},3.0,${height}`;
                     cmd += `^BE${orient},${height},${showText},N^FD${bcVal}^FS\n`;

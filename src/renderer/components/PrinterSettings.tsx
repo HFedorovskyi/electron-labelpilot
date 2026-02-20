@@ -21,6 +21,7 @@ export interface PrinterDeviceConfig {
     // UI only
     darkness?: number; // 0-30
     printSpeed?: number; // 2-12
+    dpi?: number; // 203 | 300 | 600
 }
 
 interface PrinterSettingsProps {
@@ -120,6 +121,28 @@ const PrinterSettings = ({ title, config, onChange, systemPrinters, serialPorts 
                                     <span className="font-bold text-xs">{proto.label}</span>
                                 </div>
                                 <span className="text-[10px] opacity-60 leading-tight">{proto.desc}</span>
+                            </button>
+                        ))}
+                    </div>
+                </div>
+
+                {/* DPI Selection */}
+                <div>
+                    <label className="block text-sm text-neutral-400 mb-2">Качество печати (DPI)</label>
+                    <div className="grid grid-cols-2 gap-2">
+                        {[
+                            { id: 203, label: '203 DPI (Стандарт)' },
+                            { id: 300, label: '300 DPI (Высокое)' }
+                        ].map((d) => (
+                            <button
+                                key={d.id}
+                                onClick={() => update('dpi', d.id)}
+                                className={`p-3 rounded-xl border transition-all ${(config.dpi === d.id) || (!config.dpi && d.id === 203)
+                                    ? 'bg-amber-500/20 border-amber-500 text-amber-400'
+                                    : 'bg-black/20 border-white/5 text-neutral-500 hover:bg-white/5 hover:text-white'
+                                    }`}
+                            >
+                                <div className="font-bold text-xs text-center">{d.label}</div>
                             </button>
                         ))}
                     </div>

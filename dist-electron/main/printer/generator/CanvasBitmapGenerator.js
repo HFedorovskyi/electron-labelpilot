@@ -215,6 +215,16 @@ class CanvasBitmapGenerator {
         const t5 = Date.now();
         logger_1.default.info(`[CanvasBitmapGenerator] Optimized Timing: static=${t3 - t2}ms dynamic=${t4 - t3}ms zpl=${t5 - t4}ms TOTAL=${t5 - t0}ms`);
         logger_1.default.info(`[CanvasBitmapGenerator] Layered ZPL: Background=${bgName}, Static=${staticCompressed.length}chars, DynamicBits=${hasDynamicBits}, NativeBC=${barcodeCommands.length}`);
+        // ── DEBUG: Dump ZPL to file ──────────────────────────────────
+        try {
+            const fs = require('fs');
+            const debugPath = path_1.default.join(electron_1.app.getPath('logs'), `debug_label_${Date.now()}.zpl`);
+            fs.writeFileSync(debugPath, zpl);
+            logger_1.default.info(`[CanvasBitmapGenerator] DEBUG: Dumped generated ZPL to ${debugPath}`);
+        }
+        catch (e) {
+            logger_1.default.error(`[CanvasBitmapGenerator] DEBUG: Failed to dump ZPL`, e);
+        }
         return buf;
     }
     // ═══════════════════════════════════════════════════════════════════
@@ -462,7 +472,7 @@ class CanvasBitmapGenerator {
             cmd += `^BQ${orient},2,${mag}`;
             cmd += `^FDQA,${bcVal}^FS\n`;
         }
-        else if (type.includes('ean13')) {
+        else if (type.includes('ean13') || type.includes('ean13_kz')) {
             const showText = el.showText ? 'Y' : 'N';
             cmd += `^BY${moduleWidth},3.0,${height}`;
             cmd += `^BE${orient},${height},${showText},N^FD${bcVal}^FS\n`;

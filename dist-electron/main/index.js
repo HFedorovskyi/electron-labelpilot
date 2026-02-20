@@ -182,11 +182,9 @@ electron_1.app.whenReady().then(() => {
             const { silent, labelDoc, data, printerConfig, printerName } = options;
             // ── DIAGNOSTIC: Log what we received to understand routing ──
             logger_1.default.info(`[print-label] Routing: protocol=${printerConfig?.protocol}, connection=${printerConfig?.connection}, name=${printerConfig?.name}`);
-            // New Routing Logic: Use PrinterService for all protocols (zpl, image, tspl)
-            // when we have a structured printerConfig with a direct connection (TCP/Serial).
-            // Fall through to legacy webContents.print() only for windows_driver without protocol support.
-            if (printerConfig && typeof printerConfig === 'object' &&
-                (printerConfig.protocol !== 'image' || printerConfig.connection === 'tcp' || printerConfig.connection === 'serial')) {
+            // New Routing Logic: Use PrinterService for all native protocols (zpl, image/hybrid_zpl, tspl)
+            // Fall through to legacy webContents.print() only for "browser" protocol.
+            if (printerConfig && typeof printerConfig === 'object' && printerConfig.protocol !== 'browser') {
                 try {
                     const { printerService } = await Promise.resolve().then(() => __importStar(require('./printer/PrinterService')));
                     await printerService.printLabel(printerConfig, labelDoc, data);
@@ -335,7 +333,7 @@ electron_1.ipcMain.on('save-printer-config', async (_, config) => {
 electron_1.ipcMain.handle('test-print', async (_event, config) => {
     logger_1.default.info('[IPC] test-print started', { protocol: config.protocol, name: config.name });
     const startTime = Date.now();
-    if (config.protocol === 'image') {
+    if (config.protocol === 'browser') {
         const testDoc = {
             id: 'test',
             name: 'Test Label',
