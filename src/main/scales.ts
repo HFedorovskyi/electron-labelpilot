@@ -12,7 +12,8 @@ class ScaleManager {
     private currentProtocol: ScaleProtocol | null = null;
     private pollingInterval: NodeJS.Timeout | null = null;
     private config: ScaleConfig | null = null;
-    private isConnecting: boolean = false;
+    private connectionTimeout: NodeJS.Timeout | null = null;
+    private lastConnectId: number = 0;
 
     // Stability Logic
     private recentReadings: number[] = [];
@@ -32,6 +33,7 @@ class ScaleManager {
     }
 
     public setMainWindow(window: BrowserWindow) {
+        log.info('ScaleManager: setMainWindow called. Window exists:', !!window);
         this.mainWindow = window;
     }
 
@@ -40,6 +42,7 @@ class ScaleManager {
     }
 
     public async saveAndConnect(config: ScaleConfig) {
+        log.info('ScaleManager: saveAndConnect triggered:', JSON.stringify(config));
         saveScaleConfig(config);
         await this.connect(config);
     }
@@ -78,18 +81,22 @@ class ScaleManager {
     private watchdogInterval: NodeJS.Timeout | null = null;
 
     public async connect(config: ScaleConfig) {
-        if (this.isConnecting) {
-            log.info('ScaleManager: Already connecting, skipping...');
-            return;
-        }
-        this.isConnecting = true;
+        const myId = ++this.lastConnectId;
+        log.info(`ScaleManager: [CONNECT] START #${myId} (type: ${config.type}, protocol: ${config.protocolId})`);
 
         try {
             await this.disconnect();
+
+            // Fencing check
+            if (myId !== this.lastConnectId) {
+                log.warn(`ScaleManager: [CONNECT] #${myId} superseded by #${this.lastConnectId}. Aborting.`);
+                return;
+            }
+
             this.config = config;
             this.currentProtocol = getProtocol(config.protocolId);
 
-            console.log(`ScaleManager: Connecting to ${config.type} using ${this.currentProtocol.name}`);
+            log.info(`ScaleManager: [CONNECT] #${myId} Internal type: ${config.type}, Protocol: ${this.currentProtocol.name}`);
             this.emitStatus('reconnecting');
 
             if (config.type === 'serial') {
@@ -100,26 +107,52 @@ class ScaleManager {
             } else {
                 this.connectTcp(config);
             }
+
+            // Final fencing check
+            if (myId !== this.lastConnectId) {
+                log.warn(`ScaleManager: [CONNECT] #${myId} superseded during connection. Ignoring results.`);
+                return;
+            }
+        } catch (e) {
+            log.error(`ScaleManager: [CONNECT] #${myId} ERROR:`, e);
+            throw e;
         } finally {
-            this.isConnecting = false;
+            if (myId === this.lastConnectId) {
+                log.info(`ScaleManager: [CONNECT] #${myId} FINISHED`);
+            } else {
+                log.info(`ScaleManager: [CONNECT] #${myId} cleanup finished.`);
+            }
         }
     }
 
     private async connectSerial(config: ScaleConfig) {
         const path = config.path;
         if (!path) {
-            console.error('ScaleManager: No serial path provided');
+            log.error('ScaleManager: [SERIAL] No path provided');
             return;
         }
 
-        return new Promise<void>((resolve) => {
+        return new Promise<void>((resolvePromise) => {
+            let doneCalled = false;
+            const done = () => {
+                if (doneCalled) return;
+                doneCalled = true;
+                clearTimeout(connectionTimeout);
+                resolvePromise();
+            };
+
+            const connectionTimeout = setTimeout(() => {
+                log.warn(`ScaleManager: [SERIAL] Connection to ${path} TIMEOUT (5s)`);
+                done();
+            }, 5000);
+
             try {
                 const baudRate = config.baudRate || this.currentProtocol?.defaultBaudRate || 9600;
                 const parity = this.currentProtocol?.parity || 'none';
                 const dataBits = this.currentProtocol?.dataBits || 8;
                 const stopBits = this.currentProtocol?.stopBits || 1;
 
-                log.info(`ScaleManager: Opening ${path} (${baudRate}, ${dataBits}, ${parity}, ${stopBits})`);
+                log.info(`ScaleManager: [SERIAL] Opening ${path} (${baudRate}, ${dataBits}, ${parity}, ${stopBits})`);
 
                 this.scalePort = new SerialPort({
                     path: path,
@@ -128,38 +161,30 @@ class ScaleManager {
                     dataBits: dataBits as any,
                     stopBits: stopBits as any,
                     autoOpen: false,
-                    rtscts: false, // Explicitly disable hardware flow control
+                    rtscts: false,
                 });
 
                 this.scalePort.on('open', () => {
-                    log.info(`ScaleManager: Port ${path} OPENED`);
+                    log.info(`ScaleManager: [SERIAL] Port ${path} OPENED`);
 
-                    // Set control signals (often required for USB adapters and Massa-K)
                     this.scalePort?.set({ dtr: true, rts: true }, (err) => {
-                        if (err) log.error('ScaleManager: Error setting DTR/RTS:', err.message);
+                        if (err) log.error('ScaleManager: [SERIAL] Error setting DTR/RTS:', err.message);
                         else {
-                            log.info('ScaleManager: DTR/RTS signals set to TRUE');
-                            // Experimental: pulse DTR after open
-                            setTimeout(() => {
-                                this.scalePort?.set({ dtr: false }, () => {
-                                    setTimeout(() => this.scalePort?.set({ dtr: true }), 50);
-                                });
-                            }, 100);
+                            log.info('ScaleManager: [SERIAL] DTR/RTS signals set to TRUE');
                         }
                     });
 
-                    // Status is 'connecting' until first data
                     this.emitStatus('connecting');
-                    // Delay polling slightly to allow signals to stabilize
-                    setTimeout(() => {
+                    this.connectionTimeout = setTimeout(() => {
+                        this.connectionTimeout = null;
                         if (this.scalePort?.isOpen) {
-                            log.info('ScaleManager: Starting polling after stabilization delay');
+                            log.info('ScaleManager: [SERIAL] Starting polling after delay');
                             this.startPolling();
                             this.startWatchdog();
                         }
                     }, 200);
 
-                    resolve();
+                    done();
                 });
 
                 this.scalePort.on('data', (data) => {
@@ -167,9 +192,7 @@ class ScaleManager {
                 });
 
                 this.scalePort.on('error', (err) => {
-                    log.error('ScaleManager: Serial Port Error:', err.message);
-
-                    // Specific error handling for "Access denied"
+                    log.error('ScaleManager: [SERIAL] Port Error:', err.message);
                     if (err.message.includes('Access denied')) {
                         this.emitError(`serial_access_denied|${config.path}`);
                     } else if (err.message.includes('File not found')) {
@@ -177,26 +200,23 @@ class ScaleManager {
                     } else {
                         this.emitError(err.message);
                     }
-                    resolve(); // Resolve anyway to unlock isConnecting, error is handled by listeners
+                    done();
                 });
 
                 this.scalePort.on('close', () => {
-                    log.info('ScaleManager: Port CLOSED');
+                    log.info('ScaleManager: [SERIAL] Port CLOSED');
                     this.emitStatus('disconnected');
                 });
 
                 this.scalePort.open((err) => {
                     if (err) {
-                        log.error('ScaleManager: Immediate Open Error:', err.message);
-                        // Handled by 'error' listener
+                        log.error('ScaleManager: [SERIAL] Immediate Open Error:', err.message);
                     }
                 });
 
-
             } catch (err: any) {
-                console.error('ScaleManager: Failed to create SerialPort:', err.message);
-                this.emitError(err.message);
-                resolve();
+                log.error('ScaleManager: [SERIAL] Init Exception:', err.message);
+                done();
             }
         });
     }
@@ -236,46 +256,58 @@ class ScaleManager {
     }
 
     private startPolling() {
+        log.info(`ScaleManager: [POLLING] startPolling called. Type: ${this.config?.type}, Protocol: ${this.currentProtocol?.id}`);
+
+        if (this.pollingInterval) {
+            log.info('ScaleManager: [POLLING] Clearing existing interval');
+            clearInterval(this.pollingInterval);
+            this.pollingInterval = null;
+        }
+
         if (!this.currentProtocol) {
-            console.log('ScaleManager: No protocol selected, skipping polling');
+            log.warn('ScaleManager: [POLLING] No protocol selected, skipping');
             return;
         }
 
-        if (!this.currentProtocol.pollingRequired) {
-            console.log(`ScaleManager: Protocol ${this.currentProtocol.name} does not require polling`);
-            return;
-        }
-
-        if (!this.currentProtocol.getWeightCommand) {
-            console.log(`ScaleManager: Protocol ${this.currentProtocol.name} has no weight command`);
+        if (!this.currentProtocol.pollingRequired && this.config?.type !== 'simulator') {
+            log.info(`ScaleManager: [POLLING] Protocol ${this.currentProtocol.name} does not require polling`);
             return;
         }
 
         const interval = this.config?.pollingInterval || 500;
-        const cmd = this.currentProtocol.getWeightCommand();
-        console.log(`ScaleManager: Starting polling every ${interval}ms using command:`, cmd);
+        const cmd = this.currentProtocol.getWeightCommand ? this.currentProtocol.getWeightCommand() : null;
+
+        log.info(`ScaleManager: [POLLING] Starting interval: ${interval}ms. Cmd: ${!!cmd}, Window: ${!!this.mainWindow}`);
 
         this.pollingInterval = setInterval(() => {
-            if (this.config?.type === 'serial' && this.scalePort?.isOpen) {
-                if (cmd instanceof Buffer) {
-                    // log.debug('ScaleManager: Sending Hex:', cmd.toString('hex').toUpperCase());
-                } else {
-                    // log.debug('ScaleManager: Sending Text:', cmd);
-                }
+            if (this.config?.type === 'serial' && this.scalePort?.isOpen && cmd) {
                 this.scalePort.write(cmd, (err) => {
-                    if (err) console.error('ScaleManager: Write error:', err);
+                    if (err) log.error('ScaleManager: [POLLING] Serial Write error:', err);
                 });
-            } else if (this.config?.type === 'tcp' && this.tcpClient && !this.tcpClient.destroyed) {
+            } else if (this.config?.type === 'tcp' && this.tcpClient && !this.tcpClient.destroyed && cmd) {
                 this.tcpClient.write(cmd);
             } else if (this.config?.type === 'simulator') {
-                const randomWeight = (Math.random() * 10 + 1).toFixed(3);
-                const isStable = Math.random() > 0.3;
-                const reading: ScaleReading = {
-                    weight: parseFloat(randomWeight),
-                    unit: 'kg',
-                    stable: isStable
-                };
-                this.mainWindow?.webContents.send('scale-reading', reading);
+                try {
+                    // Occasionally drop weight to zero so auto-print can reset
+                    const shouldBeZero = Math.random() > 0.8;
+                    const randomWeight = shouldBeZero ? "0.000" : (Math.random() * 5 + 0.5).toFixed(3);
+
+                    const isStable = Math.random() > 0.2;
+                    const reading: ScaleReading = {
+                        weight: parseFloat(randomWeight),
+                        unit: 'kg',
+                        stable: isStable
+                    };
+                    if (this.mainWindow) {
+                        this.lastDataTime = Date.now(); // Update watchdog
+                        this.mainWindow.webContents.send('scale-reading', reading);
+                    } else {
+                        // Very important log: why the simulator might look dead
+                        log.warn('ScaleManager: [POLLING] Simulator active but mainWindow is NULL');
+                    }
+                } catch (e) {
+                    log.error('ScaleManager: [POLLING] Simulator error:', e);
+                }
             }
         }, interval);
     }
@@ -320,6 +352,13 @@ class ScaleManager {
     }
 
     public async disconnect() {
+        log.info('ScaleManager: Disconnecting...');
+
+        if (this.connectionTimeout) {
+            clearTimeout(this.connectionTimeout);
+            this.connectionTimeout = null;
+        }
+
         if (this.pollingInterval) {
             clearInterval(this.pollingInterval);
             this.pollingInterval = null;
@@ -336,8 +375,14 @@ class ScaleManager {
 
             if (port.isOpen) {
                 log.info('ScaleManager: Closing serial port...');
-                return new Promise<void>((resolve) => {
+                await new Promise<void>((resolve) => {
+                    const timeout = setTimeout(() => {
+                        log.warn('ScaleManager: Disconnect TIMEOUT - forcing resolution');
+                        resolve();
+                    }, 2000);
+
                     port.close((err) => {
+                        clearTimeout(timeout);
                         if (err) log.error('ScaleManager: Error closing port:', err);
                         port.removeAllListeners();
                         resolve();

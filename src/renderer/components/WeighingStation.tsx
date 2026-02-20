@@ -45,6 +45,9 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
         autoPrintOnStable: false
     });
 
+    const [isReady, setIsReady] = useState(false);
+    const [stableTrigger, setStableTrigger] = useState(0);
+
     const [batchNumber, setBatchNumber] = useState<string>('');
     const [isKeypadOpen, setIsKeypadOpen] = useState(false);
     const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
@@ -55,7 +58,6 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
     const autoPrintFiredRef = useRef(false);
     const isPrintingRef = useRef(false);
     const weightRef = useRef('0.000');
-    const componentReadyRef = useRef(false);
 
     // --- EFFECTS ---
     useEffect(() => {
@@ -65,15 +67,6 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
                 if (info) {
                     if (info.station_number) setStationNumber(info.station_number);
                 }
-
-                // Get latest records from history
-                const latest = await window.electron.invoke('get-latest-counters');
-                console.log('Latest Counters from DB:', latest);
-                if (latest) {
-                    if (latest.totalUnits !== undefined) setTotalUnits(latest.totalUnits);
-                    if (latest.totalBoxes !== undefined) setTotalBoxes(latest.totalBoxes);
-                    if (latest.boxesInPallet !== undefined) setBoxesInPallet(latest.boxesInPallet);
-                }
             } catch (e) {
                 console.error('Failed to load station info', e);
             }
@@ -81,25 +74,55 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
         loadStationInfo();
 
         // Delay enabling auto-print to avoid firing on startup
-        const readyTimer = setTimeout(() => { componentReadyRef.current = true; }, 2000);
+        const readyTimer = setTimeout(() => { setIsReady(true); }, 1500);
         return () => clearTimeout(readyTimer);
     }, []);
+
+    // Sync counters when selectedProduct changes or on mount
+    useEffect(() => {
+        const syncCountersWithProduct = async () => {
+            try {
+                const nomenclatureId = selectedProduct?.id;
+                const latest = await window.electron.invoke('get-latest-counters', nomenclatureId);
+                console.log('Latest Counters from DB (Product Sync):', latest);
+                if (latest) {
+                    // Global counters
+                    if (latest.totalUnits !== undefined) setTotalUnits(latest.totalUnits);
+                    if (latest.totalBoxes !== undefined) setTotalBoxes(latest.totalBoxes);
+                    if (latest.boxesInPallet !== undefined) setBoxesInPallet(latest.boxesInPallet);
+
+                    // Box-specific counters
+                    if (latest.unitsInBox !== undefined) setUnitsInBox(latest.unitsInBox);
+                    if (latest.boxNetWeight !== undefined) setBoxNetWeight(latest.boxNetWeight);
+                    if (latest.currentBoxId !== undefined) setCurrentBoxId(latest.currentBoxId);
+                    if (latest.currentBoxNumber !== undefined) setCurrentBoxNumber(latest.currentBoxNumber);
+                }
+            } catch (e) {
+                console.error('Failed to load latest counters', e);
+            }
+        };
+        syncCountersWithProduct();
+    }, [selectedProduct]);
 
 
 
     // --- HELPER FUNCTIONS ---
-    const getGrossWeight = () => {
+    const getNetWeight = () => {
         if (!selectedProduct) return weight;
         const currentWeight = parseFloat(weight);
-        // Try to find container first
-        if (selectedProduct.portion_container_id) {
-            const container = containers.find(c => c.id === selectedProduct.portion_container_id);
-            if (container) {
-                return (currentWeight + container.weight / 1000).toFixed(3);
-            }
-        }
-        // Fallback to direct portion_weight if present
-        return (currentWeight + (selectedProduct.portion_weight || 0) / 1000).toFixed(3);
+
+        const portionContainerId = selectedProduct.portion_container_id;
+        const portionContainer = portionContainerId
+            ? containers.find(c => String(c.id) === String(portionContainerId))
+            : null;
+
+        // Use container weight from list, or the pre-loaded portion_weight from product query
+        const tareGrams = portionContainer?.weight || selectedProduct.portion_weight || 0;
+        const tareKg = tareGrams / 1000;
+
+        const result = Math.max(0, currentWeight - tareKg).toFixed(3);
+        console.log(`DEBUG [getNetWeight]: weight=${weight}, tareKg=${tareKg}, result=${result}`);
+        return result;
     };
 
     const getLabelData = (overrideWeight?: number, isBoxLabel: boolean = false, overrideUnits?: number) => {
@@ -135,9 +158,10 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
         }
 
         // Calculate Weights
-        const weightNettoPack = currentWeightVal;
-        const portionContainer = containers.find(c => c.id === selectedProduct?.portion_container_id);
-        const weightBruttoPack = weightNettoPack + (portionContainer?.weight || 0) / 1000;
+        const weightBruttoPack = currentWeightVal;
+        const portionContainer = containers.find(c => String(c.id) === String(selectedProduct?.portion_container_id));
+        const tarePack = (portionContainer?.weight || selectedProduct?.portion_weight || 0) / 1000;
+        const weightNettoPack = Math.max(0, weightBruttoPack - tarePack);
 
         // Box Weights
         // For box label, currentWeightVal passed in IS the total box net weight
@@ -323,9 +347,14 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
         const removeReadingListener = window.electron.on('scale-reading', (data: any) => {
             if (data && typeof data === 'object' && 'weight' in data) {
                 const w = typeof data.weight === 'number' ? data.weight : parseFloat(String(data.weight));
+                console.log(`[WeighingStation] Event received: ${w.toFixed(3)} (stable: ${data.stable})`);
                 setWeight(w.toFixed(3));
                 weightRef.current = w.toFixed(3);
                 setIsStable(!!data.stable);
+
+                if (data.stable) {
+                    setStableTrigger(prev => prev + 1);
+                }
 
                 // Reset auto-print flag when weight drops near zero (product removed)
                 if (w < 0.010) {
@@ -369,7 +398,7 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
             removeErrorListener();
             removeUpdateListener();
         };
-    }, [searchQuery]);
+    }, []); // Remove searchQuery to prevent listener flapping
 
     // Auto-update selected product / auto-select on load
     useEffect(() => {
@@ -417,7 +446,7 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
     // Only reacts to isStable changes (not every weight reading) to avoid blocking React rendering
     useEffect(() => {
         if (
-            !componentReadyRef.current ||
+            !isReady ||
             !printerConfig.autoPrintOnStable ||
             !isStable ||
             !selectedProduct ||
@@ -425,18 +454,28 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
             autoPrintFiredRef.current ||
             isPrintingRef.current ||
             activeTab !== 'weighing'
-        ) return;
+        ) {
+            // Optional: verbose log if we are stable but not firing
+            if (isStable && !autoPrintFiredRef.current && !isPrintingRef.current) {
+                console.log(`[AutoPrint] Skip: isReady=${isReady}, product=${!!selectedProduct}, doc=${!!labelDoc}, tab=${activeTab}`);
+            }
+            return;
+        }
 
         // Check weight from ref (avoids putting weight in deps which would cause effect to fire ~7/sec)
         const currentWeight = parseFloat(weightRef.current);
-        if (currentWeight <= 0.010) return;
+        if (currentWeight <= 0.010) {
+            if (isStable) console.log(`[AutoPrint] Skip: weight too low (${currentWeight})`);
+            return;
+        }
 
+        console.log(`[AutoPrint] Firing! Weight: ${currentWeight}, Product: ${selectedProduct.name}`);
         autoPrintFiredRef.current = true;
         handlePrint().catch((err) => {
             console.error('Auto-print failed:', err);
             isPrintingRef.current = false;
         });
-    }, [isStable, selectedProduct, labelDoc, printerConfig.autoPrintOnStable]);
+    }, [isStable, selectedProduct, labelDoc, printerConfig.autoPrintOnStable, isReady, stableTrigger]);
 
     // Initial Data Load
     useEffect(() => {
@@ -680,11 +719,9 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
         try {
             if (!labelDoc) {
                 console.warn('Cannot print: No label template selected');
-                isPrintingRef.current = false;
                 return;
             }
 
-            const currentWeight = parseFloat(weight);
             const boxLimit = selectedProduct?.close_box_counter || 999999;
 
             // 1. Get PREDICTED Box Number for Record-Pack if no box is open
@@ -738,8 +775,9 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
             setLastPrinted({ doc: labelDoc, data: finalPrintData });
 
             // 7. Update Box Stats
+            const currentNetWeight = parseFloat(finalPrintData.weight_netto_pack);
             const newUnitsInBox = unitsInBox + 1;
-            const newBoxNetWeight = boxNetWeight + currentWeight;
+            const newBoxNetWeight = boxNetWeight + currentNetWeight;
 
             if (newUnitsInBox >= boxLimit) {
                 console.log('Box limit reached. Auto-printing box label.');
@@ -810,11 +848,10 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
                 setBoxNetWeight(newBoxNetWeight);
                 setTotalUnits(prev => prev + 1);
             }
-
-            isPrintingRef.current = false;
         } catch (err) {
             console.error('Print Error:', err);
             setAlertMessage(`Ошибка: ${err instanceof Error ? err.message : String(err)}`);
+        } finally {
             isPrintingRef.current = false;
         }
     };
@@ -839,6 +876,8 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
         setSearchQuery('');
         setIsMenuOpen(false);
     };
+
+    console.log('[WeighingStation] Render State:', { weight, isStable, selectedProductName: selectedProduct?.name, containersCount: containers.length });
 
     return (
         <div className="grid grid-cols-12 gap-6 h-full p-4 relative" onClick={() => setIsMenuOpen(false)}>
@@ -922,7 +961,7 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
                 <div className="mt-8 grid grid-cols-2 gap-4">
                     <div className="bg-black/30 border border-white/10 rounded-3xl p-8 text-center relative overflow-hidden group">
                         <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                        <label className="text-xs uppercase tracking-widest text-neutral-500 font-bold">{t('ws.net')}</label>
+                        <label className="text-xs uppercase tracking-widest text-neutral-500 font-bold">{t('ws.gross')}</label>
                         <div className="text-7xl font-mono text-emerald-400 mt-2 font-light tracking-tighter">
                             {weight} <span className="text-2xl text-emerald-500/50">{t('ws.kg')}</span>
                         </div>
@@ -934,9 +973,9 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
                         )}
                     </div>
                     <div className="bg-black/30 border border-white/10 rounded-3xl p-8 text-center">
-                        <label className="text-xs uppercase tracking-widest text-neutral-500 font-bold">{t('ws.gross')}</label>
+                        <label className="text-xs uppercase tracking-widest text-neutral-500 font-bold">{t('ws.net')}</label>
                         <div className="text-7xl font-mono text-neutral-300 mt-2 font-light tracking-tighter">
-                            {getGrossWeight()} <span className="text-2xl text-neutral-600">{t('ws.kg')}</span>
+                            {getNetWeight()} <span className="text-2xl text-neutral-600">{t('ws.kg')}</span>
                         </div>
                     </div>
                 </div>
@@ -1104,24 +1143,18 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
                 onClose={() => setIsDeleteModalOpen(false)}
                 onDeleted={async () => {
                     // Refresh counters
-                    const latest = await window.electron.invoke('get-latest-counters');
+                    const nomenclatureId = selectedProduct?.id;
+                    const latest = await window.electron.invoke('get-latest-counters', nomenclatureId);
                     if (latest) {
                         setTotalUnits(latest.totalUnits);
                         setTotalBoxes(latest.totalBoxes);
                         setUnitsInBox(latest.unitsInBox);
                         setBoxesInPallet(latest.boxesInPallet);
-                    }
 
-                    // We also need to refresh local state if the current box/pack was deleted
-                    const openContent = await window.electron.invoke('get-open-pallet-content');
-                    if (openContent && openContent.openBox) {
-                        // setUnitsInBox(openContent.packsInCurrentBox?.length || 0); // Already set by get-latest-counters
-                        setCurrentBoxId(openContent.openBox.id);
-                        setCurrentBoxNumber(openContent.openBox.number);
-                        setBoxNetWeight(openContent.openBox.weight_netto || 0);
+                        setCurrentBoxId(latest.currentBoxId);
+                        setCurrentBoxNumber(latest.currentBoxNumber);
+                        setBoxNetWeight(latest.boxNetWeight || 0);
                     } else {
-                        // No open box
-                        // setUnitsInBox(0); // Already set by get-latest-counters
                         setCurrentBoxId(null);
                         setCurrentBoxNumber(null);
                         setBoxNetWeight(0);

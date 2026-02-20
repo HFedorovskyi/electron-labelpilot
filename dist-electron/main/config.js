@@ -104,7 +104,22 @@ function loadPrinterConfig() {
     try {
         if (fs_1.default.existsSync(configPath)) {
             const data = fs_1.default.readFileSync(configPath, 'utf-8');
-            return { ...DEFAULT_PRINTER_CONFIG, ...JSON.parse(data) };
+            const parsed = JSON.parse(data);
+            // Migration: wipe out old default 58x40 limits if they match exactly
+            // This prevents legacy configs from shrinking dynamic templates
+            if (parsed.packPrinter) {
+                if (parsed.packPrinter.widthMm === 58 && parsed.packPrinter.heightMm === 40) {
+                    delete parsed.packPrinter.widthMm;
+                    delete parsed.packPrinter.heightMm;
+                }
+            }
+            if (parsed.boxPrinter) {
+                if (parsed.boxPrinter.widthMm === 58 && parsed.boxPrinter.heightMm === 40) {
+                    delete parsed.boxPrinter.widthMm;
+                    delete parsed.boxPrinter.heightMm;
+                }
+            }
+            return { ...DEFAULT_PRINTER_CONFIG, ...parsed };
         }
     }
     catch (error) {

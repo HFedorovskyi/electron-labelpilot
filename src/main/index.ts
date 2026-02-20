@@ -40,6 +40,7 @@ let mainWindow: any = null;
 let workerWindow: BrowserWindow | null = null;
 
 function createWindow() {
+    log.info('[Main] createWindow called');
     mainWindow = new BrowserWindow({
         width: 1200,
         height: 800,
@@ -96,7 +97,9 @@ function createWorkerWindow() {
 }
 
 app.whenReady().then(() => {
+    log.info('[Main] app.ready! Initializing services...');
     initDatabase();
+    // ... rest of init
 
     ipcMain.handle('get-station-info', () => {
         const { getStationInfo } = require('./database');
@@ -128,6 +131,7 @@ app.whenReady().then(() => {
     });
 
     ipcMain.on('connect-scale', (_, config) => {
+        log.info('[IPC] connect-scale called', JSON.stringify(config));
         scaleManager.saveAndConnect(config);
     });
 
@@ -140,6 +144,7 @@ app.whenReady().then(() => {
     });
 
     ipcMain.on('save-scale-config', (_, config) => {
+        log.info('[IPC] save-scale-config called', JSON.stringify(config));
         scaleManager.saveAndConnect(config);
     });
 
@@ -458,9 +463,9 @@ ipcMain.handle('delete-box', async (_, boxId) => {
     return deleteBox(boxId);
 });
 
-ipcMain.handle('get-latest-counters', async () => {
+ipcMain.handle('get-latest-counters', async (_, nomenclatureId?: number) => {
     const { getLatestCounters } = await import('./database');
-    return getLatestCounters();
+    return getLatestCounters(nomenclatureId);
 });
 
 ipcMain.on('log-to-main', (_event, ...args) => {

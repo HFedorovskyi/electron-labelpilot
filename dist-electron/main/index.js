@@ -64,6 +64,7 @@ process.on('uncaughtException', (err) => {
 let mainWindow = null;
 let workerWindow = null;
 function createWindow() {
+    logger_1.default.info('[Main] createWindow called');
     mainWindow = new electron_1.BrowserWindow({
         width: 1200,
         height: 800,
@@ -113,7 +114,9 @@ function createWorkerWindow() {
     });
 }
 electron_1.app.whenReady().then(() => {
+    logger_1.default.info('[Main] app.ready! Initializing services...');
     (0, database_1.initDatabase)();
+    // ... rest of init
     electron_1.ipcMain.handle('get-station-info', () => {
         const { getStationInfo } = require('./database');
         return getStationInfo();
@@ -136,6 +139,7 @@ electron_1.app.whenReady().then(() => {
         discovery_1.discoveryManager.setMode(mode);
     });
     electron_1.ipcMain.on('connect-scale', (_, config) => {
+        logger_1.default.info('[IPC] connect-scale called', JSON.stringify(config));
         scales_1.scaleManager.saveAndConnect(config);
     });
     electron_1.ipcMain.handle('get-scale-config', () => {
@@ -145,6 +149,7 @@ electron_1.app.whenReady().then(() => {
         return scales_1.scaleManager.getStatus();
     });
     electron_1.ipcMain.on('save-scale-config', (_, config) => {
+        logger_1.default.info('[IPC] save-scale-config called', JSON.stringify(config));
         scales_1.scaleManager.saveAndConnect(config);
     });
     electron_1.ipcMain.handle('get-numbering-config', async () => {
@@ -419,9 +424,9 @@ electron_1.ipcMain.handle('delete-box', async (_, boxId) => {
     const { deleteBox } = await Promise.resolve().then(() => __importStar(require('./database')));
     return deleteBox(boxId);
 });
-electron_1.ipcMain.handle('get-latest-counters', async () => {
+electron_1.ipcMain.handle('get-latest-counters', async (_, nomenclatureId) => {
     const { getLatestCounters } = await Promise.resolve().then(() => __importStar(require('./database')));
-    return getLatestCounters();
+    return getLatestCounters(nomenclatureId);
 });
 electron_1.ipcMain.on('log-to-main', (_event, ...args) => {
     logger_1.default.info('[Renderer Log]:', ...args);

@@ -330,7 +330,14 @@ const Settings = () => {
                                 <label className="block text-sm text-neutral-400 mb-2">{t('settings.connectionType')}</label>
                                 <select
                                     value={config.type}
-                                    onChange={(e) => setConfig({ ...config, type: e.target.value })}
+                                    onChange={(e) => {
+                                        const newType = e.target.value;
+                                        const update: any = { type: newType };
+                                        if (newType === 'simulator') {
+                                            update.protocolId = 'simulator';
+                                        }
+                                        setConfig({ ...config, ...update });
+                                    }}
                                     className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all hover:bg-black/30"
                                 >
                                     <option value="serial">{t('settings.serial')}</option>

@@ -345,7 +345,7 @@ export function closeBox(boxId: number, weightNetto: number, weightBrutto: numbe
   return { success: true };
 }
 
-export function getLatestCounters() {
+export function getLatestCounters(nomenclatureId?: number) {
   const db = initDatabase();
 
   const lastPack = db.prepare('SELECT number FROM pack ORDER BY id DESC LIMIT 1').get() as { number: string } | undefined;
@@ -365,11 +365,24 @@ export function getLatestCounters() {
   // We need to find the open box first. Logic similar to recordPack but read-only.
   // Ideally, an open box belongs to the open pallet, but strictly speaking it just needs status='Open'.
   // Let's find the most recent open box.
-  const openBox = db.prepare("SELECT id FROM boxes WHERE status = 'Open' ORDER BY id DESC LIMIT 1").get() as { id: number } | undefined;
+  let openBoxQuery = "SELECT id, number FROM boxes WHERE status = 'Open'";
+  const queryArgs: any[] = [];
+
+  if (nomenclatureId) {
+    openBoxQuery += " AND nomenclature_id = ?";
+    queryArgs.push(nomenclatureId);
+  }
+
+  openBoxQuery += " ORDER BY id DESC LIMIT 1";
+
+  const openBox = db.prepare(openBoxQuery).get(...queryArgs) as { id: number, number: string } | undefined;
   let unitsInBox = 0;
+  let boxNetWeight = 0;
+
   if (openBox) {
-    const res = db.prepare("SELECT COUNT(*) as count FROM pack WHERE box_id = ? AND status != 'Deleted'").get(openBox.id) as { count: number };
+    const res = db.prepare("SELECT COUNT(*) as count, SUM(weight_netto) as current_weight FROM pack WHERE box_id = ? AND status != 'Deleted'").get(openBox.id) as { count: number, current_weight: number | null };
     unitsInBox = res.count;
+    boxNetWeight = res.current_weight || 0;
   }
 
   const finalCounters = {
@@ -378,7 +391,10 @@ export function getLatestCounters() {
     totalUnits: totalUnits.total,
     totalBoxes: totalBoxes.total,
     boxesInPallet: boxesInPallet,
-    unitsInBox: unitsInBox
+    unitsInBox: unitsInBox,
+    boxNetWeight: boxNetWeight,
+    currentBoxId: openBox?.id || null,
+    currentBoxNumber: openBox?.number || null
   };
 
   return finalCounters;

@@ -1,5 +1,5 @@
 export interface BarcodeField {
-    field_type: 'constanta' | 'constant' | 'ai' | 'weight' | 'weight_netto_pack' | 'weight_brutto_pack' | 'weight_netto_box' | 'weight_brutto_box' | 'weight_netto_pallet' | 'weight_brutto_pallet' | 'weight_brutto_all' | 'production_date' | 'exp_date' | 'article' | 'batch_number' | 'pack_number' | 'box_number' | 'pallet_number';
+    field_type: 'constanta' | 'constant' | 'ai' | 'weight' | 'weight_netto_pack' | 'weight_brutto_pack' | 'weight_netto_box' | 'weight_brutto_box' | 'weight_netto_pallet' | 'weight_brutto_pallet' | 'weight_brutto_all' | 'production_date' | 'exp_date' | 'article' | 'batch_number' | 'pack_number' | 'box_number' | 'pallet_number' | 'extra_data';
     value?: string;
     length?: string | number;
     decimalPlaces?: string | number;
@@ -141,6 +141,17 @@ export const generateBarcode = (fields: BarcodeField[], data: BarcodeData): stri
                 case 'pallet_number':
                     const palletLen = Number(field.length) || 0;
                     barcode += (data.pallet_number || '').padStart(palletLen, '0');
+                    break;
+                case 'extra_data':
+                    if (field.value) {
+                        const extraValue = String(data[field.value] || '');
+                        const extraLen = field.length ? Number(field.length) : 0;
+                        if (extraLen > 0) {
+                            barcode += extraValue.padStart(extraLen, '0').slice(0, extraLen);
+                        } else {
+                            barcode += extraValue;
+                        }
+                    }
                     break;
             }
         } catch (e) {
