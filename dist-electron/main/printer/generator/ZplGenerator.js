@@ -5,7 +5,7 @@ class ZplGenerator {
     async generate(doc, data, options) {
         console.log('ZplGenerator: Incoming doc:', JSON.stringify(doc, null, 2));
         console.log('ZplGenerator: Options:', JSON.stringify(options, null, 2));
-        const dpi = doc.dpi || options.dpi || 203;
+        const dpi = options.dpi || doc.dpi || 203;
         // 1. Determine Physical Dimensions (MM)
         // Priority: 
         // 1. Root widthMm/heightMm (Manual override or direct property)

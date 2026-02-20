@@ -76,7 +76,7 @@ class CanvasBitmapGenerator {
     }
     async generate(doc, data, options) {
         const t0 = Date.now();
-        const dpi = doc.dpi || options.dpi || 203;
+        const dpi = options.dpi || doc.dpi || 203;
         const srcDpi = doc.canvas?.dpi || 96;
         // ── Physical dimensions (mm → dots) ──────────────────────────
         let targetWidthMm = doc.widthMm || options.widthMm;

@@ -87,9 +87,7 @@ const DEFAULT_DEVICE_CONFIG = {
     protocol: 'image',
     port: 9100,
     baudRate: 9600,
-    dpi: 203,
-    widthMm: 58,
-    heightMm: 40
+    dpi: 203
 };
 const DEFAULT_PRINTER_CONFIG = {
     packPrinter: { ...DEFAULT_DEVICE_CONFIG, id: 'pack_default', name: 'Pack Printer' },
