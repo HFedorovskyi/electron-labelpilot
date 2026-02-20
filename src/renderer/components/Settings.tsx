@@ -47,9 +47,7 @@ const Settings = () => {
             protocol: 'image',
             port: 9100,
             baudRate: 9600,
-            dpi: 203,
-            widthMm: 58,
-            heightMm: 40
+            dpi: 203
         },
         boxPrinter: {
             id: 'box_default',
@@ -59,9 +57,7 @@ const Settings = () => {
             protocol: 'image',
             port: 9100,
             baudRate: 9600,
-            dpi: 203,
-            widthMm: 58,
-            heightMm: 40
+            dpi: 203
         },
         autoPrintOnStable: false,
         serverIp: ''
