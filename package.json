@@ -36,7 +36,7 @@
       "package.json"
     ],
     "win": {
-      "icon": "resources/icons/app-icon.ico",
+      "icon": "resources/icons/app-icon.png",
       "target": [
         "nsis",
         "portable"
@@ -46,8 +46,8 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "installerIcon": "resources/icons/app-icon.ico",
-      "uninstallerIcon": "resources/icons/app-icon.ico",
+      "installerIcon": "resources/icons/app-icon.png",
+      "uninstallerIcon": "resources/icons/app-icon.png",
       "artifactName": "${productName}-Setup-${version}.${ext}"
     },
     "extraResources": [
