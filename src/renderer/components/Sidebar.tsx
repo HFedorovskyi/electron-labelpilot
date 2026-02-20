@@ -29,7 +29,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, serverStatus
         <div className="w-64 bg-neutral-900/50 backdrop-blur border-r border-white/5 flex flex-col p-4">
             <div className="flex items-center gap-1.5 px-0 py-6 mb-6">
                 <div className="flex items-center justify-center shrink-0">
-                    <img src="/sidebar-logo.svg" alt="LabelPilot Logo" className="w-16 h-16 filter grayscale brightness-200" style={{ filter: 'invert(100%)' }} />
+                    <img src="./sidebar-logo.svg" alt="LabelPilot Logo" className="w-16 h-16 filter grayscale brightness-200" style={{ filter: 'invert(100%)' }} />
                 </div>
                 <h1 className="text-3xl font-black tracking-tighter whitespace-nowrap overflow-hidden text-ellipsis text-neutral-300" style={{ fontFamily: "'Outfit', sans-serif", textShadow: '0 2px 4px rgba(0,0,0,0.3)' }}>LabelPilot</h1>
             </div>
