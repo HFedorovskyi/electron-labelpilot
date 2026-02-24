@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Printer, RefreshCw, Box, AlertCircle, X, Hash, Layers, Calendar, Search } from 'lucide-react';
 import { generateBarcode, type BarcodeData } from '../utils/barcodeGenerator';
 import { useTranslation } from '../i18n';

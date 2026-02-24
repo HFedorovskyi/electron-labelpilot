@@ -1,4 +1,4 @@
-import React from 'react';
+import { } from 'react';
 import { X, Delete, Check } from 'lucide-react';
 
 interface NumericKeypadProps {

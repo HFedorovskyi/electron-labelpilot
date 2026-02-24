@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Delete, ArrowUp, Globe } from 'lucide-react';
 
 interface VirtualKeyboardProps {

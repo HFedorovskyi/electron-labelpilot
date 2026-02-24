@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { X, Check, ChevronLeft, ChevronRight, Calendar as CalendarIcon } from 'lucide-react';
 
 interface DatePickerModalProps {
