@@ -53,25 +53,25 @@ const DatePickerModal: React.FC<DatePickerModalProps> = ({ value, onUpdate, onCl
 
     return (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
-            <div className="bg-neutral-900 border border-white/10 rounded-[2.5rem] p-8 w-[450px] shadow-2xl relative animate-in zoom-in-95 duration-200">
+            <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-white/10 rounded-[2.5rem] p-8 w-[450px] shadow-sm dark:shadow-2xl relative animate-in zoom-in-95 duration-200">
                 <button
                     onClick={onClose}
-                    className="absolute top-6 right-6 p-2 bg-white/5 hover:bg-white/10 rounded-full transition-colors"
+                    className="absolute top-6 right-6 p-2 bg-neutral-100 dark:bg-white/5 hover:bg-neutral-200 dark:hover:bg-white/10 rounded-full transition-colors"
                 >
-                    <X className="w-8 h-8 text-neutral-400" />
+                    <X className="w-8 h-8 text-neutral-500 dark:text-neutral-400" />
                 </button>
 
-                <h3 className="text-2xl font-bold text-white mb-6 text-center">{title}</h3>
+                <h3 className="text-2xl font-bold text-neutral-900 dark:text-white mb-6 text-center">{title}</h3>
 
                 <div className="flex items-center justify-between mb-6">
-                    <button onClick={prevMonth} className="p-3 bg-neutral-700 hover:bg-neutral-600 rounded-2xl transition-colors">
-                        <ChevronLeft className="w-6 h-6 text-white" />
+                    <button onClick={prevMonth} className="p-3 bg-neutral-100 dark:bg-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-600 rounded-2xl transition-colors">
+                        <ChevronLeft className="w-6 h-6 text-neutral-700 dark:text-white" />
                     </button>
-                    <div className="text-xl font-bold text-emerald-400">
+                    <div className="text-xl font-bold text-emerald-600 dark:text-emerald-400">
                         {monthNames[currentMonth.getMonth()]} {currentMonth.getFullYear()}
                     </div>
-                    <button onClick={nextMonth} className="p-3 bg-neutral-700 hover:bg-neutral-600 rounded-2xl transition-colors">
-                        <ChevronRight className="w-6 h-6 text-white" />
+                    <button onClick={nextMonth} className="p-3 bg-neutral-100 dark:bg-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-600 rounded-2xl transition-colors">
+                        <ChevronRight className="w-6 h-6 text-neutral-700 dark:text-white" />
                     </button>
                 </div>
 
@@ -93,8 +93,8 @@ const DatePickerModal: React.FC<DatePickerModalProps> = ({ value, onUpdate, onCl
                                 key={`day-${day}`}
                                 onClick={() => handleSelect(day)}
                                 className={`h-12 rounded-xl text-lg font-bold flex items-center justify-center transition-all active:scale-95 ${isSelected ? 'bg-emerald-500 text-white shadow-[0_0_15px_rgba(16,185,129,0.6)] border-2 border-emerald-200 scale-110 z-10' :
-                                    isToday ? 'bg-neutral-700 text-emerald-400 border border-emerald-500/50 hover:bg-neutral-600' :
-                                        'bg-neutral-700 text-white hover:bg-neutral-600 shadow-sm'
+                                    isToday ? 'bg-emerald-50 dark:bg-neutral-700 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/50 hover:bg-emerald-100 dark:hover:bg-neutral-600' :
+                                        'bg-neutral-100 dark:bg-neutral-700 text-neutral-800 dark:text-white hover:bg-neutral-200 dark:hover:bg-neutral-600 shadow-sm border border-neutral-200 dark:border-transparent'
                                     }`}
                             >
                                 {day}
@@ -106,7 +106,7 @@ const DatePickerModal: React.FC<DatePickerModalProps> = ({ value, onUpdate, onCl
                 <div className="flex gap-4">
                     <button
                         onClick={handleToday}
-                        className="flex-1 py-4 bg-neutral-700 hover:bg-neutral-600 text-white rounded-2xl font-bold flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
+                        className="flex-1 py-4 bg-neutral-200 dark:bg-neutral-700 hover:bg-neutral-300 dark:hover:bg-neutral-600 text-neutral-800 dark:text-white rounded-2xl font-bold flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
                     >
                         <CalendarIcon className="w-5 h-5" />
                         Сегодня

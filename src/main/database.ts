@@ -74,7 +74,10 @@ export function initDatabase() {
         weight_brutto REAL NOT NULL,
         barcode_value TEXT,
         station_number TEXT,
-        status TEXT NOT NULL
+        status TEXT NOT NULL,
+        production_date TEXT,
+        expiration_date TEXT,
+        batch TEXT
       );
 
       CREATE TABLE IF NOT EXISTS station (
@@ -265,6 +268,9 @@ export function recordPack(data: {
   weight_brutto: number;
   barcode_value: string;
   station_number?: string;
+  production_date?: string;
+  expiration_date?: string;
+  batch?: string;
 }) {
   const startTime = Date.now();
   const db = initDatabase();
@@ -317,8 +323,8 @@ export function recordPack(data: {
 
     // 2. Insert the pack
     db!.prepare(`
-      INSERT INTO pack (number, box_id, nomenclature_id, weight_netto, weight_brutto, barcode_value, station_number, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'Printed')
+      INSERT INTO pack (number, box_id, nomenclature_id, weight_netto, weight_brutto, barcode_value, station_number, status, production_date, expiration_date, batch)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'Printed', ?, ?, ?)
     `).run(
       data.number,
       box.id,
@@ -326,7 +332,10 @@ export function recordPack(data: {
       data.weight_netto,
       data.weight_brutto,
       data.barcode_value,
-      data.station_number || null
+      data.station_number || null,
+      data.production_date || null,
+      data.expiration_date || null,
+      data.batch || null
     );
 
     const duration = Date.now() - startTime;

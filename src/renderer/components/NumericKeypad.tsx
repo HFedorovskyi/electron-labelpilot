@@ -31,35 +31,35 @@ const NumericKeypad: React.FC<NumericKeypadProps> = ({ value, onUpdate, onClose,
 
     return (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
-            <div className="bg-neutral-900 border border-white/10 rounded-[2.5rem] p-8 w-[400px] shadow-2xl relative animate-in zoom-in-95 duration-200">
+            <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-white/10 rounded-[2.5rem] p-8 w-[400px] shadow-sm dark:shadow-2xl relative animate-in zoom-in-95 duration-200">
                 <button
                     onClick={onClose}
-                    className="absolute top-6 right-6 p-2 bg-white/5 hover:bg-white/10 rounded-full transition-colors"
+                    className="absolute top-6 right-6 p-2 bg-neutral-100 dark:bg-white/5 hover:bg-neutral-200 dark:hover:bg-white/10 rounded-full transition-colors"
                 >
-                    <X className="w-8 h-8 text-neutral-400" />
+                    <X className="w-8 h-8 text-neutral-500 dark:text-neutral-400" />
                 </button>
 
-                <h3 className="text-2xl font-bold text-white mb-6 text-center">{title}</h3>
+                <h3 className="text-2xl font-bold text-neutral-900 dark:text-white mb-6 text-center">{title}</h3>
 
-                <div className="bg-black/40 border border-white/10 rounded-2xl p-6 mb-8 text-center">
-                    <div className="text-4xl font-mono font-bold text-emerald-400 min-h-[44px] break-all">
-                        {value || <span className="text-neutral-700">_</span>}
+                <div className="bg-neutral-50 dark:bg-black/40 border border-neutral-200 dark:border-white/10 rounded-2xl p-6 mb-8 text-center shadow-inner dark:shadow-none">
+                    <div className="text-4xl font-mono font-bold text-emerald-600 dark:text-emerald-400 min-h-[44px] break-all">
+                        {value || <span className="text-neutral-300 dark:text-neutral-700">_</span>}
                     </div>
                 </div>
 
                 <div className="grid grid-cols-3 gap-4">
                     {buttons.map((btn) => {
-                        let className = "py-6 text-2xl font-bold rounded-2xl transition-all active:scale-95 flex items-center justify-center ";
+                        let className = "py-6 text-2xl font-bold rounded-2xl transition-all active:scale-95 flex items-center justify-center shadow-sm dark:shadow-none border ";
                         let action = () => handleNumber(btn);
 
                         if (btn === 'C') {
-                            className += "bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500/20";
+                            className += "bg-red-50 dark:bg-red-500/10 text-red-600 dark:text-red-500 border-red-200 dark:border-red-500/20 hover:bg-red-100 dark:hover:bg-red-500/20";
                             action = handleClear;
                         } else if (btn === '⌫') {
-                            className += "bg-neutral-800 text-neutral-400 hover:bg-neutral-700";
+                            className += "bg-neutral-200 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-300 dark:hover:bg-neutral-700 border-neutral-300 dark:border-transparent";
                             action = handleBackspace;
                         } else {
-                            className += "bg-neutral-800 text-white hover:bg-neutral-700 border border-white/5";
+                            className += "bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-white hover:bg-neutral-200 dark:hover:bg-neutral-700 border-neutral-300 dark:border-white/5";
                         }
 
                         return (

@@ -50,10 +50,10 @@ const DatabaseViewer = () => {
     const headers = tableData.length > 0 ? Object.keys(tableData[0]) : [];
 
     return (
-        <div className="flex h-full bg-neutral-900/50 backdrop-blur rounded-3xl border border-white/5 overflow-hidden shadow-2xl">
+        <div className="flex h-full bg-white dark:bg-neutral-900/50 backdrop-blur rounded-3xl border border-neutral-200 dark:border-white/5 overflow-hidden shadow-sm dark:shadow-2xl transition-colors">
             {/* Sidebar - Table List */}
-            <div className="w-64 bg-black/20 border-r border-white/5 flex flex-col">
-                <div className="p-4 border-b border-white/5 flex items-center gap-2 text-emerald-400">
+            <div className="w-64 bg-neutral-50 dark:bg-black/20 border-r border-neutral-200 dark:border-white/5 flex flex-col">
+                <div className="p-4 border-b border-neutral-200 dark:border-white/5 flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
                     <Database className="w-5 h-5" />
                     <h2 className="font-bold">{t('db.tables')}</h2>
                 </div>
@@ -63,8 +63,8 @@ const DatabaseViewer = () => {
                             key={table}
                             onClick={() => setSelectedTable(table)}
                             className={`w-full text-left px-4 py-3 rounded-xl transition-all flex items-center gap-3 ${selectedTable === table
-                                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/20'
-                                : 'text-neutral-400 hover:bg-white/5 hover:text-white'
+                                ? 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-500/20'
+                                : 'text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200 dark:hover:bg-white/5 hover:text-neutral-900 dark:hover:text-white'
                                 }`}
                         >
                             <TableIcon className="w-4 h-4" />
@@ -78,31 +78,31 @@ const DatabaseViewer = () => {
             <div className="flex-1 flex flex-col min-w-0">
                 {selectedTable ? (
                     <>
-                        <div className="p-4 border-b border-white/5 flex justify-between items-center bg-white/5">
+                        <div className="p-4 border-b border-neutral-200 dark:border-white/5 flex justify-between items-center bg-neutral-50 dark:bg-white/5">
                             <div className="flex items-center gap-4">
-                                <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                                    <TableIcon className="w-5 h-5 text-neutral-400" />
+                                <h2 className="text-xl font-bold text-neutral-900 dark:text-white flex items-center gap-2">
+                                    <TableIcon className="w-5 h-5 text-neutral-500 dark:text-neutral-400" />
                                     {selectedTable}
                                 </h2>
-                                <span className="text-neutral-500 text-sm bg-neutral-900 px-2 py-0.5 rounded-full border border-white/5">
+                                <span className="text-neutral-600 dark:text-neutral-500 text-sm bg-neutral-200 dark:bg-neutral-900 px-2 py-0.5 rounded-full border border-neutral-300 dark:border-white/5">
                                     {tableData.length} {t('db.records')}
                                 </span>
                             </div>
 
                             <div className="flex items-center gap-3">
                                 <div className="relative">
-                                    <Search className="w-4 h-4 text-neutral-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                                    <Search className="w-4 h-4 text-neutral-400 dark:text-neutral-500 absolute left-3 top-1/2 -translate-y-1/2" />
                                     <input
                                         type="text"
                                         placeholder={t('db.search')}
                                         value={searchTerm}
                                         onChange={(e) => setSearchTerm(e.target.value)}
-                                        className="bg-neutral-900 border border-white/10 rounded-lg pl-9 pr-4 py-1.5 text-sm text-white focus:outline-none focus:border-emerald-500/50 w-64"
+                                        className="bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-white/10 rounded-lg pl-9 pr-4 py-1.5 text-sm text-neutral-900 dark:text-white focus:outline-none focus:border-emerald-500/50 w-64 shadow-sm dark:shadow-none"
                                     />
                                 </div>
                                 <button
                                     onClick={() => loadTableData(selectedTable)}
-                                    className="p-2 bg-neutral-800 hover:bg-neutral-700 rounded-lg text-white transition-colors"
+                                    className="p-2 bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 rounded-lg text-neutral-700 dark:text-white transition-colors border border-neutral-300 dark:border-transparent"
                                     title="Reload Data"
                                 >
                                     <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
@@ -110,7 +110,7 @@ const DatabaseViewer = () => {
                             </div>
                         </div>
 
-                        <div className="flex-1 overflow-auto relative bg-neutral-900/40">
+                        <div className="flex-1 overflow-auto relative bg-neutral-50/50 dark:bg-neutral-900/40">
                             {loading ? (
                                 <div className="absolute inset-0 flex items-center justify-center">
                                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-500"></div>
@@ -122,18 +122,18 @@ const DatabaseViewer = () => {
                                 </div>
                             ) : (
                                 <table className="w-full text-sm text-left">
-                                    <thead className="text-xs text-neutral-400 uppercase bg-neutral-900/80 sticky top-0 z-10 backdrop-blur-sm">
+                                    <thead className="text-xs text-neutral-500 dark:text-neutral-400 uppercase bg-neutral-100/90 dark:bg-neutral-900/80 sticky top-0 z-10 backdrop-blur-sm shadow-sm dark:shadow-none">
                                         <tr>
                                             {headers.map(header => (
-                                                <th key={header} className="px-6 py-3 font-medium whitespace-nowrap border-b border-white/5">
+                                                <th key={header} className="px-6 py-3 font-medium whitespace-nowrap border-b border-neutral-200 dark:border-white/5">
                                                     {header}
                                                 </th>
                                             ))}
                                         </tr>
                                     </thead>
-                                    <tbody className="divide-y divide-white/5">
+                                    <tbody className="divide-y divide-neutral-200 dark:divide-white/5">
                                         {filteredData.map((row, idx) => (
-                                            <tr key={idx} className="hover:bg-white/5 transition-colors">
+                                            <tr key={idx} className="hover:bg-neutral-100 dark:hover:bg-white/5 transition-colors">
                                                 {headers.map(header => {
                                                     const val = row[header];
                                                     let displayVal = val;
@@ -149,12 +149,19 @@ const DatabaseViewer = () => {
                                                                 </code>
                                                             );
                                                         } catch (e) { }
+                                                    } else if (typeof val === 'string' && (header === 'production_date' || header === 'expiration_date' || header === 'created_at' || header === 'updated_at')) {
+                                                        try {
+                                                            const d = new Date(val);
+                                                            if (!isNaN(d.getTime())) {
+                                                                displayVal = d.toLocaleString('ru-RU');
+                                                            }
+                                                        } catch (e) { }
                                                     }
 
-                                                    if (val === null) displayVal = <span className="text-neutral-600 italic">null</span>;
+                                                    if (val === null) displayVal = <span className="text-neutral-500 dark:text-neutral-600 italic">null</span>;
 
                                                     return (
-                                                        <td key={`${idx}-${header}`} className="px-6 py-3 whitespace-nowrap text-neutral-300 max-w-xs truncate">
+                                                        <td key={`${idx}-${header}`} className="px-6 py-3 whitespace-nowrap text-neutral-700 dark:text-neutral-300 max-w-xs truncate">
                                                             {displayVal}
                                                         </td>
                                                     );

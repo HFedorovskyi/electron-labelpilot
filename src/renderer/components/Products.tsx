@@ -46,9 +46,9 @@ const Products: React.FC = () => {
     };
 
     return (
-        <div className="bg-neutral-900 min-h-screen text-white p-8">
+        <div className="bg-neutral-50 dark:bg-neutral-900 min-h-screen text-neutral-900 dark:text-white p-8 transition-colors duration-200">
             <h1 className="text-3xl font-bold mb-8 flex items-center gap-3">
-                <Package className="w-8 h-8 text-emerald-500" />
+                <Package className="w-8 h-8 text-emerald-600 dark:text-emerald-500" />
                 {t('products.title')}
                 <span className="ml-auto text-sm font-normal text-neutral-500">
                     {t('products.totalItems')}: {filtered.length}
@@ -57,13 +57,13 @@ const Products: React.FC = () => {
 
             {/* Search */}
             <div className="relative mb-6 max-w-xl">
-                <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-500" />
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400 dark:text-neutral-500" />
                 <input
                     type="text"
                     value={searchQuery}
                     onChange={e => setSearchQuery(e.target.value)}
                     placeholder={t('products.search')}
-                    className="w-full pl-11 pr-4 py-3 bg-black/30 border border-white/10 rounded-xl text-white placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                    className="w-full pl-11 pr-4 py-3 bg-white dark:bg-black/30 border border-neutral-300 dark:border-white/10 rounded-xl text-neutral-900 dark:text-white placeholder-neutral-400 dark:placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 shadow-sm dark:shadow-none transition-colors"
                 />
             </div>
 
@@ -86,44 +86,44 @@ const Products: React.FC = () => {
                         const extra = parseExtra(product.extra_data);
 
                         return (
-                            <div key={product.id} className="bg-white/5 border border-white/10 rounded-xl overflow-hidden transition-all">
+                            <div key={product.id} className="bg-white dark:bg-white/5 border border-neutral-200 dark:border-white/10 rounded-xl overflow-hidden shadow-sm dark:shadow-none transition-all">
                                 <button
                                     onClick={() => setExpandedId(isExpanded ? null : product.id)}
-                                    className="w-full grid grid-cols-12 gap-3 items-center px-5 py-4 hover:bg-white/5 transition-colors text-left"
+                                    className="w-full grid grid-cols-12 gap-3 items-center px-5 py-4 hover:bg-neutral-100 dark:hover:bg-white/5 transition-colors text-left"
                                 >
-                                    <div className="col-span-4 font-medium text-white truncate">{product.name}</div>
-                                    <div className="col-span-2 text-neutral-400 font-mono text-sm">{product.article || '—'}</div>
-                                    <div className="col-span-1 text-center text-neutral-300">{product.exp_date || 0}</div>
-                                    <div className="col-span-2 text-neutral-400 text-sm">{getContainerName(product.portion_container_id)}</div>
-                                    <div className="col-span-2 text-neutral-400 text-sm">{getContainerName(product.box_container_id)}</div>
+                                    <div className="col-span-4 font-medium text-neutral-900 dark:text-white truncate">{product.name}</div>
+                                    <div className="col-span-2 text-neutral-600 dark:text-neutral-400 font-mono text-sm">{product.article || '—'}</div>
+                                    <div className="col-span-1 text-center text-neutral-600 dark:text-neutral-300">{product.exp_date || 0}</div>
+                                    <div className="col-span-2 text-neutral-600 dark:text-neutral-400 text-sm">{getContainerName(product.portion_container_id)}</div>
+                                    <div className="col-span-2 text-neutral-600 dark:text-neutral-400 text-sm">{getContainerName(product.box_container_id)}</div>
                                     <div className="col-span-1 flex items-center justify-center gap-2">
-                                        <span className="text-neutral-300">{product.close_box_counter || '—'}</span>
+                                        <span className="text-neutral-600 dark:text-neutral-300">{product.close_box_counter || '—'}</span>
                                         {isExpanded ? (
-                                            <ChevronUp className="w-4 h-4 text-neutral-500" />
+                                            <ChevronUp className="w-4 h-4 text-neutral-400 dark:text-neutral-500" />
                                         ) : (
-                                            <ChevronDown className="w-4 h-4 text-neutral-500" />
+                                            <ChevronDown className="w-4 h-4 text-neutral-400 dark:text-neutral-500" />
                                         )}
                                     </div>
                                 </button>
 
                                 {isExpanded && (
-                                    <div className="px-5 pb-5 pt-2 border-t border-white/5">
+                                    <div className="px-5 pb-5 pt-2 border-t border-neutral-200 dark:border-white/5">
                                         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                                            <div className="bg-black/20 p-3 rounded-lg">
+                                            <div className="bg-neutral-50 dark:bg-black/20 p-3 rounded-lg border border-neutral-100 dark:border-transparent">
                                                 <div className="text-xs text-neutral-500 mb-1">{t('products.packLabel')}</div>
-                                                <div className="text-sm text-white">{product.templates_pack_label ? `#${product.templates_pack_label}` : '—'}</div>
+                                                <div className="text-sm text-neutral-900 dark:text-white">{product.templates_pack_label ? `#${product.templates_pack_label}` : '—'}</div>
                                             </div>
-                                            <div className="bg-black/20 p-3 rounded-lg">
+                                            <div className="bg-neutral-50 dark:bg-black/20 p-3 rounded-lg border border-neutral-100 dark:border-transparent">
                                                 <div className="text-xs text-neutral-500 mb-1">{t('products.boxLabel')}</div>
-                                                <div className="text-sm text-white">{product.templates_box_label ? `#${product.templates_box_label}` : '—'}</div>
+                                                <div className="text-sm text-neutral-900 dark:text-white">{product.templates_box_label ? `#${product.templates_box_label}` : '—'}</div>
                                             </div>
-                                            <div className="bg-black/20 p-3 rounded-lg">
+                                            <div className="bg-neutral-50 dark:bg-black/20 p-3 rounded-lg border border-neutral-100 dark:border-transparent">
                                                 <div className="text-xs text-neutral-500 mb-1">ID</div>
-                                                <div className="text-sm text-white font-mono">{product.id}</div>
+                                                <div className="text-sm text-neutral-900 dark:text-white font-mono">{product.id}</div>
                                             </div>
-                                            <div className="bg-black/20 p-3 rounded-lg">
+                                            <div className="bg-neutral-50 dark:bg-black/20 p-3 rounded-lg border border-neutral-100 dark:border-transparent">
                                                 <div className="text-xs text-neutral-500 mb-1">{t('products.packTare')} ({t('products.gram')})</div>
-                                                <div className="text-sm text-white">{product.portion_weight ?? '—'}</div>
+                                                <div className="text-sm text-neutral-900 dark:text-white">{product.portion_weight ?? '—'}</div>
                                             </div>
                                         </div>
 
@@ -132,9 +132,9 @@ const Products: React.FC = () => {
                                                 <div className="text-xs text-neutral-500 mb-2">{t('products.extraData')}</div>
                                                 <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
                                                     {Object.entries(extra).map(([key, val]) => (
-                                                        <div key={key} className="bg-black/20 p-2 rounded-lg">
+                                                        <div key={key} className="bg-neutral-50 dark:bg-black/20 p-2 rounded-lg border border-neutral-100 dark:border-transparent">
                                                             <div className="text-xs text-neutral-500">{key}</div>
-                                                            <div className="text-sm text-white truncate">{String(val)}</div>
+                                                            <div className="text-sm text-neutral-900 dark:text-white truncate">{String(val)}</div>
                                                         </div>
                                                     ))}
                                                 </div>

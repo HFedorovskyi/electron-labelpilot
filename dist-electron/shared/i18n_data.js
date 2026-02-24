@@ -20,6 +20,7 @@ exports.translations = {
         'db.noTable': 'Выберите таблицу для просмотра данных',
         // Settings
         'settings.title': 'Настройки',
+        'settings.theme': 'Внешний вид',
         'settings.printer': 'Настройки принтера',
         'settings.packPrinter': 'Принтер для этикетки на упаковку',
         'settings.boxPrinter': 'Принтер для этикетки на короб',
@@ -186,6 +187,7 @@ exports.translations = {
         'db.noTable': 'Select a table to view data',
         // Settings
         'settings.title': 'Settings',
+        'settings.theme': 'Appearance',
         'settings.printer': 'Printer Settings',
         'settings.packPrinter': 'Pack label printer',
         'settings.boxPrinter': 'Box label printer',
@@ -350,6 +352,7 @@ exports.translations = {
         'db.noTable': 'Wählen Sie eine Tabelle aus, um Daten anzuzeigen',
         // Settings
         'settings.title': 'Einstellungen',
+        'settings.theme': 'Erscheinungsbild',
         'settings.printer': 'Druckereinstellungen',
         'settings.packPrinter': 'Drucker für Packungsetikett',
         'settings.boxPrinter': 'Drucker für Karton-Etikett',

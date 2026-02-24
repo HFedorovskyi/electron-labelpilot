@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
-import { Save, RefreshCw, Settings as SettingsIcon, Printer, Languages } from 'lucide-react';
+import { Save, RefreshCw, Settings as SettingsIcon, Printer, Languages, Moon, Sun, Monitor } from 'lucide-react';
 import PrinterSettings from './PrinterSettings';
 import UpdateSettings from './UpdateSettings';
 import { useTranslation, type Lang } from '../i18n';
+import { useTheme } from './ThemeProvider';
 
 interface SerialPortInfo {
     path: string;
@@ -24,6 +25,7 @@ interface PrinterInfo {
 
 const Settings = () => {
     const { t, lang, setLang } = useTranslation();
+    const { theme, setTheme } = useTheme();
     const [ports, setPorts] = useState<SerialPortInfo[]>([]);
     const [protocols, setProtocols] = useState<ProtocolInfo[]>([]);
     const [config, setConfig] = useState({
@@ -147,7 +149,7 @@ const Settings = () => {
     };
 
     return (
-        <div className="bg-neutral-900 min-h-screen text-white p-8 relative">
+        <div className="bg-transparent min-h-screen text-neutral-900 dark:text-white p-8 relative">
             {/* Toast Notification */}
             {toastMessage && (
                 <div className="fixed bottom-8 right-8 bg-emerald-600 text-white px-6 py-3 rounded-xl shadow-2xl flex items-center gap-3 animate-bounce z-50">
@@ -156,14 +158,51 @@ const Settings = () => {
                 </div>
             )}
 
-            <h1 className="text-3xl font-bold mb-8 flex items-center gap-3">
+            <h1 className="text-3xl font-bold mb-8 flex items-center gap-3 text-neutral-900 dark:text-white">
                 <SettingsIcon className="w-8 h-8 text-emerald-500" />
                 {t('settings.title')}
             </h1>
 
             <div className="space-y-8 max-w-4xl">
+                {/* ── Theme Configuration ── */}
+                <div className="p-6 bg-white dark:bg-white/5 border border-neutral-200 dark:border-white/10 rounded-2xl shadow-sm dark:shadow-none">
+                    <h2 className="text-xl font-semibold mb-6 flex items-center gap-3 text-neutral-800 dark:text-emerald-400">
+                        <Moon className="w-6 h-6" />
+                        {t('settings.theme') || 'Appearance'}
+                    </h2>
+                    <div className="flex gap-4">
+                        <button
+                            onClick={() => setTheme('light')}
+                            className={`px-6 py-3 rounded-xl border transition-all font-medium flex items-center gap-2 ${theme === 'light'
+                                ? 'bg-emerald-600 border-emerald-600 text-white shadow-lg shadow-emerald-500/20'
+                                : 'bg-neutral-50 dark:bg-black/20 border-neutral-200 dark:border-white/10 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/5'
+                                }`}
+                        >
+                            <Sun size={18} /> Light
+                        </button>
+                        <button
+                            onClick={() => setTheme('dark')}
+                            className={`px-6 py-3 rounded-xl border transition-all font-medium flex items-center gap-2 ${theme === 'dark'
+                                ? 'bg-emerald-600 border-emerald-600 text-white shadow-lg shadow-emerald-500/20'
+                                : 'bg-neutral-50 dark:bg-black/20 border-neutral-200 dark:border-white/10 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/5'
+                                }`}
+                        >
+                            <Moon size={18} /> Dark
+                        </button>
+                        <button
+                            onClick={() => setTheme('system')}
+                            className={`px-6 py-3 rounded-xl border transition-all font-medium flex items-center gap-2 ${theme === 'system'
+                                ? 'bg-emerald-600 border-emerald-600 text-white shadow-lg shadow-emerald-500/20'
+                                : 'bg-neutral-50 dark:bg-black/20 border-neutral-200 dark:border-white/10 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/5'
+                                }`}
+                        >
+                            <Monitor size={18} /> System
+                        </button>
+                    </div>
+                </div>
+
                 {/* ── Language Configuration ── */}
-                <div className="p-6 bg-white/5 border border-white/10 rounded-2xl">
+                <div className="p-6 bg-white dark:bg-white/5 border border-neutral-200 dark:border-white/10 rounded-2xl shadow-sm dark:shadow-none">
                     <h2 className="text-xl font-semibold mb-6 flex items-center gap-3 text-emerald-400">
                         <Languages className="w-6 h-6" />
                         {t('settings.language')}
@@ -174,8 +213,8 @@ const Settings = () => {
                                 key={l}
                                 onClick={() => setLang(l)}
                                 className={`px-6 py-3 rounded-xl border transition-all font-medium ${lang === l
-                                    ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.1)]'
-                                    : 'bg-black/20 border-white/10 text-neutral-400 hover:text-white hover:bg-white/5'
+                                    ? 'bg-emerald-600 border-emerald-600 text-white shadow-lg shadow-emerald-500/20'
+                                    : 'bg-neutral-50 dark:bg-black/20 border-neutral-200 dark:border-white/10 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/5'
                                     }`}
                             >
                                 {l.toUpperCase()}
@@ -185,26 +224,26 @@ const Settings = () => {
                 </div>
 
                 {/* ── Server Configuration ── */}
-                <div className="p-6 bg-white/5 border border-white/10 rounded-2xl">
-                    <h2 className="text-xl font-semibold mb-6 flex items-center gap-3 text-blue-400">
+                <div className="p-6 bg-white dark:bg-white/5 border border-neutral-200 dark:border-white/10 rounded-2xl shadow-sm dark:shadow-none">
+                    <h2 className="text-xl font-semibold mb-6 flex items-center gap-3 text-blue-600 dark:text-blue-400">
                         <SettingsIcon className="w-6 h-6" />
                         {t('sidebar.serverStatus')}
                     </h2>
                     <div>
-                        <label className="block text-sm text-neutral-400 mb-2">{t('settings.serverIp')}</label>
+                        <label className="block text-sm text-neutral-600 dark:text-neutral-400 mb-2">{t('settings.serverIp')}</label>
                         <div className="flex gap-3">
                             <input
                                 type="text"
                                 value={printerConfig.serverIp || ''}
                                 onChange={(e) => setPrinterConfig({ ...printerConfig, serverIp: e.target.value })}
                                 placeholder={t('settings.serverIpPlaceholder')}
-                                className="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-all hover:bg-black/40 font-mono"
+                                className="w-full bg-white dark:bg-black/30 border border-neutral-200 dark:border-white/10 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-all hover:bg-neutral-50 dark:hover:bg-black/40 font-mono"
                             />
                             <button
                                 onClick={handleSync}
                                 disabled={isSyncing || !printerConfig.serverIp}
                                 className={`px-6 rounded-xl font-medium transition-all flex items-center gap-2 ${isSyncing || !printerConfig.serverIp
-                                    ? 'bg-neutral-800 text-neutral-500 cursor-not-allowed'
+                                    ? 'bg-neutral-100 dark:bg-neutral-800 text-neutral-400 dark:text-neutral-500 cursor-not-allowed'
                                     : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg hover:shadow-blue-500/20'
                                     }`}
                             >
@@ -213,14 +252,14 @@ const Settings = () => {
                             </button>
                         </div>
 
-                        <p className="mt-2 text-xs text-white/30">
+                        <p className="mt-2 text-xs text-neutral-500 dark:text-white/30">
                             {t('settings.serverIpPlaceholder')}
                         </p>
                     </div>
 
                     {/* Offline Sync Controls */}
-                    <div className="mt-6 pt-6 border-t border-white/5">
-                        <label className="block text-sm text-neutral-400 mb-3">{t('settings.offlineSync') || 'Offline Synchronization'}</label>
+                    <div className="mt-6 pt-6 border-t border-neutral-200 dark:border-white/5">
+                        <label className="block text-sm text-neutral-600 dark:text-neutral-400 mb-3">{t('settings.offlineSync') || 'Offline Synchronization'}</label>
                         <div className="flex gap-3 flex-wrap">
                             <button
                                 onClick={async () => {
@@ -263,8 +302,8 @@ const Settings = () => {
                 </div>
 
                 {/* ── Printer Configuration ── */}
-                <div className="p-6 bg-white/5 border border-white/10 rounded-2xl">
-                    <h2 className="text-xl font-semibold mb-6 flex items-center gap-3 text-amber-400">
+                <div className="p-6 bg-white dark:bg-white/5 border border-neutral-200 dark:border-white/10 rounded-2xl shadow-sm dark:shadow-none">
+                    <h2 className="text-xl font-semibold mb-6 flex items-center gap-3 text-amber-600 dark:text-amber-400">
                         <Printer className="w-6 h-6" />
                         {t('settings.printer')}
                     </h2>
@@ -296,10 +335,10 @@ const Settings = () => {
                     </div>
 
                     {/* Auto-Print Toggle */}
-                    <div className="mt-6 p-4 bg-black/20 rounded-xl border border-white/5">
+                    <div className="mt-6 p-4 bg-neutral-50 dark:bg-black/20 rounded-xl border border-neutral-200 dark:border-white/5">
                         <div className="flex justify-between items-center">
                             <div>
-                                <div className="font-medium text-white">{t('settings.autoPrint')}</div>
+                                <div className="font-medium text-neutral-900 dark:text-white">{t('settings.autoPrint')}</div>
                                 <div className="text-xs text-neutral-500 mt-1">
                                     {t('settings.autoPrintDesc')}
                                 </div>
@@ -318,47 +357,63 @@ const Settings = () => {
                 </div>
 
                 {/* ── Scale Configuration ── */}
-                <div className="p-6 bg-white/5 border border-white/10 rounded-2xl">
-                    <h2 className="text-xl font-semibold mb-6 text-white">{t('settings.scales')}</h2>
+                <div className="p-6 bg-white dark:bg-white/5 border border-neutral-200 dark:border-white/10 rounded-2xl shadow-sm dark:shadow-none">
+                    <h2 className="text-xl font-semibold mb-6 text-neutral-900 dark:text-white">{t('settings.scales')}</h2>
 
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                         {/* Left Column: Connection */}
                         <div className="space-y-6">
-                            <h3 className="text-lg font-medium text-white/80 border-b border-white/5 pb-2">{t('settings.connectionInterface')}</h3>
+                            <h3 className="text-lg font-medium text-neutral-800 dark:text-white/80 border-b border-neutral-200 dark:border-white/5 pb-2">{t('settings.connectionInterface')}</h3>
 
-                            <div>
-                                <label className="block text-sm text-neutral-400 mb-2">{t('settings.connectionType')}</label>
-                                <select
-                                    value={config.type}
-                                    onChange={(e) => {
-                                        const newType = e.target.value;
-                                        const update: any = { type: newType };
-                                        if (newType === 'simulator') {
-                                            update.protocolId = 'simulator';
-                                        }
-                                        setConfig({ ...config, ...update });
+                            <div className="flex bg-neutral-100 dark:bg-black/20 p-1.5 rounded-xl border border-neutral-200 dark:border-white/10 w-full mb-2">
+                                <button
+                                    onClick={() => {
+                                        setConfig({ ...config, type: 'serial' });
                                     }}
-                                    className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all hover:bg-black/30"
+                                    className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 z-10 ${config.type === 'serial'
+                                        ? 'bg-emerald-600 dark:bg-emerald-600 border border-emerald-500 dark:border-emerald-400 text-white shadow-[0_0_15px_rgba(16,185,129,0.4)] scale-105 z-20'
+                                        : 'text-neutral-600 dark:text-neutral-400 border border-transparent hover:text-neutral-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-white/5'
+                                        }`}
                                 >
-                                    <option value="serial">{t('settings.serial')}</option>
-                                    <option value="tcp">{t('settings.tcp')}</option>
-                                    <option value="simulator">{t('settings.simulator')}</option>
-                                </select>
+                                    {t('settings.serial')}
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        setConfig({ ...config, type: 'tcp' });
+                                    }}
+                                    className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 z-10 ${config.type === 'tcp'
+                                        ? 'bg-emerald-600 dark:bg-emerald-600 border border-emerald-500 dark:border-emerald-400 text-white shadow-[0_0_15px_rgba(16,185,129,0.4)] scale-105 z-20'
+                                        : 'text-neutral-600 dark:text-neutral-400 border border-transparent hover:text-neutral-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-white/5'
+                                        }`}
+                                >
+                                    {t('settings.tcp')}
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        setConfig({ ...config, type: 'simulator', protocolId: 'simulator' });
+                                    }}
+                                    className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 z-10 ${config.type === 'simulator'
+                                        ? 'bg-emerald-600 dark:bg-emerald-600 border border-emerald-500 dark:border-emerald-400 text-white shadow-[0_0_15px_rgba(16,185,129,0.4)] scale-105 z-20'
+                                        : 'text-neutral-600 dark:text-neutral-400 border border-transparent hover:text-neutral-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-white/5'
+                                        }`}
+                                >
+                                    {t('settings.simulator')}
+                                </button>
                             </div>
 
                             {config.type === 'serial' && (
                                 <div className="space-y-4">
                                     <div>
                                         <div className="flex justify-between mb-2">
-                                            <label className="text-sm text-neutral-400">{t('settings.port')}</label>
-                                            <button onClick={loadData} className="text-xs text-emerald-400 hover:text-emerald-300 flex items-center gap-1">
+                                            <label className="text-sm text-neutral-600 dark:text-neutral-400">{t('settings.port')}</label>
+                                            <button onClick={loadData} className="text-xs text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 flex items-center gap-1">
                                                 <RefreshCw size={12} /> {t('settings.refresh')}
                                             </button>
                                         </div>
                                         <select
                                             value={config.path}
                                             onChange={(e) => setConfig({ ...config, path: e.target.value })}
-                                            className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                                            className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-white/10 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
                                         >
                                             {ports.map(p => (
                                                 <option key={p.path} value={p.path}>{p.path} {p.manufacturer ? `(${p.manufacturer})` : ''}</option>
@@ -367,11 +422,11 @@ const Settings = () => {
                                         </select>
                                     </div>
                                     <div>
-                                        <label className="block text-sm text-neutral-400 mb-2">{t('settings.baudRate')}</label>
+                                        <label className="block text-sm text-neutral-600 dark:text-neutral-400 mb-2">{t('settings.baudRate')}</label>
                                         <select
                                             value={config.baudRate}
                                             onChange={(e) => setConfig({ ...config, baudRate: Number(e.target.value) })}
-                                            className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                                            className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-white/10 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
                                         >
                                             {[1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200].map(rate => (
                                                 <option key={rate} value={rate}>{rate}</option>
@@ -384,21 +439,21 @@ const Settings = () => {
                             {config.type === 'tcp' && (
                                 <div className="grid grid-cols-3 gap-4">
                                     <div className="col-span-2">
-                                        <label className="block text-sm text-neutral-400 mb-2">{t('settings.ipAddress')}</label>
+                                        <label className="block text-sm text-neutral-600 dark:text-neutral-400 mb-2">{t('settings.ipAddress')}</label>
                                         <input
                                             type="text"
                                             value={config.host}
                                             onChange={(e) => setConfig({ ...config, host: e.target.value })}
-                                            className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                                            className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-white/10 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
                                         />
                                     </div>
                                     <div>
-                                        <label className="block text-sm text-neutral-400 mb-2">{t('settings.port')}</label>
+                                        <label className="block text-sm text-neutral-600 dark:text-neutral-400 mb-2">{t('settings.port')}</label>
                                         <input
                                             type="number"
                                             value={config.port}
                                             onChange={(e) => setConfig({ ...config, port: Number(e.target.value) })}
-                                            className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                                            className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-white/10 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
                                         />
                                     </div>
                                 </div>
@@ -407,42 +462,42 @@ const Settings = () => {
 
                         {/* Right Column: Protocol & Advanced */}
                         <div className="space-y-6">
-                            <h3 className="text-lg font-medium text-white/80 border-b border-white/5 pb-2">{t('settings.protocolSettings')}</h3>
+                            <h3 className="text-lg font-medium text-neutral-800 dark:text-white/80 border-b border-neutral-200 dark:border-white/5 pb-2">{t('settings.protocolSettings')}</h3>
 
                             <div>
-                                <label className="block text-sm text-neutral-400 mb-2">{t('settings.protocol')}</label>
+                                <label className="block text-sm text-neutral-600 dark:text-neutral-400 mb-2">{t('settings.protocol')}</label>
                                 <select
                                     value={config.protocolId}
                                     onChange={(e) => setConfig({ ...config, protocolId: e.target.value })}
-                                    className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                                    className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-white/10 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
                                     disabled={config.type === 'simulator'}
                                 >
                                     {protocols.map(p => (
                                         <option key={p.id} value={p.id}>{p.name}</option>
                                     ))}
                                 </select>
-                                <p className="mt-2 text-xs text-white/40">
+                                <p className="mt-2 text-xs text-neutral-500 dark:text-white/40">
                                     {protocols.find(p => p.id === config.protocolId)?.description}
                                 </p>
                             </div>
 
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
-                                    <label className="block text-sm text-neutral-400 mb-2">{t('settings.pollingMs')}</label>
+                                    <label className="block text-sm text-neutral-600 dark:text-neutral-400 mb-2">{t('settings.pollingMs')}</label>
                                     <input
                                         type="number"
                                         value={config.pollingInterval}
                                         onChange={(e) => setConfig({ ...config, pollingInterval: Number(e.target.value) })}
-                                        className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                                        className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-white/10 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm text-neutral-400 mb-2">{t('settings.stabilityCount')}</label>
+                                    <label className="block text-sm text-neutral-600 dark:text-neutral-400 mb-2">{t('settings.stabilityCount')}</label>
                                     <input
                                         type="number"
                                         value={config.stabilityCount}
                                         onChange={(e) => setConfig({ ...config, stabilityCount: Number(e.target.value) })}
-                                        className="w-full bg-black/20 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                                        className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-white/10 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
                                     />
                                 </div>
                             </div>
@@ -464,20 +519,20 @@ const Settings = () => {
                 <UpdateSettings />
 
                 {/* ── Danger Zone ── */}
-                <div className="p-6 bg-red-500/5 border border-red-500/10 rounded-2xl">
-                    <h2 className="text-xl font-semibold mb-6 flex items-center gap-3 text-red-400">
-                        <div className="p-2 bg-red-500/10 rounded-lg">
+                <div className="p-6 bg-red-50 dark:bg-red-500/5 border border-red-200 dark:border-red-500/10 rounded-2xl">
+                    <h2 className="text-xl font-semibold mb-6 flex items-center gap-3 text-red-600 dark:text-red-400">
+                        <div className="p-2 bg-red-100 dark:bg-red-500/10 rounded-lg">
                             <RefreshCw className="w-5 h-5" />
                         </div>
                         {t('settings.dangerZone') || 'Danger Zone'}
                     </h2>
                     <div className="flex flex-col gap-4">
-                        <p className="text-sm text-neutral-400">
+                        <p className="text-sm text-neutral-600 dark:text-neutral-400">
                             {t('settings.resetWarning') || 'Resetting the database will permanently delete all local data, including labels, products, and logs. This action cannot be undone.'}
                         </p>
                         <button
                             onClick={() => window.electron.send('open-logs-folder', {})}
-                            className="w-fit px-6 py-3 bg-neutral-800 hover:bg-neutral-700 border border-white/5 hover:border-white/10 text-white font-medium rounded-xl transition-all flex items-center gap-2"
+                            className="w-fit px-6 py-3 bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 border border-neutral-300 dark:border-white/5 hover:border-neutral-400 dark:hover:border-white/10 text-neutral-900 dark:text-white font-medium rounded-xl transition-all flex items-center gap-2"
                         >
                             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -499,18 +554,18 @@ const Settings = () => {
             {showResetModal && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
                     <div
-                        className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+                        className="absolute inset-0 bg-neutral-900/40 dark:bg-black/80 backdrop-blur-sm"
                         onClick={() => !isResetting && setShowResetModal(false)}
                     />
-                    <div className="relative bg-neutral-900 border border-white/10 rounded-3xl p-8 max-w-md w-full shadow-2xl animate-in fade-in zoom-in duration-200">
-                        <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mb-6 mx-auto">
-                            <RefreshCw className="w-8 h-8 text-red-500" />
+                    <div className="relative bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-white/10 rounded-3xl p-8 max-w-md w-full shadow-2xl animate-in fade-in zoom-in duration-200">
+                        <div className="w-16 h-16 bg-red-100 dark:bg-red-500/10 rounded-full flex items-center justify-center mb-6 mx-auto">
+                            <RefreshCw className="w-8 h-8 text-red-600 dark:text-red-500" />
                         </div>
 
-                        <h3 className="text-2xl font-bold text-center mb-2">
+                        <h3 className="text-2xl font-bold text-center mb-2 text-neutral-900 dark:text-white">
                             {t('settings.resetConfirmTitle') || 'Are you absolutely sure?'}
                         </h3>
-                        <p className="text-neutral-400 text-center mb-8">
+                        <p className="text-neutral-600 dark:text-neutral-400 text-center mb-8">
                             {t('settings.resetConfirmDesc') || 'This will wipe all local data and reset the station identity. You will need to re-import the identity file to use the application.'}
                         </p>
 
@@ -518,7 +573,7 @@ const Settings = () => {
                             <button
                                 disabled={isResetting}
                                 onClick={() => setShowResetModal(false)}
-                                className="flex-1 px-6 py-3 bg-neutral-800 hover:bg-neutral-700 text-white font-medium rounded-xl transition-all"
+                                className="flex-1 px-6 py-3 bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-900 dark:text-white font-medium rounded-xl transition-all"
                             >
                                 {t('common.cancel') || 'Cancel'}
                             </button>

@@ -68,8 +68,8 @@ const PrinterSettings = ({ title, config, onChange, systemPrinters, serialPorts 
     };
 
     return (
-        <div className="bg-black/20 p-5 rounded-xl border border-white/5">
-            <h3 className="text-lg font-medium text-amber-400 mb-4 flex items-center gap-2">
+        <div className="bg-neutral-50 dark:bg-black/20 p-5 rounded-xl border border-neutral-200 dark:border-white/5">
+            <h3 className="text-lg font-medium text-amber-600 dark:text-amber-400 mb-4 flex items-center gap-2">
                 <Printer size={20} />
                 {title}
             </h3>
@@ -77,7 +77,7 @@ const PrinterSettings = ({ title, config, onChange, systemPrinters, serialPorts 
             <div className="space-y-4">
                 {/* Connection Type */}
                 <div>
-                    <label className="block text-sm text-neutral-400 mb-2">{t('settings.printerType')}</label>
+                    <label className="block text-sm text-neutral-600 dark:text-neutral-400 mb-2">{t('settings.printerType')}</label>
                     <div className="grid grid-cols-3 gap-2">
                         {[
                             { id: 'windows_driver', icon: Monitor, label: 'Driver' },
@@ -87,9 +87,9 @@ const PrinterSettings = ({ title, config, onChange, systemPrinters, serialPorts 
                             <button
                                 key={type.id}
                                 onClick={() => update('connection', type.id)}
-                                className={`flex flex-col items-center justify-center p-3 rounded-xl border transition-all ${config.connection === type.id
-                                    ? 'bg-amber-500/20 border-amber-500 text-amber-400'
-                                    : 'bg-black/20 border-white/5 text-neutral-500 hover:bg-white/5 hover:text-white'
+                                className={`flex flex-col items-center justify-center p-3 rounded-xl border transition-all duration-200 ${config.connection === type.id
+                                    ? 'bg-emerald-600 dark:bg-emerald-600 border-emerald-500 dark:border-emerald-400 text-white shadow-[0_0_15px_rgba(16,185,129,0.4)] scale-105 z-10'
+                                    : 'bg-white dark:bg-neutral-800/50 border-neutral-200 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-700 hover:text-neutral-900 dark:hover:text-white'
                                     }`}
                             >
                                 <type.icon size={20} className="mb-1" />
@@ -101,7 +101,7 @@ const PrinterSettings = ({ title, config, onChange, systemPrinters, serialPorts 
 
                 {/* Protocol Selection */}
                 <div>
-                    <label className="block text-sm text-neutral-400 mb-2">Протокол печати</label>
+                    <label className="block text-sm text-neutral-600 dark:text-neutral-400 mb-2">Протокол печати</label>
                     <div className="grid grid-cols-3 gap-2">
                         {[
                             { id: 'zpl', icon: Activity, label: 'ZPL (Классика)', desc: 'Шрифты принтера' },
@@ -111,9 +111,9 @@ const PrinterSettings = ({ title, config, onChange, systemPrinters, serialPorts 
                             <button
                                 key={proto.id}
                                 onClick={() => update('protocol', proto.id)}
-                                className={`flex flex-col items-start p-3 rounded-xl border transition-all ${config.protocol === proto.id
-                                    ? 'bg-emerald-500/10 border-emerald-500 text-emerald-400'
-                                    : 'bg-black/20 border-white/5 text-neutral-500 hover:bg-white/5 hover:text-white'
+                                className={`flex flex-col items-start p-3 rounded-xl border transition-all duration-200 ${config.protocol === proto.id
+                                    ? 'bg-emerald-600 dark:bg-emerald-600 border-emerald-500 dark:border-emerald-400 text-white shadow-[0_0_15px_rgba(16,185,129,0.4)] scale-105 z-10'
+                                    : 'bg-white dark:bg-neutral-800/50 border-neutral-200 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-700 hover:text-neutral-900 dark:hover:text-white'
                                     }`}
                             >
                                 <div className="flex items-center gap-2 mb-1">
@@ -128,7 +128,7 @@ const PrinterSettings = ({ title, config, onChange, systemPrinters, serialPorts 
 
                 {/* DPI Selection */}
                 <div>
-                    <label className="block text-sm text-neutral-400 mb-2">Качество печати (DPI)</label>
+                    <label className="block text-sm text-neutral-600 dark:text-neutral-400 mb-2">Качество печати (DPI)</label>
                     <div className="grid grid-cols-2 gap-2">
                         {[
                             { id: 203, label: '203 DPI (Стандарт)' },
@@ -137,9 +137,9 @@ const PrinterSettings = ({ title, config, onChange, systemPrinters, serialPorts 
                             <button
                                 key={d.id}
                                 onClick={() => update('dpi', d.id)}
-                                className={`p-3 rounded-xl border transition-all ${(config.dpi === d.id) || (!config.dpi && d.id === 203)
-                                    ? 'bg-amber-500/20 border-amber-500 text-amber-400'
-                                    : 'bg-black/20 border-white/5 text-neutral-500 hover:bg-white/5 hover:text-white'
+                                className={`p-3 rounded-xl border transition-all duration-200 ${(config.dpi === d.id) || (!config.dpi && d.id === 203)
+                                    ? 'bg-emerald-600 dark:bg-emerald-600 border-emerald-500 dark:border-emerald-400 text-white shadow-[0_0_15px_rgba(16,185,129,0.4)] scale-105 z-10'
+                                    : 'bg-white dark:bg-neutral-800/50 border-neutral-200 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-700 hover:text-neutral-900 dark:hover:text-white'
                                     }`}
                             >
                                 <div className="font-bold text-xs text-center">{d.label}</div>
@@ -153,11 +153,11 @@ const PrinterSettings = ({ title, config, onChange, systemPrinters, serialPorts 
                 {/* Windows Driver */}
                 {config.connection === 'windows_driver' && (
                     <div>
-                        <label className="block text-sm text-neutral-400 mb-2">{t('settings.driverName')}</label>
+                        <label className="block text-sm text-neutral-600 dark:text-neutral-400 mb-2">{t('settings.driverName')}</label>
                         <select
                             value={config.driverName || ''}
                             onChange={(e) => update('driverName', e.target.value)}
-                            className="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+                            className="w-full bg-white dark:bg-black/30 border border-neutral-200 dark:border-white/10 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"
                         >
                             <option value="">{t('settings.systemDefault')}</option>
                             {systemPrinters.map(p => (
@@ -175,21 +175,21 @@ const PrinterSettings = ({ title, config, onChange, systemPrinters, serialPorts 
                 {config.connection === 'tcp' && (
                     <div className="grid grid-cols-3 gap-3">
                         <div className="col-span-2">
-                            <label className="block text-sm text-neutral-400 mb-2">{t('settings.ipAddress')}</label>
+                            <label className="block text-sm text-neutral-600 dark:text-neutral-400 mb-2">{t('settings.ipAddress')}</label>
                             <input
                                 type="text"
                                 value={config.ip || '192.168.1.100'}
                                 onChange={(e) => update('ip', e.target.value)}
-                                className="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+                                className="w-full bg-white dark:bg-black/30 border border-neutral-200 dark:border-white/10 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"
                             />
                         </div>
                         <div>
-                            <label className="block text-sm text-neutral-400 mb-2">{t('settings.port')}</label>
+                            <label className="block text-sm text-neutral-600 dark:text-neutral-400 mb-2">{t('settings.port')}</label>
                             <input
                                 type="number"
                                 value={config.port || 9100}
                                 onChange={(e) => update('port', Number(e.target.value))}
-                                className="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+                                className="w-full bg-white dark:bg-black/30 border border-neutral-200 dark:border-white/10 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"
                             />
                         </div>
                     </div>
@@ -199,11 +199,11 @@ const PrinterSettings = ({ title, config, onChange, systemPrinters, serialPorts 
                 {config.connection === 'serial' && (
                     <div className="grid grid-cols-2 gap-3">
                         <div>
-                            <label className="block text-sm text-neutral-400 mb-2">{t('settings.port')}</label>
+                            <label className="block text-sm text-neutral-600 dark:text-neutral-400 mb-2">{t('settings.port')}</label>
                             <select
                                 value={config.serialPort || ''}
                                 onChange={(e) => update('serialPort', e.target.value)}
-                                className="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+                                className="w-full bg-white dark:bg-black/30 border border-neutral-200 dark:border-white/10 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"
                             >
                                 <option value="">Select Port</option>
                                 {serialPorts.map(p => (
@@ -212,11 +212,11 @@ const PrinterSettings = ({ title, config, onChange, systemPrinters, serialPorts 
                             </select>
                         </div>
                         <div>
-                            <label className="block text-sm text-neutral-400 mb-2">{t('settings.baudRate')}</label>
+                            <label className="block text-sm text-neutral-600 dark:text-neutral-400 mb-2">{t('settings.baudRate')}</label>
                             <select
                                 value={config.baudRate || 9600}
                                 onChange={(e) => update('baudRate', Number(e.target.value))}
-                                className="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+                                className="w-full bg-white dark:bg-black/30 border border-neutral-200 dark:border-white/10 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"
                             >
                                 {[9600, 19200, 38400, 57600, 115200].map(r => (
                                     <option key={r} value={r}>{r}</option>
@@ -232,7 +232,7 @@ const PrinterSettings = ({ title, config, onChange, systemPrinters, serialPorts 
                     <button
                         onClick={handleTestPrint}
                         disabled={isTesting}
-                        className="text-xs px-4 py-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 rounded-lg border border-amber-500/20 transition-all flex items-center gap-2"
+                        className="text-xs px-4 py-2 bg-amber-50 dark:bg-amber-500/10 hover:bg-amber-100 dark:hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 rounded-lg border border-amber-200 dark:border-amber-500/20 transition-all flex items-center gap-2"
                     >
                         {isTesting ? <RefreshCw size={14} className="animate-spin" /> : <Activity size={14} />}
                         {t('settings.testPrint')}

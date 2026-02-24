@@ -6,6 +6,7 @@ import Settings from './components/Settings';
 import PrintView from './components/PrintView';
 import DatabaseViewer from './components/DatabaseViewer';
 import { useTranslation } from './i18n';
+import { ThemeProvider } from './components/ThemeProvider';
 
 const App = () => {
     const { t } = useTranslation();
@@ -14,6 +15,7 @@ const App = () => {
     const [serverStatus, setServerStatus] = useState<string>('disconnected');
     const [stationNumber, setStationNumber] = useState<number | null>(null);
     const [loadingIdentity, setLoadingIdentity] = useState(true);
+    const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
     // Global Sync Listener
     useEffect(() => {
@@ -105,46 +107,50 @@ const App = () => {
     }
 
     if (loadingIdentity) {
-        return <div className="h-screen w-full bg-neutral-950 flex items-center justify-center text-white">Loading...</div>;
+        return <div className="h-screen w-full bg-neutral-50 dark:bg-neutral-950 flex items-center justify-center text-neutral-900 dark:text-white">Loading...</div>;
     }
 
     return (
-        <div className="flex w-full h-screen bg-neutral-950 text-white font-sans overflow-hidden relative">
-            <Sidebar
-                activeTab={activeTab}
-                setActiveTab={setActiveTab}
-                serverStatus={serverStatus}
-                stationNumber={stationNumber}
-            />
-            <main className="flex-1 overflow-auto p-6 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-emerald-900/20 via-neutral-900 to-neutral-950">
-                <div style={{ display: activeTab === 'weighing' ? 'block' : 'none', height: '100%' }}>
-                    <WeighingStation activeTab={activeTab} />
-                </div>
-                <div style={{ display: activeTab === 'products' ? 'block' : 'none', height: '100%' }}>
-                    <Products />
-                </div>
-                <div style={{ display: activeTab === 'database' ? 'block' : 'none', height: '100%' }}>
-                    <DatabaseViewer />
-                </div>
-                <div style={{ display: activeTab === 'settings' ? 'block' : 'none', height: '100%' }}>
-                    <Settings />
-                </div>
-            </main>
-
-            {/* Global Toast Notification */}
-            {
-                toast && (
-                    <div className={`fixed bottom-8 right-8 px-6 py-4 rounded-2xl shadow-2xl backdrop-blur border flex items-center gap-3 animate-in slide-in-from-right duration-300 z-[200] ${toast.type === 'success' ? 'bg-emerald-900/80 border-emerald-500/30 text-emerald-100' :
-                        toast.type === 'error' ? 'bg-red-900/80 border-red-500/30 text-red-100' :
-                            'bg-neutral-900/80 border-white/10 text-white'
-                        }`}>
-                        {toast.type === 'success' && <div className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.5)]" />}
-                        {toast.type === 'error' && <div className="w-2 h-2 rounded-full bg-red-400 shadow-[0_0_10px_rgba(248,113,113,0.5)]" />}
-                        <span className="font-medium">{toast.msg}</span>
+        <ThemeProvider defaultTheme="system" storageKey="app-theme">
+            <div className="flex w-full h-screen bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-white font-sans overflow-hidden relative transition-colors duration-200">
+                <Sidebar
+                    activeTab={activeTab}
+                    setActiveTab={setActiveTab}
+                    serverStatus={serverStatus}
+                    stationNumber={stationNumber}
+                    isCollapsed={isSidebarCollapsed}
+                    toggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+                />
+                <main className="flex-1 overflow-auto p-6 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-white via-neutral-50 to-neutral-100 dark:from-emerald-900/20 dark:via-neutral-900 dark:to-neutral-950 transition-colors duration-200">
+                    <div style={{ display: activeTab === 'weighing' ? 'block' : 'none', height: '100%' }}>
+                        <WeighingStation activeTab={activeTab} />
                     </div>
-                )
-            }
-        </div>
+                    <div style={{ display: activeTab === 'products' ? 'block' : 'none', height: '100%' }}>
+                        <Products />
+                    </div>
+                    <div style={{ display: activeTab === 'database' ? 'block' : 'none', height: '100%' }}>
+                        <DatabaseViewer />
+                    </div>
+                    <div style={{ display: activeTab === 'settings' ? 'block' : 'none', height: '100%' }}>
+                        <Settings />
+                    </div>
+                </main>
+
+                {/* Global Toast Notification */}
+                {
+                    toast && (
+                        <div className={`fixed bottom-8 right-8 px-6 py-4 rounded-2xl shadow-2xl backdrop-blur border flex items-center gap-3 animate-in slide-in-from-right duration-300 z-[200] ${toast.type === 'success' ? 'bg-emerald-100/90 dark:bg-emerald-900/80 border-emerald-500/30 text-emerald-900 dark:text-emerald-100' :
+                            toast.type === 'error' ? 'bg-red-100/90 dark:bg-red-900/80 border-red-500/30 text-red-900 dark:text-red-100' :
+                                'bg-white/90 dark:bg-neutral-900/80 border-neutral-200 dark:border-white/10 text-neutral-900 dark:text-white'
+                            }`}>
+                            {toast.type === 'success' && <div className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.5)]" />}
+                            {toast.type === 'error' && <div className="w-2 h-2 rounded-full bg-red-400 shadow-[0_0_10px_rgba(248,113,113,0.5)]" />}
+                            <span className="font-medium">{toast.msg}</span>
+                        </div>
+                    )
+                }
+            </div>
+        </ThemeProvider>
     );
 };
 

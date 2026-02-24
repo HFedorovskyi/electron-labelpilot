@@ -22,6 +22,7 @@ export const translations: Record<Lang, Record<string, string>> = {
 
         // Settings
         'settings.title': 'Настройки',
+        'settings.theme': 'Внешний вид',
         'settings.printer': 'Настройки принтера',
         'settings.packPrinter': 'Принтер для этикетки на упаковку',
         'settings.boxPrinter': 'Принтер для этикетки на короб',
@@ -197,6 +198,7 @@ export const translations: Record<Lang, Record<string, string>> = {
 
         // Settings
         'settings.title': 'Settings',
+        'settings.theme': 'Appearance',
         'settings.printer': 'Printer Settings',
         'settings.packPrinter': 'Pack label printer',
         'settings.boxPrinter': 'Box label printer',
@@ -369,6 +371,7 @@ export const translations: Record<Lang, Record<string, string>> = {
 
         // Settings
         'settings.title': 'Einstellungen',
+        'settings.theme': 'Erscheinungsbild',
         'settings.printer': 'Druckereinstellungen',
         'settings.packPrinter': 'Drucker für Packungsetikett',
         'settings.boxPrinter': 'Drucker für Karton-Etikett',

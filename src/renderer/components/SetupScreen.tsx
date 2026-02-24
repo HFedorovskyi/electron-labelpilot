@@ -28,30 +28,30 @@ const SetupScreen: React.FC<SetupScreenProps> = ({ onIdentityLoaded }) => {
     };
 
     return (
-        <div className="flex flex-col items-center justify-center min-h-screen bg-neutral-950 text-white p-6 relative overflow-hidden">
-            <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-emerald-900/20 via-neutral-950 to-neutral-950 pointer-events-none" />
+        <div className="flex flex-col items-center justify-center min-h-screen bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-white p-6 relative overflow-hidden transition-colors">
+            <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-emerald-100/50 dark:from-emerald-900/20 via-neutral-50 dark:via-neutral-950 to-neutral-50 dark:to-neutral-950 pointer-events-none transition-colors" />
 
             <div
-                className="z-10 bg-neutral-900/50 backdrop-blur-xl p-8 rounded-3xl border border-white/10 shadow-2xl max-w-md w-full text-center animate-in fade-in slide-in-from-bottom-4 duration-700"
+                className="z-10 bg-white/80 dark:bg-neutral-900/50 backdrop-blur-xl p-8 rounded-3xl border border-neutral-200 dark:border-white/10 shadow-xl dark:shadow-2xl max-w-md w-full text-center animate-in fade-in slide-in-from-bottom-4 duration-700"
             >
                 <div className="mb-8 flex justify-center">
-                    <div className="w-20 h-20 bg-emerald-500/10 rounded-2xl flex items-center justify-center border border-emerald-500/20 shadow-[0_0_30px_rgba(16,185,129,0.15)]">
-                        <svg className="w-10 h-10 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <div className="w-20 h-20 bg-emerald-50 dark:bg-emerald-500/10 rounded-2xl flex items-center justify-center border border-emerald-200 dark:border-emerald-500/20 shadow-[0_0_30px_rgba(16,185,129,0.15)]">
+                        <svg className="w-10 h-10 text-emerald-600 dark:text-emerald-400 border-" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                         </svg>
                     </div>
                 </div>
 
-                <h1 className="text-3xl font-bold bg-gradient-to-r from-white to-neutral-400 bg-clip-text text-transparent mb-3">
+                <h1 className="text-3xl font-bold bg-gradient-to-r from-neutral-900 dark:from-white to-neutral-500 dark:to-neutral-400 bg-clip-text text-transparent mb-3">
                     {t('setup.welcome') || 'Station Setup'}
                 </h1>
-                <p className="text-neutral-400 mb-8">
+                <p className="text-neutral-500 dark:text-neutral-400 mb-8">
                     {t('setup.instruction') || 'Please insert the USB drive with the station identity file to proceed.'}
                 </p>
 
                 {error && (
                     <div
-                        className="mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-200 text-sm animate-in fade-in slide-in-from-top-2"
+                        className="mb-6 p-4 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-xl text-red-600 dark:text-red-200 text-sm animate-in fade-in slide-in-from-top-2"
                     >
                         {error}
                     </div>

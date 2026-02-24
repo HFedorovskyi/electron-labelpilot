@@ -726,21 +726,47 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
 
             // 1. Get PREDICTED Box Number for Record-Pack if no box is open
             // We use a dummy dataObj to get the predicted number
+            const predictedBoxNum = currentBoxNumber || String(totalBoxes + 1).padStart(4, '0');
             const predictedData = getLabelData();
-            const predictedBoxNum = currentBoxNumber || predictedData.box_number;
 
-            // 2. Record Pack to DB FIRST
-            // This ensures we have the CORRECT box_id and box_number from the DB
+            let packBarcode = '';
+            if (packBarcodeTemplate) {
+                try {
+                    const fields = JSON.parse(packBarcodeTemplate.structure).fields;
+                    const expDatePack = new Date(labelingDate);
+                    expDatePack.setDate(labelingDate.getDate() + (selectedProduct?.exp_date || 0));
+
+                    const genData = {
+                        weight_netto_pack: parseFloat(predictedData.weight_netto_pack),
+                        weight_brutto_pack: parseFloat(predictedData.weight_brutto_pack),
+                        production_date: labelingDate,
+                        exp_date: expDatePack,
+                        article: (selectedProduct?.article || '').padStart(14, '0'),
+                        pack_number: predictedData.pack_number,
+                        box_number: predictedBoxNum,
+                        batch_number: batchNumber || ''
+                    } as any;
+
+                    packBarcode = generateBarcode(fields, genData);
+                } catch (err) {
+                    console.error('Error generating preliminary pack barcode:', err);
+                }
+            }
+
+            const expDatePack = new Date(labelingDate);
+            expDatePack.setDate(labelingDate.getDate() + (selectedProduct?.exp_date || 0));
+
             const recordResult = await window.electron.invoke('record-pack', {
                 number: predictedData.pack_number,
                 box_number: predictedBoxNum,
                 nomenclature_id: selectedProduct.id,
                 weight_netto: parseFloat(predictedData.weight_netto_pack),
                 weight_brutto: parseFloat(predictedData.weight_brutto_pack),
-                barcode_value: '', // We don't have final barcode yet, that's okay, we'll update if needed or just live with it? 
-                // Actually, record-pack stores the barcode_value. 
-                // Let's generate a PRELIMINARY barcode.
-                station_number: stationNumber
+                barcode_value: packBarcode,
+                station_number: stationNumber,
+                production_date: labelingDate.toISOString(),
+                expiration_date: expDatePack.toISOString(),
+                batch: batchNumber || ''
             });
 
             if (!recordResult.success) throw new Error('Database recording failed');
@@ -882,10 +908,10 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
     return (
         <div className="grid grid-cols-12 gap-6 h-full p-4 relative" onClick={() => setIsMenuOpen(false)}>
             {/* Product Information Card */}
-            <div className="col-span-8 bg-neutral-900/50 border border-white/5 rounded-3xl p-8 backdrop-blur shadow-2xl">
+            <div className="col-span-8 bg-white dark:bg-neutral-900/50 border border-neutral-200 dark:border-white/5 rounded-3xl p-8 backdrop-blur shadow-sm dark:shadow-2xl">
                 <div className="flex justify-between items-start mb-8">
                     <div>
-                        <h2 className="text-2xl font-semibold text-white">{t('ws.title')}</h2>
+                        <h2 className="text-2xl font-semibold text-neutral-900 dark:text-white">{t('ws.title')}</h2>
                     </div>
                     <div className={`px-4 py-2 rounded-full text-sm font-medium flex items-center gap-2 border ${status === 'connected'
                         ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
@@ -921,18 +947,18 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
                             value={isMenuOpen ? searchQuery : (selectedProduct?.name || '')}
                             onChange={handleSearch}
                             onFocus={() => setIsMenuOpen(true)}
-                            className="w-full bg-black/20 border border-white/10 rounded-2xl px-5 py-4 text-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all text-white placeholder-neutral-500/50"
+                            className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-300 dark:border-white/10 rounded-2xl px-5 py-4 text-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all text-neutral-900 dark:text-white placeholder-neutral-400 dark:placeholder-neutral-500/50"
                         />
                         {/* Dropdown Menu */}
                         {isMenuOpen && (products.length > 0 || searchQuery !== '') && (
-                            <div className="absolute w-full mt-2 bg-neutral-900 border border-white/10 rounded-2xl shadow-xl max-h-60 overflow-y-auto z-50">
+                            <div className="absolute w-full mt-2 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-white/10 rounded-2xl shadow-xl max-h-60 overflow-y-auto z-50">
                                 {products.length > 0 ? products.map((p: any) => (
                                     <div
                                         key={p.id}
                                         onClick={() => handleSelectProduct(p)}
-                                        className="px-5 py-3 hover:bg-emerald-500/20 cursor-pointer flex justify-between items-center group transition-colors"
+                                        className="px-5 py-3 hover:bg-emerald-50 dark:hover:bg-emerald-500/20 cursor-pointer flex justify-between items-center group transition-colors"
                                     >
-                                        <span className="text-white group-hover:text-emerald-100">{p.name} <span className="text-neutral-500 text-sm ml-2">({p.article})</span></span>
+                                        <span className="text-neutral-800 dark:text-white group-hover:text-emerald-700 dark:group-hover:text-emerald-100">{p.name} <span className="text-neutral-500 text-sm ml-2">({p.article})</span></span>
                                     </div>
                                 )) : (
                                     <div className="px-5 py-3 text-neutral-500 italic">{t('ws.noProducts')}</div>
@@ -941,11 +967,11 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
                         )}
                     </div>
 
-                    <div className="p-6 bg-emerald-500/5 border border-emerald-500/10 rounded-2xl min-h-[140px] flex flex-col justify-center">
+                    <div className="p-6 bg-emerald-50 dark:bg-emerald-500/5 border border-emerald-200 dark:border-emerald-500/10 rounded-2xl min-h-[140px] flex flex-col justify-center">
                         {selectedProduct ? (
                             <>
-                                <h3 className="text-sm uppercase tracking-wider text-emerald-500/60 font-bold mb-2">{t('products.name')}</h3>
-                                <div className="text-3xl font-bold text-emerald-100">{selectedProduct.name}</div>
+                                <h3 className="text-sm uppercase tracking-wider text-emerald-600 dark:text-emerald-500/60 font-bold mb-2">{t('products.name')}</h3>
+                                <div className="text-3xl font-bold text-emerald-700 dark:text-emerald-100">{selectedProduct.name}</div>
                                 <div className="mt-2 flex gap-4 text-emerald-400/60 text-sm font-mono">
                                     <span>{t('products.article')}: {selectedProduct.article || '—'}</span>
                                     <span>{t('products.expDays').toUpperCase()}: {selectedProduct.exp_date || 0}</span>
@@ -959,23 +985,23 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
 
                 {/* Weight Display Area */}
                 <div className="mt-8 grid grid-cols-2 gap-4">
-                    <div className="bg-black/30 border border-white/10 rounded-3xl p-8 text-center relative overflow-hidden group">
-                        <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                    <div className="bg-neutral-50 dark:bg-black/30 border border-neutral-200 dark:border-white/10 rounded-3xl p-8 text-center relative overflow-hidden group">
+                        <div className="absolute inset-0 bg-gradient-to-br from-emerald-100/50 dark:from-emerald-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
                         <label className="text-xs uppercase tracking-widest text-neutral-500 font-bold">{t('ws.gross')}</label>
-                        <div className="text-7xl font-mono text-emerald-400 mt-2 font-light tracking-tighter">
+                        <div className="text-7xl font-mono text-emerald-600 dark:text-emerald-400 mt-2 font-light tracking-tighter">
                             {weight} <span className="text-2xl text-emerald-500/50">{t('ws.kg')}</span>
                         </div>
                         {isStable && (
-                            <div className="mt-2 text-emerald-500/60 text-xs font-bold uppercase tracking-widest animate-pulse flex items-center justify-center gap-2">
+                            <div className="mt-2 text-emerald-600 dark:text-emerald-500/60 text-xs font-bold uppercase tracking-widest animate-pulse flex items-center justify-center gap-2">
                                 <div className="w-1 h-1 rounded-full bg-emerald-500"></div>
                                 {t('ws.stable')}
                             </div>
                         )}
                     </div>
-                    <div className="bg-black/30 border border-white/10 rounded-3xl p-8 text-center">
+                    <div className="bg-neutral-50 dark:bg-black/30 border border-neutral-200 dark:border-white/10 rounded-3xl p-8 text-center">
                         <label className="text-xs uppercase tracking-widest text-neutral-500 font-bold">{t('ws.net')}</label>
-                        <div className="text-7xl font-mono text-neutral-300 mt-2 font-light tracking-tighter">
-                            {getNetWeight()} <span className="text-2xl text-neutral-600">{t('ws.kg')}</span>
+                        <div className="text-7xl font-mono text-neutral-700 dark:text-neutral-300 mt-2 font-light tracking-tighter">
+                            {getNetWeight()} <span className="text-2xl text-neutral-500 dark:text-neutral-600">{t('ws.kg')}</span>
                         </div>
                     </div>
                 </div>
@@ -994,32 +1020,32 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
                 <div className="grid grid-cols-2 gap-4">
                     <button
                         onClick={handleRepeat}
-                        className="py-6 bg-neutral-800/50 hover:bg-neutral-800 border border-white/5 hover:border-white/10 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group"
+                        className="py-6 bg-neutral-100 dark:bg-neutral-800/50 hover:bg-neutral-200 dark:hover:bg-neutral-800 border border-neutral-300 dark:border-white/5 hover:border-neutral-400 dark:hover:border-white/10 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group shadow-sm dark:shadow-none"
                     >
-                        <RefreshCw className="w-6 h-6 text-neutral-400 group-hover:text-white transition-colors" />
-                        <span className="text-neutral-400 group-hover:text-white uppercase text-xs tracking-widest">{t('ws.reprintSmall')}</span>
+                        <RefreshCw className="w-6 h-6 text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-800 dark:group-hover:text-white transition-colors" />
+                        <span className="text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-800 dark:group-hover:text-white uppercase text-xs tracking-widest">{t('ws.reprintSmall')}</span>
                     </button>
                     <button
                         onClick={handleCloseBox}
-                        className="py-6 bg-neutral-800/50 hover:bg-neutral-800 border border-white/5 hover:border-white/10 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group"
+                        className="py-6 bg-neutral-100 dark:bg-neutral-800/50 hover:bg-neutral-200 dark:hover:bg-neutral-800 border border-neutral-300 dark:border-white/5 hover:border-neutral-400 dark:hover:border-white/10 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group shadow-sm dark:shadow-none"
                     >
-                        <Box className="w-6 h-6 text-neutral-400 group-hover:text-white transition-colors" />
-                        <span className="text-neutral-400 group-hover:text-white uppercase text-xs tracking-widest">{t('ws.closeBox')}</span>
+                        <Box className="w-6 h-6 text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-800 dark:group-hover:text-white transition-colors" />
+                        <span className="text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-800 dark:group-hover:text-white uppercase text-xs tracking-widest">{t('ws.closeBox')}</span>
                     </button>
                     <button
                         onClick={() => setIsDeleteModalOpen(true)}
-                        className="py-6 bg-neutral-800/50 hover:bg-red-900/30 border border-white/5 hover:border-red-500/30 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group"
+                        className="py-6 bg-neutral-100 dark:bg-neutral-800/50 hover:bg-red-100 dark:hover:bg-red-900/30 border border-neutral-300 dark:border-white/5 hover:border-red-400 dark:hover:border-red-500/30 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group shadow-sm dark:shadow-none"
                     >
-                        <Layers className="w-6 h-6 text-neutral-400 group-hover:text-red-400 transition-colors" />
-                        <span className="text-neutral-400 group-hover:text-red-400 uppercase text-xs tracking-widest">Удаление</span>
+                        <Layers className="w-6 h-6 text-neutral-500 dark:text-neutral-400 group-hover:text-red-600 dark:group-hover:text-red-400 transition-colors" />
+                        <span className="text-neutral-500 dark:text-neutral-400 group-hover:text-red-600 dark:group-hover:text-red-400 uppercase text-xs tracking-widest">Удаление</span>
                     </button>
                 </div>
 
-                <div className="mt-auto p-6 bg-neutral-900/50 border border-white/5 rounded-3xl backdrop-blur">
-                    <h3 className="text-sm font-semibold mb-4 text-white/60 uppercase tracking-widest">{t('ws.sessionStats')}</h3>
+                <div className="mt-auto p-6 bg-white dark:bg-neutral-900/50 border border-neutral-200 dark:border-white/5 shadow-sm dark:shadow-none rounded-3xl backdrop-blur">
+                    <h3 className="text-sm font-semibold mb-4 text-neutral-500 dark:text-white/60 uppercase tracking-widest">{t('ws.sessionStats')}</h3>
                     <div className="space-y-3">
                         <div
-                            className="flex justify-between items-center p-3 bg-white/5 border border-white/10 rounded-xl group cursor-pointer hover:bg-emerald-500/10 hover:border-emerald-500/30 transition-all active:scale-[0.98]"
+                            className="flex justify-between items-center p-3 bg-neutral-100 dark:bg-white/5 border border-neutral-300 dark:border-white/10 rounded-xl group cursor-pointer hover:bg-emerald-50 dark:hover:bg-emerald-500/10 hover:border-emerald-300 dark:hover:border-emerald-500/30 transition-all active:scale-[0.98]"
                             onClick={(e) => {
                                 e.stopPropagation();
                                 if (unitsInBox > 0) {
@@ -1031,16 +1057,16 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
                         >
                             <span className="text-xs uppercase tracking-wider text-neutral-500 font-bold">Партия</span>
                             <div className="flex items-center gap-3">
-                                <span className="text-xl font-mono font-bold text-white group-hover:text-emerald-400 transition-colors">
-                                    {batchNumber || <span className="text-neutral-700 italic text-sm">Ввести...</span>}
+                                <span className="text-xl font-mono font-bold text-neutral-900 dark:text-white group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
+                                    {batchNumber || <span className="text-neutral-400 dark:text-neutral-700 italic text-sm">Ввести...</span>}
                                 </span>
-                                <div className="p-2 bg-neutral-800 border border-white/10 rounded-lg group-hover:bg-emerald-500/20 group-hover:border-emerald-500/40 transition-colors">
-                                    <Hash className="w-4 h-4 text-emerald-500" />
+                                <div className="p-2 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-white/10 rounded-lg group-hover:bg-emerald-100 dark:group-hover:bg-emerald-500/20 group-hover:border-emerald-400 dark:group-hover:border-emerald-500/40 transition-colors">
+                                    <Hash className="w-4 h-4 text-emerald-600 dark:text-emerald-500" />
                                 </div>
                             </div>
                         </div>
                         <div
-                            className="flex justify-between items-center p-3 bg-white/5 border border-white/10 rounded-xl group cursor-pointer hover:bg-emerald-500/10 hover:border-emerald-500/30 transition-all active:scale-[0.98]"
+                            className="flex justify-between items-center p-3 bg-neutral-100 dark:bg-white/5 border border-neutral-300 dark:border-white/10 rounded-xl group cursor-pointer hover:bg-emerald-50 dark:hover:bg-emerald-500/10 hover:border-emerald-300 dark:hover:border-emerald-500/30 transition-all active:scale-[0.98]"
                             onClick={(e) => {
                                 e.stopPropagation();
                                 if (unitsInBox > 0) {
@@ -1052,36 +1078,36 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
                         >
                             <span className="text-xs uppercase tracking-wider text-neutral-500 font-bold">Дата марк.</span>
                             <div className="flex items-center gap-3">
-                                <span className="text-xl font-mono font-bold text-white group-hover:text-emerald-400 transition-colors">
+                                <span className="text-xl font-mono font-bold text-neutral-900 dark:text-white group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
                                     {labelingDate.toLocaleDateString('ru-RU')}
                                 </span>
-                                <div className="p-2 bg-neutral-800 border border-white/10 rounded-lg group-hover:bg-emerald-500/20 group-hover:border-emerald-500/40 transition-colors">
-                                    <Calendar className="w-4 h-4 text-emerald-500" />
+                                <div className="p-2 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-white/10 rounded-lg group-hover:bg-emerald-100 dark:group-hover:bg-emerald-500/20 group-hover:border-emerald-400 dark:group-hover:border-emerald-500/40 transition-colors">
+                                    <Calendar className="w-4 h-4 text-emerald-600 dark:text-emerald-500" />
                                 </div>
                             </div>
                         </div>
-                        <div className="flex justify-between text-sm py-2 border-b border-white/5">
+                        <div className="flex justify-between text-sm py-2 border-b border-neutral-200 dark:border-white/5">
                             <span className="text-neutral-500">{t('ws.packNum')}</span>
-                            <span className="font-mono text-emerald-400">{getLabelData().pack_number || '--'}</span>
+                            <span className="font-mono text-emerald-600 dark:text-emerald-400">{getLabelData().pack_number || '--'}</span>
                         </div>
-                        <div className="flex justify-between text-sm py-2 border-b border-white/5">
+                        <div className="flex justify-between text-sm py-2 border-b border-neutral-200 dark:border-white/5">
                             <span className="text-neutral-500">{t('ws.boxNum')}</span>
-                            <span className="font-mono text-emerald-400">{getLabelData(undefined, true).box_number || '--'}</span>
+                            <span className="font-mono text-emerald-600 dark:text-emerald-400">{getLabelData(undefined, true).box_number || '--'}</span>
                         </div>
-                        <div className="flex justify-between text-sm py-2 border-b border-white/5">
+                        <div className="flex justify-between text-sm py-2 border-b border-neutral-200 dark:border-white/5">
                             <span className="text-neutral-500">{t('ws.inBox')}</span>
                             <div className="flex items-center gap-2">
-                                <span className="font-mono text-white">{unitsInBox}</span>
-                                <span className="text-neutral-600">/ {selectedProduct?.close_box_counter || '-'}</span>
+                                <span className="font-mono text-neutral-900 dark:text-white">{unitsInBox}</span>
+                                <span className="text-neutral-500 dark:text-neutral-600">/ {selectedProduct?.close_box_counter || '-'}</span>
                             </div>
                         </div>
-                        <div className="flex justify-between text-sm py-2 border-b border-white/5">
+                        <div className="flex justify-between text-sm py-2 border-b border-neutral-200 dark:border-white/5">
                             <span className="text-neutral-500">{t('ws.boxesOnPallet')}</span>
-                            <span className="font-mono text-amber-400">{boxesInPallet}</span>
+                            <span className="font-mono text-amber-600 dark:text-amber-400">{boxesInPallet}</span>
                         </div>
                         <div className="flex justify-between text-sm py-2">
                             <span className="text-neutral-500">{t('ws.totalUnits')}</span>
-                            <span className="font-mono text-white">{totalUnits}</span>
+                            <span className="font-mono text-neutral-900 dark:text-white">{totalUnits}</span>
                         </div>
                     </div>
 
@@ -1091,27 +1117,27 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
             {/* Custom Alert Modal */}
             {alertMessage && (
                 <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-in fade-in duration-200">
-                    <div className="bg-neutral-900 border border-white/10 rounded-[2rem] p-10 max-w-2xl w-full text-center shadow-2xl relative animate-in zoom-in-95 duration-200">
+                    <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-white/10 rounded-[2rem] p-10 max-w-2xl w-full text-center shadow-2xl relative animate-in zoom-in-95 duration-200">
                         <button
                             onClick={() => setAlertMessage(null)}
-                            className="absolute top-6 right-6 p-2 bg-white/5 hover:bg-white/10 rounded-full transition-colors"
+                            className="absolute top-6 right-6 p-2 bg-neutral-100 dark:bg-white/5 hover:bg-neutral-200 dark:hover:bg-white/10 rounded-full transition-colors"
                         >
-                            <X className="w-8 h-8 text-neutral-400" />
+                            <X className="w-8 h-8 text-neutral-500 dark:text-neutral-400" />
                         </button>
 
-                        <div className="mx-auto w-24 h-24 bg-red-500/10 rounded-full flex items-center justify-center mb-8">
+                        <div className="mx-auto w-24 h-24 bg-red-100 dark:bg-red-500/10 rounded-full flex items-center justify-center mb-8">
                             <AlertCircle className="w-12 h-12 text-red-500" />
                         </div>
 
-                        <h3 className="text-3xl font-bold text-white mb-4">{t('ws.attention')}</h3>
+                        <h3 className="text-3xl font-bold text-neutral-900 dark:text-white mb-4">{t('ws.attention')}</h3>
 
-                        <p className="text-xl text-neutral-400 mb-10 whitespace-pre-line leading-relaxed">
+                        <p className="text-xl text-neutral-600 dark:text-neutral-400 mb-10 whitespace-pre-line leading-relaxed">
                             {alertMessage}
                         </p>
 
                         <button
                             onClick={() => setAlertMessage(null)}
-                            className="w-full py-6 !bg-neutral-300 hover:!bg-neutral-200 !text-black active:!bg-neutral-400 active:scale-[0.98] transition-all rounded-2xl font-bold text-xl shadow-lg border border-white/20"
+                            className="w-full py-6 !bg-neutral-800 hover:!bg-neutral-700 dark:!bg-neutral-300 dark:hover:!bg-neutral-200 !text-white dark:!text-black active:!bg-neutral-900 dark:active:!bg-neutral-400 active:scale-[0.98] transition-all rounded-2xl font-bold text-xl shadow-lg border border-transparent dark:border-white/20"
                         >
                             {t('ws.ok')}
                         </button>

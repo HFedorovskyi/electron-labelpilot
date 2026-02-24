@@ -24,19 +24,25 @@ export const migrations: Migration[] = [
         }
     },
     // Future migrations go here, e.g.:
-    // {
-    //   version: 2,
-    //   description: 'Add barcode_type column to barcodes',
-    //   up(db) {
-    //     db.exec(`ALTER TABLE barcodes ADD COLUMN barcode_type TEXT DEFAULT 'auto'`);
-    //   },
-    //   down(db) {
-    //     // SQLite < 3.35 doesn't support DROP COLUMN — recreate table
-    //     db.exec(`CREATE TABLE barcodes_bak AS SELECT id, name, structure FROM barcodes`);
-    //     db.exec(`DROP TABLE barcodes`);
-    //     db.exec(`ALTER TABLE barcodes_bak RENAME TO barcodes`);
-    //   }
-    // },
+    {
+        version: 2,
+        description: 'Add production_date, expiration_date, and batch columns to pack',
+        up(db) {
+            db.exec(`
+          ALTER TABLE pack ADD COLUMN production_date TEXT;
+          ALTER TABLE pack ADD COLUMN expiration_date TEXT;
+          ALTER TABLE pack ADD COLUMN batch TEXT;
+        `);
+        },
+        down(db) {
+            // SQLite < 3.35 doesn't support DROP COLUMN — recreate table
+            db.exec(`
+          CREATE TABLE pack_bak AS SELECT id, number, created_at, box_id, nomenclature_id, weight_netto, weight_brutto, barcode_value, station_number, status FROM pack;
+          DROP TABLE pack;
+          ALTER TABLE pack_bak RENAME TO pack;
+        `);
+        }
+    },
 ];
 
 /**

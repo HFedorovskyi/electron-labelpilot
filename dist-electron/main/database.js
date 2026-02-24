@@ -95,7 +95,10 @@ function initDatabase() {
         weight_brutto REAL NOT NULL,
         barcode_value TEXT,
         station_number TEXT,
-        status TEXT NOT NULL
+        status TEXT NOT NULL,
+        production_date TEXT,
+        expiration_date TEXT,
+        batch TEXT
       );
 
       CREATE TABLE IF NOT EXISTS station (
@@ -314,9 +317,9 @@ function recordPack(data) {
         }
         // 2. Insert the pack
         db.prepare(`
-      INSERT INTO pack (number, box_id, nomenclature_id, weight_netto, weight_brutto, barcode_value, station_number, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'Printed')
-    `).run(data.number, box.id, data.nomenclature_id, data.weight_netto, data.weight_brutto, data.barcode_value, data.station_number || null);
+      INSERT INTO pack (number, box_id, nomenclature_id, weight_netto, weight_brutto, barcode_value, station_number, status, production_date, expiration_date, batch)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'Printed', ?, ?, ?)
+    `).run(data.number, box.id, data.nomenclature_id, data.weight_netto, data.weight_brutto, data.barcode_value, data.station_number || null, data.production_date || null, data.expiration_date || null, data.batch || null);
         const duration = Date.now() - startTime;
         console.log(`Database: recordPack completed in ${duration}ms (New box: ${newBoxCreated}, Box Number: ${box.number})`);
         return { success: true, boxId: box.id, boxNumber: box.number, newBoxCreated };
