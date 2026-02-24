@@ -1,10 +1,11 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Printer, RefreshCw, Box, AlertCircle, X, Hash, Layers, Calendar } from 'lucide-react';
+import { Printer, RefreshCw, Box, AlertCircle, X, Hash, Layers, Calendar, Search } from 'lucide-react';
 import { generateBarcode, type BarcodeData } from '../utils/barcodeGenerator';
 import { useTranslation } from '../i18n';
 import NumericKeypad from './NumericKeypad';
 import DeleteItemsModal from './DeleteItemsModal';
 import DatePickerModal from './DatePickerModal';
+import ProductSelectionModal from './ProductSelectionModal';
 
 const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
     const { t } = useTranslation();
@@ -15,8 +16,7 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
 
     const [products, setProducts] = useState<any[]>([]);
     const [selectedProduct, setSelectedProduct] = useState<any | null>(null);
-    const [searchQuery, setSearchQuery] = useState('');
-    const [isMenuOpen, setIsMenuOpen] = useState(false);
+    const [isProductModalOpen, setIsProductModalOpen] = useState(false);
     const [alertMessage, setAlertMessage] = useState<string | null>(null);
     const [numberingConfig, setNumberingConfig] = useState<any>(null);
 
@@ -390,7 +390,7 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
         });
 
         const removeUpdateListener = window.electron.on('data-updated', () => {
-            loadProducts(searchQuery);
+            loadProducts();
         });
 
         return () => {
@@ -885,13 +885,6 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
 
 
 
-    const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const query = e.target.value;
-        setSearchQuery(query);
-        loadProducts(query);
-        setIsMenuOpen(true);
-    };
-
     const handleSelectProduct = (product: any) => {
         if (unitsInBox > 0) {
             setAlertMessage(t('ws.closeBoxBeforeChange'));
@@ -900,14 +893,13 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
         setSelectedProduct(product);
         setCurrentBoxId(null);
         setCurrentBoxNumber(null);
-        setSearchQuery('');
-        setIsMenuOpen(false);
+        setIsProductModalOpen(false);
     };
 
     console.log('[WeighingStation] Render State:', { weight, isStable, selectedProductName: selectedProduct?.name, containersCount: containers.length });
 
     return (
-        <div className="grid grid-cols-12 gap-6 h-full p-4 relative" onClick={() => setIsMenuOpen(false)}>
+        <div className="grid grid-cols-12 gap-6 h-full p-4 relative">
             {/* Product Information Card */}
             <div className="col-span-8 bg-white dark:bg-neutral-900/50 border border-neutral-200 dark:border-white/5 rounded-3xl p-8 backdrop-blur shadow-sm dark:shadow-2xl">
                 <div className="flex justify-between items-start mb-8">
@@ -940,32 +932,14 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
                 </div>
 
                 <div className="space-y-6 relative">
-                    <div onClick={(e) => e.stopPropagation()}>
+                    <div onClick={() => setIsProductModalOpen(true)} className="cursor-pointer group">
                         <label className="block text-sm font-medium text-neutral-400 mb-2">{t('ws.search')}</label>
-                        <input
-                            type="text"
-                            placeholder={selectedProduct ? selectedProduct.name : "..."}
-                            value={isMenuOpen ? searchQuery : (selectedProduct?.name || '')}
-                            onChange={handleSearch}
-                            onFocus={() => setIsMenuOpen(true)}
-                            className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-300 dark:border-white/10 rounded-2xl px-5 py-4 text-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all text-neutral-900 dark:text-white placeholder-neutral-400 dark:placeholder-neutral-500/50"
-                        />
-                        {/* Dropdown Menu */}
-                        {isMenuOpen && (products.length > 0 || searchQuery !== '') && (
-                            <div className="absolute w-full mt-2 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-white/10 rounded-2xl shadow-xl max-h-60 overflow-y-auto z-50">
-                                {products.length > 0 ? products.map((p: any) => (
-                                    <div
-                                        key={p.id}
-                                        onClick={() => handleSelectProduct(p)}
-                                        className="px-5 py-3 hover:bg-emerald-50 dark:hover:bg-emerald-500/20 cursor-pointer flex justify-between items-center group transition-colors"
-                                    >
-                                        <span className="text-neutral-800 dark:text-white group-hover:text-emerald-700 dark:group-hover:text-emerald-100">{p.name} <span className="text-neutral-500 text-sm ml-2">({p.article})</span></span>
-                                    </div>
-                                )) : (
-                                    <div className="px-5 py-3 text-neutral-500 italic">{t('ws.noProducts')}</div>
-                                )}
-                            </div>
-                        )}
+                        <div className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-300 dark:border-white/10 rounded-2xl px-5 py-4 text-lg text-neutral-500 dark:text-neutral-400 flex items-center justify-between group-hover:bg-neutral-100 dark:group-hover:bg-black/40 group-active:scale-[0.98] transition-all">
+                            <span className={selectedProduct ? "text-neutral-900 dark:text-white" : ""}>
+                                {selectedProduct ? selectedProduct.name : "..."}
+                            </span>
+                            <Search className="w-6 h-6 text-neutral-400" />
+                        </div>
                     </div>
 
                     <div className="p-6 bg-emerald-50 dark:bg-emerald-500/5 border border-emerald-200 dark:border-emerald-500/10 rounded-2xl min-h-[140px] flex flex-col justify-center">
@@ -1117,7 +1091,7 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
             </div>
             {/* Custom Alert Modal */}
             {alertMessage && (
-                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-in fade-in duration-200">
+                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[300] flex items-center justify-center p-4 animate-in fade-in duration-200">
                     <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-white/10 rounded-[2rem] p-10 max-w-2xl w-full text-center shadow-2xl relative animate-in zoom-in-95 duration-200">
                         <button
                             onClick={() => setAlertMessage(null)}
@@ -1189,7 +1163,13 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
                 }}
             />
 
-
+            {isProductModalOpen && (
+                <ProductSelectionModal
+                    products={products}
+                    onSelect={handleSelectProduct}
+                    onClose={() => setIsProductModalOpen(false)}
+                />
+            )}
 
             {/* Alert Modal */}
         </div>
