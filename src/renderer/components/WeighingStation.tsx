@@ -269,7 +269,8 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
             pack_count: String(currentUnits + (isBoxLabel ? 0 : 1)), // For unit label: current + 1. For box: just total.
             pack_counter: String(currentUnits + (isBoxLabel ? 0 : 1)), // Alias requested by user
             box_count: String(boxesInPallet + 1),
-            close_box_counter: selectedProduct?.close_box_counter?.toString() || '',
+            close_box_counter: String(currentUnits + (isBoxLabel ? 0 : 1)),
+            box_limit: selectedProduct?.close_box_counter?.toString() || '', // Kept the actual limit here if needed later
 
             // Raw numeric values for barcode generator
             _raw_weight_netto_pack: weightNettoPack,

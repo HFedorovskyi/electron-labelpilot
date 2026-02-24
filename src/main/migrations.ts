@@ -28,11 +28,16 @@ export const migrations: Migration[] = [
         version: 2,
         description: 'Add production_date, expiration_date, and batch columns to pack',
         up(db) {
-            db.exec(`
-          ALTER TABLE pack ADD COLUMN production_date TEXT;
-          ALTER TABLE pack ADD COLUMN expiration_date TEXT;
-          ALTER TABLE pack ADD COLUMN batch TEXT;
-        `);
+            const addColumn = (col: string) => {
+                try {
+                    db.exec(`ALTER TABLE pack ADD COLUMN ${col} TEXT;`);
+                } catch (e: any) {
+                    if (!e.message.includes('duplicate column')) throw e;
+                }
+            };
+            addColumn('production_date');
+            addColumn('expiration_date');
+            addColumn('batch');
         },
         down(db) {
             // SQLite < 3.35 doesn't support DROP COLUMN — recreate table

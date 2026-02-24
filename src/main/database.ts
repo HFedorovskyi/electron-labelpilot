@@ -2,20 +2,23 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import { app } from 'electron';
 import { runMigrations } from './migrations';
+import log from './logger';
 
 let db: Database.Database | null = null;
 
 export function initDatabase() {
   if (db) return db;
 
-  const dbPath = path.join(app.getPath('userData'), 'client_data.db');
-  console.log('Initializing database at:', dbPath);
+  try {
+    const dbPath = path.join(app.getPath('userData'), 'client_data.db');
+    log.info('Initializing database at:', dbPath);
 
-  db = new Database(dbPath);
+    db = new Database(dbPath);
+    log.info('Database instance created');
 
-  // Use a transaction for schema creation to ensure atomicity
-  const init = db.transaction(() => {
-    db!.exec(`
+    // Use a transaction for schema creation to ensure atomicity
+    const init = db.transaction(() => {
+      db!.exec(`
       CREATE TABLE IF NOT EXISTS nomenclature (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
@@ -104,14 +107,19 @@ export function initDatabase() {
         updated_at DATETIME
       );
     `);
-  });
+    });
 
 
 
-  init();
-  runMigrations(db!);
-  runSelfRepairMigration(db!);
-  return db;
+    init();
+    runMigrations(db!);
+    runSelfRepairMigration(db!);
+    log.info('Database initialized successfully');
+    return db;
+  } catch (error) {
+    log.error('Failed to initialize database:', error);
+    throw error;
+  }
 }
 
 // Migration: Ensure extra_data has Russian keys (Self-Repair)

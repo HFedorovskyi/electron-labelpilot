@@ -297,21 +297,31 @@ class CanvasBitmapGenerator {
             ctx.textAlign = 'left';
         }
         console.log(`[CanvasBitmapGenerator] Drawing element "${el.id}" at (${x}, ${y}) w=${w} h=${h}. Text: "${text.substring(0, 30)}..."`);
-        // TIGHTENING HACK: Node-Canvas often renders text slightly wider than browsers.
-        // We gently squeeze the horizontal scale to 98% to simulate tighter tracking/kerning.
+        // Draw at x=0 relative to the translated origin
         ctx.save();
         ctx.translate(textX, y);
-        ctx.scale(0.98, 1);
-        // Since we translated to textX, we draw at x=0 (relative)
         const drawX = 0;
-        // Word wrapping needs to account for the scale:
-        // effectiveWidth = w / 0.98
-        const maxWidth = w ? (w / 0.98) : 9999;
+        // maxWidth matches element width exactly — same as browser
+        const maxWidth = w ?? 9999;
         const lines = this.wrapText(ctx, text, maxWidth);
-        // Line height: 1.15 multiplier matches tight label requirements
-        const lineHeight = Math.round(fontSize * 1.15);
+        // lineHeight 1.2 matches browser CSS lineHeight in LabelRenderer.tsx
+        const lineHeight = fontSize * 1.2;
+        const totalTextHeight = lines.length * lineHeight;
+        // Vertical alignment within the element box
+        // Default is 'middle' — matches the label designer's default behavior
+        const verticalAlign = el.verticalAlign || 'middle';
+        let startY = 0;
+        if (h !== undefined) {
+            if (verticalAlign === 'middle') {
+                startY = (h - totalTextHeight) / 2;
+            }
+            else if (verticalAlign === 'bottom') {
+                startY = h - totalTextHeight;
+            }
+            // 'top' → startY = 0 (default)
+        }
         for (let i = 0; i < lines.length; i++) {
-            const ly = i * lineHeight;
+            const ly = startY + i * lineHeight;
             ctx.fillText(lines[i], drawX, ly);
         }
         ctx.restore();

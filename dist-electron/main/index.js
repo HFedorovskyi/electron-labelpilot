@@ -57,9 +57,12 @@ process.on('uncaughtException', (err) => {
         // Safe to ignore EPIPE as it just means we can't write to stdout/stderr
         return;
     }
-    console.error('Uncaught Exception:', err);
+    logger_1.default.error('Uncaught Exception:', err);
     // Usually we should exit on uncaught exception, but let's try to keep running if possible
     // process.exit(1); 
+});
+process.on('unhandledRejection', (reason, _promise) => {
+    logger_1.default.error('Unhandled Rejection:', reason);
 });
 let mainWindow = null;
 let workerWindow = null;

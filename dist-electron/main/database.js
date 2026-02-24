@@ -27,16 +27,19 @@ const better_sqlite3_1 = __importDefault(require("better-sqlite3"));
 const path_1 = __importDefault(require("path"));
 const electron_1 = require("electron");
 const migrations_1 = require("./migrations");
+const logger_1 = __importDefault(require("./logger"));
 let db = null;
 function initDatabase() {
     if (db)
         return db;
-    const dbPath = path_1.default.join(electron_1.app.getPath('userData'), 'client_data.db');
-    console.log('Initializing database at:', dbPath);
-    db = new better_sqlite3_1.default(dbPath);
-    // Use a transaction for schema creation to ensure atomicity
-    const init = db.transaction(() => {
-        db.exec(`
+    try {
+        const dbPath = path_1.default.join(electron_1.app.getPath('userData'), 'client_data.db');
+        logger_1.default.info('Initializing database at:', dbPath);
+        db = new better_sqlite3_1.default(dbPath);
+        logger_1.default.info('Database instance created');
+        // Use a transaction for schema creation to ensure atomicity
+        const init = db.transaction(() => {
+            db.exec(`
       CREATE TABLE IF NOT EXISTS nomenclature (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
@@ -125,11 +128,17 @@ function initDatabase() {
         updated_at DATETIME
       );
     `);
-    });
-    init();
-    (0, migrations_1.runMigrations)(db);
-    runSelfRepairMigration(db);
-    return db;
+        });
+        init();
+        (0, migrations_1.runMigrations)(db);
+        runSelfRepairMigration(db);
+        logger_1.default.info('Database initialized successfully');
+        return db;
+    }
+    catch (error) {
+        logger_1.default.error('Failed to initialize database:', error);
+        throw error;
+    }
 }
 // Migration: Ensure extra_data has Russian keys (Self-Repair)
 function runSelfRepairMigration(db) {
