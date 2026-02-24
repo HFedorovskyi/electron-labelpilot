@@ -341,11 +341,25 @@ export class CanvasBitmapGenerator implements ILabelGenerator {
         const maxWidth = w ?? 9999;
         const lines = this.wrapText(ctx, text, maxWidth);
 
-        // Line height: 1.2 matches browser CSS lineHeight in LabelRenderer.tsx
+        // lineHeight 1.2 matches browser CSS lineHeight in LabelRenderer.tsx
         const lineHeight = fontSize * 1.2;
+        const totalTextHeight = lines.length * lineHeight;
+
+        // Vertical alignment within the element box
+        // Default is 'middle' — matches the label designer's default behavior
+        const verticalAlign = el.verticalAlign || 'middle';
+        let startY = 0;
+        if (h !== undefined) {
+            if (verticalAlign === 'middle') {
+                startY = (h - totalTextHeight) / 2;
+            } else if (verticalAlign === 'bottom') {
+                startY = h - totalTextHeight;
+            }
+            // 'top' → startY = 0 (default)
+        }
 
         for (let i = 0; i < lines.length; i++) {
-            const ly = i * lineHeight;
+            const ly = startY + i * lineHeight;
             ctx.fillText(lines[i], drawX, ly);
         }
         ctx.restore();

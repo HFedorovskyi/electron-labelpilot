@@ -68,34 +68,35 @@ const LabelElement = ({ el, processText }: { el: any; processText: (t: string) =
     };
 
     if (el.type === 'text') {
-        const getJustifyContent = (align: string) => {
-            if (align === 'center') return 'center';
-            if (align === 'right') return 'flex-end';
-            return 'flex-start';
-        };
-
         console.log(`[LabelRenderer] Rendering text element ${el.id} at (${el.x}, ${el.y}) w=${el.w} h=${el.h}. Text: "${(processText(el.text) || '').substring(0, 30)}..."`);
         const processedText = processText(el.text);
+
+        // In flexDirection: 'column':
+        //   justifyContent = controls vertical axis (top/center/bottom of block)
+        //   alignItems     = controls horizontal axis (not needed — textAlign handles text direction)
+        const getVerticalJustify = (vAlign: string) => {
+            if (vAlign === 'middle') return 'center';
+            if (vAlign === 'bottom') return 'flex-end';
+            return 'flex-start'; // 'top'
+        };
 
         return (
             <div
                 style={{
                     ...commonStyle,
-                    height: 'auto', // Allow it to grow
-                    minHeight: `${el.h}px`,
+                    height: `${el.h}px`, // Fixed height needed for vertical centering
                     fontFamily: el.fontFamily || 'Inter, sans-serif',
                     fontSize: `${el.fontSize}px`,
                     color: el.color || '#000000',
                     fontWeight: el.fontWeight || 400,
                     fontStyle: el.fontStyle || 'normal',
-                    textAlign: el.textAlign || 'left',
+                    textAlign: el.textAlign || 'left', // handles horizontal text align
                     textDecoration: el.textDecoration || 'none',
                     display: 'flex',
-                    alignItems: 'flex-start', // Top alignment is safer for overflow
-                    justifyContent: getJustifyContent(el.textAlign),
+                    flexDirection: 'column',
+                    justifyContent: getVerticalJustify(el.verticalAlign || 'middle'), // vertical
                     whiteSpace: 'pre-wrap',
                     wordBreak: 'break-word',
-                    // Explicitly set tight line-height for label accuracy
                     lineHeight: '1.2',
                     overflow: 'visible',
                 }}

@@ -14,6 +14,9 @@ export interface LabelElement {
     fontWeight?: number | string;
     fontStyle?: string;
     textAlign?: 'left' | 'center' | 'right' | 'justify';
+    verticalAlign?: 'top' | 'middle' | 'bottom'; // Vertical alignment within the element box
+    color?: string;
+    textDecoration?: string;
 
     // Rect specific
     fill?: string;
