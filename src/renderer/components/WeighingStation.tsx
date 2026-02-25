@@ -188,7 +188,7 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
         // Counters
         const currentUnits = overrideUnits !== undefined ? overrideUnits : unitsInBox;
 
-        const getFormattedCounter = (count: number, labelDoc: any, placeholder: string): string => {
+        const getFormattedCounter = (count: number, labelDoc: any, placeholder: string, configObj?: any): string => {
             // Base: Station + Count
             const stationPrefix = stationNumber ? String(stationNumber).padStart(2, '0') : '';
             const countStr = String(count);
@@ -197,8 +197,23 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
             let minLength = 0;
             const items = labelDoc ? (labelDoc.elements || labelDoc.objects) : null;
             if (items) {
-                const el = items.find((e: any) => e.type === 'text' && ((e.value && e.value.includes(placeholder)) || (e.text && e.text.includes(placeholder))));
-                if (el && el.minLength) minLength = Number(el.minLength);
+                const searchPlaceholder = placeholder.replace(/\s+/g, '');
+                let foundEl = items.find((e: any) => {
+                    const isText = e.type === 'text' || e.type === 'i-text' || e.type === 'textbox';
+                    const cleanText = (e.text || '').replace(/\s+/g, '');
+                    const cleanVal = (e.value || '').replace(/\s+/g, '');
+                    return isText && (cleanVal.includes(searchPlaceholder) || cleanText.includes(searchPlaceholder));
+                });
+
+                if (!foundEl) {
+                    foundEl = items.find((e: any) => {
+                        const isBarcode = e.type === 'barcode';
+                        const cleanVal = (e.value || '').replace(/\s+/g, '');
+                        return isBarcode && cleanVal.includes(searchPlaceholder);
+                    });
+                }
+                const foundLen = foundEl?.minLength || foundEl?.minLeght;
+                if (foundLen) minLength = Number(foundLen);
             }
 
             // Formatting Logic
@@ -208,6 +223,10 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
                 // Example: Station 06, Count 1, MinLength 8 -> 06000001
                 const targetCountLength = Math.max(0, minLength - stationPrefix.length);
                 return stationPrefix + countStr.padStart(targetCountLength, '0');
+            } else if (configObj?.enabled) {
+                // Fallback to local config
+                const prefix = configObj.prefix !== undefined ? configObj.prefix : stationPrefix;
+                return `${prefix}${countStr.padStart(configObj.length || 0, '0')}`;
             } else {
                 // Default: Just concatenate
                 return stationPrefix + countStr;
@@ -218,27 +237,12 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
         const activeLabelDoc = isBoxLabel ? boxLabelDoc : labelDoc;
 
         // For Pack Label
-        let unitNumStr = '';
-        if (stationNumber) {
-            // We use totalUnits for the permanent individual pack number.
-            // unitsInBox is used for "Pack X of Y" statistics.
-            unitNumStr = getFormattedCounter(totalUnits + 1, activeLabelDoc, '{{pack_number}}');
-        } else {
-            // Fallback to local config
-            unitNumStr = numberingConfig?.unit?.enabled
-                ? `${numberingConfig.unit.prefix || ''}${String(totalUnits + 1).padStart(numberingConfig.unit.length, '0')}`
-                : String(totalUnits + 1);
-        }
+        // We use totalUnits for the permanent individual pack number.
+        // unitsInBox is used for "Pack X of Y" statistics.
+        const unitNumStr = getFormattedCounter(totalUnits + 1, activeLabelDoc, '{{pack_number}}', numberingConfig?.unit);
 
         // For Box Label
-        let boxNumStr = '';
-        if (stationNumber) {
-            boxNumStr = getFormattedCounter(totalBoxes + 1, activeLabelDoc, '{{box_number}}');
-        } else {
-            boxNumStr = numberingConfig?.box?.enabled
-                ? `${numberingConfig.box.prefix || ''}${String(totalBoxes + 1).padStart(numberingConfig.box.length, '0')}`
-                : String(totalBoxes + 1);
-        }
+        const boxNumStr = getFormattedCounter(totalBoxes + 1, activeLabelDoc, '{{box_number}}', numberingConfig?.box);
 
         const dataObj: any = {
             name: selectedProduct?.name || '',
@@ -674,13 +678,20 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
                 console.log('MANUAL CLOSE DEBUG: No boxBarcodeTemplate found');
             }
 
+            // Determine barcode: prefer boxBarcodeTemplate result, fallback to baseData, then product fields
+            const resolvedBarcode = boxBarcode || baseData.barcode;
+            const isDefaultZeros = !resolvedBarcode || /^0+$/.test(resolvedBarcode);
+            const finalBarcode = isDefaultZeros
+                ? ((baseData as any)['Код ШК'] || selectedProduct?.barcode || selectedProduct?.article || '0000000000000')
+                : resolvedBarcode;
+
             const boxData = {
                 ...baseData,
                 is_box: true,
                 count: boxLimit,
                 pack_counter: String(finalUnitsInBox), // Actual count in this box
                 weight_netto: finalBoxWeight.toFixed(3),
-                barcode: boxBarcode || baseData.barcode
+                barcode: finalBarcode
             };
 
             await window.electron.invoke('print-label', {
@@ -727,8 +738,8 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
 
             // 1. Get PREDICTED Box Number for Record-Pack if no box is open
             // We use a dummy dataObj to get the predicted number
-            const predictedBoxNum = currentBoxNumber || String(totalBoxes + 1).padStart(4, '0');
             const predictedData = getLabelData();
+            const predictedBoxNum = currentBoxNumber || predictedData.box_number;
 
             let packBarcode = '';
             if (packBarcodeTemplate) {
@@ -841,13 +852,20 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
                         boxBarcode = generateBarcode(fields, genData);
                     }
 
+                    // Determine barcode: prefer boxBarcodeTemplate result, fallback to baseData, then product fields
+                    const resolvedBarcode = boxBarcode || baseData.barcode;
+                    const isDefaultZeros = !resolvedBarcode || /^0+$/.test(resolvedBarcode);
+                    const finalBarcode = isDefaultZeros
+                        ? ((baseData as any)['Код ШК'] || selectedProduct?.barcode || selectedProduct?.article || '0000000000000')
+                        : resolvedBarcode;
+
                     const boxData = {
                         ...baseData,
                         is_box: true,
                         count: boxLimit,
                         pack_counter: String(finalUnitsInBox),
                         weight_netto: finalBoxWeight.toFixed(3),
-                        barcode: boxBarcode || baseData.barcode
+                        barcode: finalBarcode
                     };
 
                     window.electron.invoke('print-label', {

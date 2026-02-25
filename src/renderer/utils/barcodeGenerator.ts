@@ -127,15 +127,15 @@ export const generateBarcode = (fields: BarcodeField[], data: BarcodeData): stri
                     }
                     break;
                 case 'batch_number':
-                    const batchLen = Number(field.length) || 0;
+                    const batchLen = Number(field.length) || Number((field as any).minLength) || Number((field as any).minLeght) || 0;
                     barcode += (data.batch_number || '').padStart(batchLen, '0');
                     break;
                 case 'pack_number':
-                    const packLen = Number(field.length) || 0;
+                    const packLen = Number(field.length) || Number((field as any).minLength) || Number((field as any).minLeght) || 0;
                     barcode += (data.pack_number || '').padStart(packLen, '0');
                     break;
                 case 'box_number':
-                    const boxLen = Number(field.length) || 0;
+                    const boxLen = Number(field.length) || Number((field as any).minLength) || Number((field as any).minLeght) || 0;
                     barcode += (data.box_number || '').padStart(boxLen, '0');
                     break;
                 case 'pallet_number':

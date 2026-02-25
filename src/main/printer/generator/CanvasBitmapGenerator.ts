@@ -123,6 +123,7 @@ export class CanvasBitmapGenerator implements ILabelGenerator {
         }
 
         log.info(`[CanvasBitmapGenerator] FULL DATA OBJECT: ${JSON.stringify(data)}`);
+        log.info(`[CanvasBitmapGenerator] BARCODE FIELDS: barcode="${data.barcode}" article="${data.article}" Код_ШК="${data['Код ШК']}"`);
 
         const t2 = Date.now();
         const hasVariables = (text: string) => /\{\{\s*[^{}]+\s*\}\}/.test(text);
@@ -163,34 +164,28 @@ export class CanvasBitmapGenerator implements ILabelGenerator {
         const totalBytes = bytesPerRow * labelLength;
         const staticMono = this.rgbaToMono(staticImageData.data, printWidth, labelLength, bytesPerRow);
 
-        // Simple hash for background identification
-        const bgHash = this.getSimpleHash(staticMono);
+        // Structural hash for background — deterministic regardless of canvas rendering nuances
+        const bgHash = this.getStructuralHash(staticElements, printWidth, labelLength);
         const bgName = `R:BG${bgHash.substring(0, 6).toUpperCase()}.GRF`;
 
         const t3 = Date.now();
 
-        // ── Render Dynamic Elements & Collect Native Barcodes ────────
+        // ── Render Dynamic Elements — Per-Element Clips ──────────────
+        // Instead of rendering ALL dynamic text on a full-label canvas (~18KB),
+        // each dynamic text element gets its own tiny canvas (just its bounding box).
+        // This reduces dynamic payload from ~18KB to ~1-3KB total.
         const barcodeCommands: string[] = [];
-        const dynamicCanvas = createCanvas(printWidth, labelLength);
-        const dctx = dynamicCanvas.getContext('2d');
-        // Dynamic canvas is transparent
-        dctx.clearRect(0, 0, printWidth, labelLength);
+        const dynamicClipCommands: string[] = [];
 
         for (const el of dynamicElements) {
             if (el.type === 'barcode' && (el.value || el.text)) {
                 const barcodeZpl = this.processBarcodeAsZpl(el, data, scaleX, scaleY);
                 if (barcodeZpl) barcodeCommands.push(barcodeZpl);
-            } else {
-                dctx.save();
-                this.applyRotation(dctx, el, scaleX, scaleY);
-                await this.renderElement(dctx, el, data, scaleX, scaleY);
-                dctx.restore();
+            } else if (el.type === 'text') {
+                const clipZpl = this.renderDynamicTextClip(el, data, scaleX, scaleY);
+                if (clipZpl) dynamicClipCommands.push(clipZpl);
             }
         }
-
-        const dynamicImageData = dctx.getImageData(0, 0, printWidth, labelLength);
-        const dynamicMono = this.rgbaToMono(dynamicImageData.data, printWidth, labelLength, bytesPerRow);
-        const hasDynamicBits = dynamicMono.some(b => b !== 0);
 
         const t4 = Date.now();
 
@@ -204,9 +199,9 @@ export class CanvasBitmapGenerator implements ILabelGenerator {
         if (!CanvasBitmapGenerator.uploadedBackgrounds.has(cacheKey)) {
             zpl += `~DG${bgName},${totalBytes},${bytesPerRow},${staticCompressed}\n`;
             CanvasBitmapGenerator.uploadedBackgrounds.add(cacheKey);
-            log.info(`[CanvasBitmapGenerator] Uploading NEW background to printer memory: ${bgName}`);
+            log.info(`[CanvasBitmapGenerator] Uploading NEW background to printer: ${bgName} (${staticCompressed.length} chars)`);
         } else {
-            log.info(`[CanvasBitmapGenerator] Using cached background in printer memory: ${bgName}`);
+            log.info(`[CanvasBitmapGenerator] CACHE HIT — background already in printer: ${bgName}`);
         }
 
         zpl += '^XA\n';
@@ -220,11 +215,11 @@ export class CanvasBitmapGenerator implements ILabelGenerator {
         // Recall Background
         zpl += `^FO0,0^XG${bgName},1,1^FS\n`;
 
-        // Overlay Dynamic Bits (if any)
-        if (hasDynamicBits) {
-            const dynamicCompressed = this.compressZplRLE(dynamicMono, bytesPerRow, labelLength);
-            // We use ^GFA for dynamic bits as they change every time
-            zpl += `^FO0,0^GFA,${totalBytes},${totalBytes},${bytesPerRow},${dynamicCompressed}^FS\n`;
+        // Overlay Per-Element Dynamic Text Clips
+        let dynamicClipTotalSize = 0;
+        for (const clip of dynamicClipCommands) {
+            zpl += clip;
+            dynamicClipTotalSize += clip.length;
         }
 
         // Overlay Native Barcodes
@@ -237,8 +232,8 @@ export class CanvasBitmapGenerator implements ILabelGenerator {
         const buf = Buffer.from(zpl, 'utf-8');
         const t5 = Date.now();
 
-        log.info(`[CanvasBitmapGenerator] Optimized Timing: static=${t3 - (t2 as any)}ms dynamic=${t4 - (t3 as any)}ms zpl=${t5 - (t4 as any)}ms TOTAL=${t5 - t0}ms`);
-        log.info(`[CanvasBitmapGenerator] Layered ZPL: Background=${bgName}, Static=${staticCompressed.length}chars, DynamicBits=${hasDynamicBits}, NativeBC=${barcodeCommands.length}`);
+        log.info(`[CanvasBitmapGenerator] Timing: static=${t3 - (t2 as any)}ms clips=${t4 - (t3 as any)}ms zpl=${t5 - (t4 as any)}ms TOTAL=${t5 - t0}ms`);
+        log.info(`[CanvasBitmapGenerator] Payload: BG=${staticCompressed.length}chars (cached=${CanvasBitmapGenerator.uploadedBackgrounds.has(cacheKey)}), Clips=${dynamicClipCommands.length}x (${dynamicClipTotalSize}chars), BC=${barcodeCommands.length}, TOTAL=${buf.length}bytes`);
 
         // ── DEBUG: Dump ZPL to file ──────────────────────────────────
         try {
@@ -462,6 +457,7 @@ export class CanvasBitmapGenerator implements ILabelGenerator {
 
     private processBarcodeAsZpl(el: LabelElement, data: Record<string, any>, scaleX: number, scaleY: number): string {
         const bcVal = this.processText(el.value || el.text || '', data);
+        log.info(`[CanvasBitmapGenerator] Barcode resolve: el.value="${el.value}" el.text="${el.text}" -> bcVal="${bcVal}" | data.barcode="${data.barcode}" data.article="${data.article}" data['Код ШК']="${data['Код ШК']}"`);
         if (!bcVal) return '';
 
         const x = Math.round(el.x * scaleX);
@@ -656,8 +652,207 @@ export class CanvasBitmapGenerator implements ILabelGenerator {
         }
     }
 
-    private getSimpleHash(data: Uint8Array): string {
+    // ═══════════════════════════════════════════════════════════════════
+    //  Per-Element Dynamic Text Clip
+    //  Renders a single dynamic text element on a tiny canvas matching
+    //  its bounding box, producing a small ^GFA command (~200-500 bytes)
+    //  instead of a full-label bitmap (~18KB).
+    // ═══════════════════════════════════════════════════════════════════
+
+    private renderDynamicTextClip(
+        el: LabelElement,
+        data: Record<string, any>,
+        scaleX: number,
+        scaleY: number
+    ): string {
+        const text = this.processText(el.text || '', data);
+        if (!text) return '';
+
+        // Element position and size in printer dots
+        const x = Math.round(el.x * scaleX);
+        const y = Math.round(el.y * scaleY);
+        const w = el.w ? Math.round(el.w * scaleX) : 400;
+        const h = el.h ? Math.round(el.h * scaleY) : 100;
+
+        if (w <= 0 || h <= 0) return '';
+
+        // For rotated elements, calculate expanded bounding box
+        const rotation = el.rotation || 0;
+        let clipW = w;
+        let clipH = h;
+        let foX = x;
+        let foY = y;
+
+        if (rotation === 90 || rotation === 270) {
+            // Swap dimensions for 90/270 rotation
+            clipW = h;
+            clipH = w;
+            // Adjust field origin to account for rotated bounding box
+            const cx = x + w / 2;
+            const cy = y + h / 2;
+            foX = Math.round(cx - clipW / 2);
+            foY = Math.round(cy - clipH / 2);
+        }
+
+        // Create small canvas just for this element
+        const clipCanvas = createCanvas(clipW, clipH);
+        const ctx = clipCanvas.getContext('2d');
+        ctx.clearRect(0, 0, clipW, clipH);
+
+        // Apply rotation within the clip canvas
+        if (rotation) {
+            const cx = clipW / 2;
+            const cy = clipH / 2;
+            ctx.translate(cx, cy);
+            ctx.rotate((rotation * Math.PI) / 180);
+            ctx.translate(-cx, -cy);
+            // After rotation, draw text in the original (pre-rotation) bounding box
+            // centered within the clip canvas
+            if (rotation === 90 || rotation === 270) {
+                // The text's original w×h is swapped vs clip dimensions
+                const offsetX = (clipW - w) / 2;
+                const offsetY = (clipH - h) / 2;
+                this.drawTextOnClip(ctx, el, text, offsetX, offsetY, w, h);
+            } else {
+                // 180° — same dimensions, just rotated
+                this.drawTextOnClip(ctx, el, text, 0, 0, clipW, clipH);
+            }
+        } else {
+            // No rotation — straightforward
+            this.drawTextOnClip(ctx, el, text, 0, 0, w, h);
+        }
+
+        // Convert to mono
+        const imageData = ctx.getImageData(0, 0, clipW, clipH);
+        const clipBytesPerRow = Math.ceil(clipW / 8);
+        const mono = this.rgbaToMono(imageData.data, clipW, clipH, clipBytesPerRow);
+
+        // ── Auto-crop: trim empty rows & columns ──────────────────
+        // Find bounding box of actual content within the clip
+        let minRow = clipH, maxRow = -1;
+        let minCol = clipW, maxCol = -1;
+
+        for (let row = 0; row < clipH; row++) {
+            const rowOffset = row * clipBytesPerRow;
+            for (let col = 0; col < clipW; col++) {
+                if (mono[rowOffset + (col >> 3)] & (0x80 >> (col & 7))) {
+                    if (row < minRow) minRow = row;
+                    if (row > maxRow) maxRow = row;
+                    if (col < minCol) minCol = col;
+                    if (col > maxCol) maxCol = col;
+                }
+            }
+        }
+
+        // Skip if empty
+        if (maxRow < 0) return '';
+
+        // Add 1px padding to avoid edge clipping
+        minRow = Math.max(0, minRow - 1);
+        maxRow = Math.min(clipH - 1, maxRow + 1);
+        minCol = Math.max(0, minCol - 1);
+        maxCol = Math.min(clipW - 1, maxCol + 1);
+
+        const cropW = maxCol - minCol + 1;
+        const cropH = maxRow - minRow + 1;
+        const cropBytesPerRow = Math.ceil(cropW / 8);
+        const cropTotalBytes = cropBytesPerRow * cropH;
+
+        // Extract cropped region
+        const croppedMono = new Uint8Array(cropTotalBytes);
+        for (let r = 0; r < cropH; r++) {
+            const srcRow = minRow + r;
+            for (let c = 0; c < cropW; c++) {
+                const srcCol = minCol + c;
+                if (mono[srcRow * clipBytesPerRow + (srcCol >> 3)] & (0x80 >> (srcCol & 7))) {
+                    croppedMono[r * cropBytesPerRow + (c >> 3)] |= (0x80 >> (c & 7));
+                }
+            }
+        }
+
+        const compressed = this.compressZplRLE(croppedMono, cropBytesPerRow, cropH);
+        const adjustedX = Math.max(0, foX + minCol);
+        const adjustedY = Math.max(0, foY + minRow);
+
+        const origBytes = clipBytesPerRow * clipH;
+        log.info(`[CanvasBitmapGenerator] Clip "${el.id}": ${clipW}x${clipH} (${origBytes}B) -> CROPPED ${cropW}x${cropH} (${cropTotalBytes}B, ${compressed.length}chars) saved ${Math.round((1 - cropTotalBytes / origBytes) * 100)}%`);
+
+        return `^FO${adjustedX},${adjustedY}^GFA,${cropTotalBytes},${cropTotalBytes},${cropBytesPerRow},${compressed}^FS\n`;
+    }
+
+    /**
+     * Draws text at a given origin within a clip canvas.
+     * Reuses the same font/alignment logic as drawText but at arbitrary position.
+     */
+    private drawTextOnClip(
+        ctx: SKRSContext2D,
+        el: LabelElement,
+        text: string,
+        originX: number,
+        originY: number,
+        w: number,
+        h: number
+    ): void {
+        // Font setup — use raw pixel sizes (already in printer dots)
+        const fontSize = (el.fontSize || 12) * (h / (el.h || h)); // Scale fontSize proportionally
+        const fontFamily = el.fontFamily || 'Arial';
+        const weight = el.fontWeight
+            ? (typeof el.fontWeight === 'number' && el.fontWeight >= 600 ? 'bold'
+                : (el.fontWeight === 'bold' ? 'bold' : 'normal'))
+            : 'normal';
+        const style = el.fontStyle || 'normal';
+
+        ctx.font = `${style} ${weight} ${fontSize}px "${fontFamily}", "Arial", sans-serif`;
+        ctx.fillStyle = '#000000';
+        ctx.textBaseline = 'top';
+
+        // Alignment
+        let textX = originX;
+        if (el.textAlign === 'center') {
+            ctx.textAlign = 'center';
+            textX = originX + w / 2;
+        } else if (el.textAlign === 'right') {
+            ctx.textAlign = 'right';
+            textX = originX + w;
+        } else {
+            ctx.textAlign = 'left';
+        }
+
+        const lines = this.wrapText(ctx, text, w);
+        const lineHeight = fontSize * 1.2;
+        const totalTextHeight = lines.length * lineHeight;
+
+        // Vertical alignment
+        const verticalAlign = el.verticalAlign || 'middle';
+        let startY = originY;
+        if (verticalAlign === 'middle') {
+            startY = originY + (h - totalTextHeight) / 2;
+        } else if (verticalAlign === 'bottom') {
+            startY = originY + h - totalTextHeight;
+        }
+
+        for (let i = 0; i < lines.length; i++) {
+            ctx.fillText(lines[i], textX, startY + i * lineHeight);
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  Structural Hash — deterministic based on element properties,
+    //  not canvas bitmap (which can vary due to floating-point rounding)
+    // ═══════════════════════════════════════════════════════════════════
+
+    private getStructuralHash(elements: LabelElement[], canvasW: number, canvasH: number): string {
         const crypto = require('crypto');
-        return crypto.createHash('md5').update(data).digest('hex');
+        const struct = JSON.stringify({
+            cw: canvasW, ch: canvasH,
+            els: elements.map(e => ({
+                t: e.type, x: e.x, y: e.y, w: e.w, h: e.h,
+                txt: e.text, fs: e.fontSize, ff: e.fontFamily,
+                fw: e.fontWeight, ta: e.textAlign, va: e.verticalAlign,
+                f: e.fill, bw: e.borderWidth, bc: e.borderColor,
+                br: e.borderRadius, r: e.rotation
+            }))
+        });
+        return crypto.createHash('md5').update(struct).digest('hex');
     }
 }
