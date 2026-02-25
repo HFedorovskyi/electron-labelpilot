@@ -77,6 +77,17 @@ export class CanvasBitmapGenerator implements ILabelGenerator {
         return (global as any).zplBackgroundCache;
     }
 
+    /**
+     * Clear the background GRF cache. Call after data sync to ensure
+     * updated label templates get fresh backgrounds uploaded to the printer.
+     */
+    static clearBackgroundCache(): void {
+        const cache = CanvasBitmapGenerator.uploadedBackgrounds;
+        const size = cache.size;
+        cache.clear();
+        log.info(`[CanvasBitmapGenerator] Background cache cleared (${size} entries removed)`);
+    }
+
     async generate(doc: LabelDoc, data: Record<string, any>, options: GeneratorOptions): Promise<Buffer> {
         const t0 = Date.now();
 

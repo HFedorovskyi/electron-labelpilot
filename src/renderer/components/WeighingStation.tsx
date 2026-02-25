@@ -54,6 +54,9 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
     const [labelingDate, setLabelingDate] = useState<Date>(new Date());
     const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
 
+    // Sync version counter — incremented on data-updated to force re-fetch of templates
+    const [syncVersion, setSyncVersion] = useState(0);
+
     // Auto-print refs to prevent duplicate prints
     const autoPrintFiredRef = useRef(false);
     const isPrintingRef = useRef(false);
@@ -394,7 +397,14 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
         });
 
         const removeUpdateListener = window.electron.on('data-updated', () => {
+            console.log('WeighingStation: data-updated received, reloading all data...');
             loadProducts();
+            // Increment sync version to force label/barcode template re-fetch
+            setSyncVersion(prev => prev + 1);
+            // Also reload containers in case they changed
+            window.electron.invoke('get-containers').then((cnts: any) => {
+                setContainers(cnts);
+            }).catch((e: any) => console.error('Failed to reload containers', e));
         });
 
         return () => {
@@ -599,7 +609,7 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
             await fetchBarcode(bDoc, setBoxBarcodeTemplate, 'BOX');
         };
         fetchLabelsAndBarcodes();
-    }, [selectedProduct]);
+    }, [selectedProduct, syncVersion]);
 
     const handleRepeat = async () => {
         if (!lastPrinted) {

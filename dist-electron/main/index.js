@@ -292,7 +292,15 @@ electron_1.ipcMain.handle('usb-import', async (_, path) => {
 });
 electron_1.ipcMain.handle('get-label', async (_, id) => {
     const { getLabelById } = await Promise.resolve().then(() => __importStar(require('./database')));
-    return getLabelById(id);
+    const label = getLabelById(id);
+    if (label) {
+        const struct = label.structure;
+        logger_1.default.info(`[get-label] ID=${id}, name=${label.name}, structure_length=${struct?.length || 0}, structure_snippet="${String(struct).substring(0, 200)}"`);
+    }
+    else {
+        logger_1.default.info(`[get-label] ID=${id} NOT FOUND`);
+    }
+    return label;
 });
 electron_1.ipcMain.handle('get-barcode-template', async (_, id) => {
     const { getBarcodeTemplateById } = await Promise.resolve().then(() => __importStar(require('./database')));
@@ -455,6 +463,10 @@ electron_1.ipcMain.handle('import-identity-file', async () => {
             return { success: false, message: 'Cancelled' };
         }
         const identity = await importIdentityFile(result.filePaths[0]);
+        // Notify all windows that data has been updated
+        electron_1.BrowserWindow.getAllWindows().forEach(win => {
+            win.webContents.send('data-updated');
+        });
         return { success: true, identity };
     }
     catch (error) {
@@ -464,7 +476,14 @@ electron_1.ipcMain.handle('import-identity-file', async () => {
 });
 electron_1.ipcMain.handle('offline-import', async () => {
     const { importOfflineUpdate } = require('./offline_sync');
-    return await importOfflineUpdate();
+    const result = await importOfflineUpdate();
+    if (result.success) {
+        // Notify all windows that data has been updated
+        electron_1.BrowserWindow.getAllWindows().forEach(win => {
+            win.webContents.send('data-updated');
+        });
+    }
+    return result;
 });
 electron_1.ipcMain.handle('offline-export', async () => {
     const { exportOfflineData } = require('./offline_sync');
@@ -535,10 +554,22 @@ electron_1.ipcMain.handle('updater:refresh-server-version', async () => {
 });
 // Import and start Sync Server
 const server_1 = require("./server");
+const CanvasBitmapGenerator_1 = require("./printer/generator/CanvasBitmapGenerator");
 // Register ipc handlers
 (0, server_1.startSyncServer)((data) => {
+    logger_1.default.info('[Sync] Sync complete callback fired. Broadcasting data-updated...');
+    // Clear printer background GRF cache so updated templates get fresh backgrounds
+    CanvasBitmapGenerator_1.CanvasBitmapGenerator.clearBackgroundCache();
     if (mainWindow) {
         mainWindow.webContents.send('sync-complete', { success: true, ...data });
+        // Notify all windows that data has been updated so components reload
+        electron_1.BrowserWindow.getAllWindows().forEach(win => {
+            win.webContents.send('data-updated');
+        });
+        logger_1.default.info('[Sync] data-updated sent to all windows');
+    }
+    else {
+        logger_1.default.warn('[Sync] mainWindow is null — cannot send data-updated');
     }
 });
 electron_1.app.on('window-all-closed', () => {

@@ -46,6 +46,52 @@ exports.migrations = [
         `);
         }
     },
+    {
+        version: 3,
+        description: 'Remove UNIQUE constraints from labels table (name and structure)',
+        up(db) {
+            // Recreate labels table without UNIQUE constraints
+            // SQLite doesn't support DROP CONSTRAINT, so we rebuild the table
+            try {
+                db.exec(`
+                    CREATE TABLE IF NOT EXISTS labels_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name TEXT NOT NULL,
+                        structure TEXT NOT NULL,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME
+                    );
+                    INSERT OR IGNORE INTO labels_new SELECT * FROM labels;
+                    DROP TABLE labels;
+                    ALTER TABLE labels_new RENAME TO labels;
+                `);
+                console.log('[Migration v3] Labels table rebuilt without UNIQUE constraints');
+            }
+            catch (e) {
+                console.warn('[Migration v3] Warning:', e.message);
+            }
+        },
+        down(db) {
+            // Add back UNIQUE constraints (lossy if duplicates exist)
+            try {
+                db.exec(`
+                    CREATE TABLE labels_old (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name TEXT NOT NULL UNIQUE,
+                        structure TEXT NOT NULL UNIQUE,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME
+                    );
+                    INSERT OR IGNORE INTO labels_old SELECT * FROM labels;
+                    DROP TABLE labels;
+                    ALTER TABLE labels_old RENAME TO labels;
+                `);
+            }
+            catch (e) {
+                console.warn('[Migration v3 rollback] Warning:', e.message);
+            }
+        }
+    },
 ];
 /**
  * Ensures the _migrations tracking table exists.

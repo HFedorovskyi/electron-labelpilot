@@ -312,7 +312,14 @@ ipcMain.handle('usb-import', async (_, path) => {
 
 ipcMain.handle('get-label', async (_, id) => {
     const { getLabelById } = await import('./database');
-    return getLabelById(id);
+    const label = getLabelById(id);
+    if (label) {
+        const struct = (label as any).structure;
+        log.info(`[get-label] ID=${id}, name=${(label as any).name}, structure_length=${struct?.length || 0}, structure_snippet="${String(struct).substring(0, 200)}"`);
+    } else {
+        log.info(`[get-label] ID=${id} NOT FOUND`);
+    }
+    return label;
 });
 
 ipcMain.handle('get-barcode-template', async (_, id) => {
@@ -504,6 +511,10 @@ ipcMain.handle('import-identity-file', async () => {
         }
 
         const identity = await importIdentityFile(result.filePaths[0]);
+        // Notify all windows that data has been updated
+        BrowserWindow.getAllWindows().forEach(win => {
+            win.webContents.send('data-updated');
+        });
         return { success: true, identity };
     } catch (error: any) {
         console.error('Identity Import Error:', error);
@@ -513,7 +524,14 @@ ipcMain.handle('import-identity-file', async () => {
 
 ipcMain.handle('offline-import', async () => {
     const { importOfflineUpdate } = require('./offline_sync');
-    return await importOfflineUpdate();
+    const result = await importOfflineUpdate();
+    if (result.success) {
+        // Notify all windows that data has been updated
+        BrowserWindow.getAllWindows().forEach(win => {
+            win.webContents.send('data-updated');
+        });
+    }
+    return result;
 });
 
 ipcMain.handle('offline-export', async () => {
@@ -597,11 +615,22 @@ ipcMain.handle('updater:refresh-server-version', async () => {
 
 // Import and start Sync Server
 import { startSyncServer } from './server';
+import { CanvasBitmapGenerator } from './printer/generator/CanvasBitmapGenerator';
 
 // Register ipc handlers
 startSyncServer((data) => {
+    log.info('[Sync] Sync complete callback fired. Broadcasting data-updated...');
+    // Clear printer background GRF cache so updated templates get fresh backgrounds
+    CanvasBitmapGenerator.clearBackgroundCache();
     if (mainWindow) {
         mainWindow.webContents.send('sync-complete', { success: true, ...data });
+        // Notify all windows that data has been updated so components reload
+        BrowserWindow.getAllWindows().forEach(win => {
+            win.webContents.send('data-updated');
+        });
+        log.info('[Sync] data-updated sent to all windows');
+    } else {
+        log.warn('[Sync] mainWindow is null — cannot send data-updated');
     }
 });
 

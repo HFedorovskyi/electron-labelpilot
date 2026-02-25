@@ -484,27 +484,31 @@ export function importFullDump(payload: any) {
 
       // 4. Insert barcodes
       if (payload.barcodes && Array.isArray(payload.barcodes)) {
-        const stmt = db!.prepare('INSERT INTO barcodes (id, name, structure) VALUES (?, ?, ?)');
+        const stmt = db!.prepare('INSERT OR REPLACE INTO barcodes (id, name, structure) VALUES (?, ?, ?)');
+        let insertedCount = 0;
         for (const item of payload.barcodes) {
           try {
-            const structure = toPrim(item.structure);
+            const structure = typeof item.structure === 'string' ? item.structure : JSON.stringify(item.structure);
             if (!structure) {
               console.warn(`Skipping barcode ${item.id} (${item.name}): missing structure`);
               continue;
             }
             stmt.run(toPrim(item.id), toPrim(item.name), structure);
+            insertedCount++;
           } catch (err: any) {
             console.warn(`Skipping barcode item ${item.id} due to error:`, err.message);
           }
         }
+        console.log(`Database: Imported ${insertedCount}/${payload.barcodes.length} barcodes`);
       }
 
       // 5. Insert labels
       if (payload.labels && Array.isArray(payload.labels)) {
-        const stmt = db!.prepare('INSERT INTO labels (id, name, structure, created_at, updated_at) VALUES (?, ?, ?, ?, ?)');
+        const stmt = db!.prepare('INSERT OR REPLACE INTO labels (id, name, structure, created_at, updated_at) VALUES (?, ?, ?, ?, ?)');
+        let insertedCount = 0;
         for (const item of payload.labels) {
           try {
-            const structure = toPrim(item.structure);
+            const structure = typeof item.structure === 'string' ? item.structure : JSON.stringify(item.structure);
             if (!structure) {
               console.warn(`Skipping label ${item.id} (${item.name}): missing structure`);
               continue;
@@ -516,10 +520,12 @@ export function importFullDump(payload: any) {
               toPrim(item.created_at),
               toPrim(item.updated_at)
             );
+            insertedCount++;
           } catch (err: any) {
             console.warn(`Skipping label item ${item.id} due to error:`, err.message);
           }
         }
+        console.log(`Database: Imported ${insertedCount}/${payload.labels.length} labels`);
       }
 
       // 6. Update station number if provided

@@ -62,6 +62,14 @@ function startSyncServer(onSyncComplete) {
                 try {
                     const data = JSON.parse(body);
                     console.log(`Sync Server: Received POST sync request. Type: ${data?.meta?.type || 'Online'}`);
+                    // Debug: Log incoming labels
+                    if (data?.payload?.labels) {
+                        console.log(`Sync Server: Incoming labels count: ${data.payload.labels.length}`);
+                        data.payload.labels.forEach((l) => {
+                            const structStr = typeof l.structure === 'string' ? l.structure : JSON.stringify(l.structure);
+                            console.log(`  Label ${l.id} (${l.name}): structure length=${structStr?.length || 0}`);
+                        });
+                    }
                     const result = await processSyncData(data);
                     if (result.success) {
                         res.writeHead(200, { 'Content-Type': 'application/json' });
