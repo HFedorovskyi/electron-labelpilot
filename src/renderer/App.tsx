@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import WeighingStation from './components/WeighingStation';
+import FixedWeightStation from './components/FixedWeightStation';
 import Products from './components/Products';
 import Settings from './components/Settings';
 import PrintView from './components/PrintView';
@@ -124,6 +125,9 @@ const App = () => {
                 <main className="flex-1 overflow-auto p-6 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-white via-neutral-50 to-neutral-100 dark:from-emerald-900/20 dark:via-neutral-900 dark:to-neutral-950 transition-colors duration-200">
                     <div style={{ display: activeTab === 'weighing' ? 'block' : 'none', height: '100%' }}>
                         <WeighingStation activeTab={activeTab} />
+                    </div>
+                    <div style={{ display: activeTab === 'fixedWeight' ? 'block' : 'none', height: '100%' }}>
+                        <FixedWeightStation activeTab={activeTab} />
                     </div>
                     <div style={{ display: activeTab === 'products' ? 'block' : 'none', height: '100%' }}>
                         <Products />

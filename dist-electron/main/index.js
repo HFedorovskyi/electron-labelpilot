@@ -177,6 +177,10 @@ electron_1.app.whenReady().then(() => {
         const { getProducts } = await Promise.resolve().then(() => __importStar(require('./database')));
         return getProducts(search);
     });
+    electron_1.ipcMain.handle('get-fixed-weight-products', async (_, search) => {
+        const { getFixedWeightProducts } = await Promise.resolve().then(() => __importStar(require('./database')));
+        return getFixedWeightProducts(search);
+    });
     electron_1.ipcMain.handle('get-containers', async () => {
         const { getContainers } = await Promise.resolve().then(() => __importStar(require('./database')));
         return getContainers();

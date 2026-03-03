@@ -1,5 +1,5 @@
 import React from 'react';
-import { Scale, Settings, Package, Database, LogOut, ChevronLeft, Menu } from 'lucide-react';
+import { Scale, Settings, Package, Database, LogOut, ChevronLeft, Menu, Weight } from 'lucide-react';
 import clsx from 'clsx';
 import { useTranslation } from '../i18n';
 import packageJson from '../../../package.json';
@@ -18,6 +18,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, serverStatus
 
     const menuItems = [
         { id: 'weighing', labelKey: 'sidebar.weighing', icon: Scale },
+        { id: 'fixedWeight', labelKey: 'sidebar.fixedWeight', icon: Weight },
         { id: 'products', labelKey: 'sidebar.products', icon: Package },
         { id: 'database', labelKey: 'sidebar.database', icon: Database },
         { id: 'settings', labelKey: 'sidebar.settings', icon: Settings },

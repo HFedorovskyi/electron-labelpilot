@@ -92,6 +92,26 @@ export const migrations: Migration[] = [
             }
         }
     },
+    {
+        version: 4,
+        description: 'Add fixed weight columns to nomenclature',
+        up(db) {
+            const addColumn = (col: string, type: string, defaultVal: string) => {
+                try {
+                    db.exec(`ALTER TABLE nomenclature ADD COLUMN ${col} ${type} DEFAULT ${defaultVal};`);
+                } catch (e: any) {
+                    if (!e.message.includes('duplicate column')) throw e;
+                }
+            };
+            addColumn('is_fixed_weight', 'INTEGER', '0');
+            addColumn('fixed_weight_grams', 'REAL', '0');
+            addColumn('min_weight_grams', 'REAL', '0');
+            addColumn('max_weight_grams', 'REAL', '0');
+        },
+        down(_db) {
+            // SQLite < 3.35 doesn't support DROP COLUMN — columns will remain but be unused
+        }
+    },
 ];
 
 /**

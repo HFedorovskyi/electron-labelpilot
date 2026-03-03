@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.initDatabase = initDatabase;
 exports.getProducts = getProducts;
+exports.getFixedWeightProducts = getFixedWeightProducts;
 exports.getContainers = getContainers;
 exports.getLabelById = getLabelById;
 exports.getBarcodeTemplateById = getBarcodeTemplateById;
@@ -220,6 +221,29 @@ function getProducts(search = '') {
         return results;
     }
 }
+function getFixedWeightProducts(search = '') {
+    const db = initDatabase();
+    if (!db)
+        return [];
+    const baseQuery = `
+    SELECT n.*, c.weight as portion_weight 
+    FROM nomenclature n
+    LEFT JOIN container c ON n.portion_container_id = c.id
+    WHERE n.is_fixed_weight = 1
+  `;
+    if (search) {
+        const query = `
+      ${baseQuery}
+      AND (n.name LIKE @search OR n.article LIKE @search)
+      ORDER BY n.name ASC
+      LIMIT 50
+    `;
+        return db.prepare(query).all({ search: `%${search}%` });
+    }
+    else {
+        return db.prepare(`${baseQuery} ORDER BY n.name ASC LIMIT 50`).all();
+    }
+}
 function getContainers() {
     const db = initDatabase();
     if (!db)
@@ -410,12 +434,13 @@ function importFullDump(payload) {
           INSERT INTO nomenclature (
             id, name, article, exp_date, portion_container_id, 
             box_container_id, templates_pack_label, templates_box_label, 
-            close_box_counter, extra_data
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            close_box_counter, extra_data,
+            is_fixed_weight, fixed_weight_grams, min_weight_grams, max_weight_grams
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
                 for (const item of payload.nomenclature) {
                     try {
-                        stmt.run(toPrim(item.id), toPrim(item.name), toPrim(item.article), toPrim(item.exp_date) || 0, toPrim(item.portion_container_id) ?? toPrim(item.portion_container) ?? null, toPrim(item.box_container_id) ?? toPrim(item.box_container) ?? null, toPrim(item.templates_pack_label) ?? null, toPrim(item.templates_box_label) ?? null, toPrim(item.close_box_counter) || 0, typeof item.extra_data === 'string' ? item.extra_data : JSON.stringify(item.extra_data || {}));
+                        stmt.run(toPrim(item.id), toPrim(item.name), toPrim(item.article), toPrim(item.exp_date) || 0, toPrim(item.portion_container_id) ?? toPrim(item.portion_container) ?? null, toPrim(item.box_container_id) ?? toPrim(item.box_container) ?? null, toPrim(item.templates_pack_label) ?? null, toPrim(item.templates_box_label) ?? null, toPrim(item.close_box_counter) || 0, typeof item.extra_data === 'string' ? item.extra_data : JSON.stringify(item.extra_data || {}), item.is_fixed_weight ? 1 : 0, toPrim(item.fixed_weight_grams) || 0, toPrim(item.min_weight_grams) || 0, toPrim(item.max_weight_grams) || 0);
                     }
                     catch (err) {
                         console.warn(`Skipping nomenclature item ${item.id} due to error:`, err.message);

@@ -200,6 +200,30 @@ export function getProducts(search: string = '') {
   }
 }
 
+export function getFixedWeightProducts(search: string = '') {
+  const db = initDatabase();
+  if (!db) return [];
+
+  const baseQuery = `
+    SELECT n.*, c.weight as portion_weight 
+    FROM nomenclature n
+    LEFT JOIN container c ON n.portion_container_id = c.id
+    WHERE n.is_fixed_weight = 1
+  `;
+
+  if (search) {
+    const query = `
+      ${baseQuery}
+      AND (n.name LIKE @search OR n.article LIKE @search)
+      ORDER BY n.name ASC
+      LIMIT 50
+    `;
+    return db.prepare(query).all({ search: `%${search}%` });
+  } else {
+    return db.prepare(`${baseQuery} ORDER BY n.name ASC LIMIT 50`).all();
+  }
+}
+
 export function getContainers() {
   const db = initDatabase();
   if (!db) return [];
@@ -445,8 +469,9 @@ export function importFullDump(payload: any) {
           INSERT INTO nomenclature (
             id, name, article, exp_date, portion_container_id, 
             box_container_id, templates_pack_label, templates_box_label, 
-            close_box_counter, extra_data
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            close_box_counter, extra_data,
+            is_fixed_weight, fixed_weight_grams, min_weight_grams, max_weight_grams
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
 
         for (const item of payload.nomenclature) {
@@ -461,7 +486,11 @@ export function importFullDump(payload: any) {
               toPrim(item.templates_pack_label) ?? null,
               toPrim(item.templates_box_label) ?? null,
               toPrim(item.close_box_counter) || 0,
-              typeof item.extra_data === 'string' ? item.extra_data : JSON.stringify(item.extra_data || {})
+              typeof item.extra_data === 'string' ? item.extra_data : JSON.stringify(item.extra_data || {}),
+              item.is_fixed_weight ? 1 : 0,
+              toPrim(item.fixed_weight_grams) || 0,
+              toPrim(item.min_weight_grams) || 0,
+              toPrim(item.max_weight_grams) || 0
             );
           } catch (err: any) {
             console.warn(`Skipping nomenclature item ${item.id} due to error:`, err.message);

@@ -180,6 +180,11 @@ app.whenReady().then(() => {
         return getProducts(search);
     });
 
+    ipcMain.handle('get-fixed-weight-products', async (_, search) => {
+        const { getFixedWeightProducts } = await import('./database');
+        return getFixedWeightProducts(search);
+    });
+
     ipcMain.handle('get-containers', async () => {
         const { getContainers } = await import('./database');
         return getContainers();
