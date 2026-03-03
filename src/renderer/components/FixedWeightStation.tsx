@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { Printer, RefreshCw, Box, AlertCircle, X, Hash, Calendar, Search, Scale, Package, Play, Square, CheckCircle2 } from 'lucide-react';
+import { Printer, RefreshCw, Box, AlertCircle, X, Hash, Calendar, Search, Scale, Package, Play, Square, CheckCircle2, Layers } from 'lucide-react';
 import { generateBarcode, type BarcodeData } from '../utils/barcodeGenerator';
 import { useTranslation } from '../i18n';
 import NumericKeypad from './NumericKeypad';
@@ -758,6 +758,10 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                             <button onClick={handleCloseBox} className="py-6 bg-neutral-100 dark:bg-neutral-800/50 hover:bg-neutral-200 dark:hover:bg-neutral-800 border border-neutral-300 dark:border-white/5 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group">
                                 <Box className="w-6 h-6 text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-800 dark:group-hover:text-white transition-colors" />
                                 <span className="text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-800 dark:group-hover:text-white uppercase text-xs tracking-widest">{t('ws.closeBox')}</span>
+                            </button>
+                            <button onClick={() => setIsDeleteModalOpen(true)} className="py-6 bg-neutral-100 dark:bg-neutral-800/50 hover:bg-red-100 dark:hover:bg-red-900/30 border border-neutral-300 dark:border-white/5 hover:border-red-400 dark:hover:border-red-500/30 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group col-span-2">
+                                <Layers className="w-6 h-6 text-neutral-500 dark:text-neutral-400 group-hover:text-red-600 dark:group-hover:text-red-400 transition-colors" />
+                                <span className="text-neutral-500 dark:text-neutral-400 group-hover:text-red-600 dark:group-hover:text-red-400 uppercase text-xs tracking-widest">{t('ws.delete')}</span>
                             </button>
                         </div>
                     </>
