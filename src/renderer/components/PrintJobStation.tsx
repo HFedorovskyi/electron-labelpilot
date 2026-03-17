@@ -41,6 +41,7 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
     const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
     const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
     const [syncVersion, setSyncVersion] = useState(0);
+    const [jobsTab, setJobsTab] = useState<'active' | 'completed'>('active');
 
     // Scale state (for kg mode — weighing each pack)
     const [weight, setWeight] = useState<string>('0.000');
@@ -61,6 +62,7 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
     const isPrintingRef = useRef(false);
     const cancelRef = useRef(false);
     const weightRef = useRef('0.000');
+    const kgPrintedQtyRef = useRef(0);
     const autoPrintFiredRef = useRef(false);
 
     // --- LOAD JOBS ---
@@ -136,8 +138,16 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
     // --- SELECT JOB ---
     const selectJob = useCallback(async (job: PrintJobData) => {
         if (job.status === 'completed') return;
+
+        // Block switching if box is not closed
+        if (unitsInBox > 0 && activeJob && activeJob.job_id !== job.job_id) {
+            setAlertMessage(t('ws.closeBoxBeforeChange'));
+            return;
+        }
+
         setActiveJob(job);
         cancelRef.current = false;
+        kgPrintedQtyRef.current = job.printed_qty || 0;
 
         // Load product data from nomenclature
         try {
@@ -148,7 +158,7 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
             console.error('Failed to load product:', e);
             setProduct(null);
         }
-    }, []);
+    }, [unitsInBox, activeJob]);
 
     // --- LOAD LABELS & BARCODES ---
     useEffect(() => {
@@ -519,9 +529,10 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
 
             const newUnitsInBox = unitsInBox + 1;
             const newBoxNetWeight = boxNetWeight + result.weightNetto;
-            const newPrintedQty = activeJob.printed_qty + result.weightNetto;
+            kgPrintedQtyRef.current += result.weightNetto;
+            const newPrintedQty = kgPrintedQtyRef.current;
 
-            // Update job progress (kg mode: add weight)
+            // Update job progress (kg mode: accumulate weight)
             await window.electron.invoke('update-print-job-progress', { jobId: activeJob.job_id, printedQty: newPrintedQty });
 
             if (newUnitsInBox >= boxLimit) {
@@ -687,81 +698,123 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
                     </div>
                 )}
 
-                {/* Active Jobs */}
+                {/* Tabs */}
+                <div className="flex border-b border-neutral-200 dark:border-white/5 mb-4">
+                    <button
+                        onClick={() => setJobsTab('active')}
+                        className={`flex-1 py-3 text-sm font-semibold flex items-center justify-center gap-2 transition-colors relative ${jobsTab === 'active'
+                            ? 'text-violet-700 dark:text-violet-300'
+                            : 'text-neutral-400 dark:text-neutral-600 hover:text-neutral-600 dark:hover:text-neutral-400'
+                        }`}
+                    >
+                        <Play className="w-4 h-4" />
+                        {t('pj.tab.active')} ({activeJobs.length})
+                        {jobsTab === 'active' && (
+                            <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-violet-500 shadow-[0_0_10px_rgba(139,92,246,0.5)]" />
+                        )}
+                    </button>
+                    <button
+                        onClick={() => setJobsTab('completed')}
+                        className={`flex-1 py-3 text-sm font-semibold flex items-center justify-center gap-2 transition-colors relative ${jobsTab === 'completed'
+                            ? 'text-emerald-700 dark:text-emerald-300'
+                            : 'text-neutral-400 dark:text-neutral-600 hover:text-neutral-600 dark:hover:text-neutral-400'
+                        }`}
+                    >
+                        <CheckCircle2 className="w-4 h-4" />
+                        {t('pj.tab.completed')} ({completedJobs.length})
+                        {jobsTab === 'completed' && (
+                            <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]" />
+                        )}
+                    </button>
+                </div>
+
+                {/* Job List */}
                 <div className="flex-1 overflow-y-auto space-y-3 pr-1">
-                    {activeJobs.length === 0 && completedJobs.length === 0 && (
-                        <div className="flex flex-col items-center justify-center h-64 text-neutral-400 dark:text-neutral-600">
-                            <ClipboardList className="w-16 h-16 mb-4 opacity-30" />
-                            <p className="text-lg font-medium">{t('pj.noJobs')}</p>
-                            <p className="text-sm mt-1">{t('pj.noJobsHint')}</p>
-                        </div>
-                    )}
+                    {jobsTab === 'active' ? (
+                        <>
+                            {activeJobs.length === 0 && (
+                                <div className="flex flex-col items-center justify-center h-64 text-neutral-400 dark:text-neutral-600">
+                                    <ClipboardList className="w-16 h-16 mb-4 opacity-30" />
+                                    <p className="text-lg font-medium">{t('pj.noJobs')}</p>
+                                    <p className="text-sm mt-1">{t('pj.noJobsHint')}</p>
+                                </div>
+                            )}
 
-                    {activeJobs.map(job => (
-                        <div
-                            key={job.job_id}
-                            onClick={() => selectJob(job)}
-                            className={`p-5 rounded-2xl border cursor-pointer transition-all group ${activeJob?.job_id === job.job_id
-                                    ? 'bg-violet-50 dark:bg-violet-500/10 border-violet-300 dark:border-violet-500/30 shadow-lg shadow-violet-500/5'
-                                    : 'bg-neutral-50 dark:bg-black/20 border-neutral-200 dark:border-white/5 hover:bg-neutral-100 dark:hover:bg-black/30 hover:border-neutral-300 dark:hover:border-white/10'
-                                }`}
-                        >
-                            <div className="flex justify-between items-start mb-3">
-                                <div className="flex-1 min-w-0">
-                                    <h3 className="text-lg font-bold text-neutral-900 dark:text-white truncate">{job.nomenclature_name}</h3>
-                                    <div className="flex items-center gap-3 mt-1 text-sm text-neutral-500 dark:text-neutral-400">
-                                        {job.nomenclature_article && <span className="font-mono">{job.nomenclature_article}</span>}
-                                        {job.batch_number && <span className="flex items-center gap-1"><Hash className="w-3 h-3" />{job.batch_number}</span>}
-                                        <span className="font-mono text-xs opacity-60">ID: {job.job_id}</span>
+                            {activeJobs.map(job => (
+                                <div
+                                    key={job.job_id}
+                                    onClick={() => selectJob(job)}
+                                    className={`p-5 rounded-2xl border cursor-pointer transition-all group ${activeJob?.job_id === job.job_id
+                                            ? 'bg-violet-50 dark:bg-violet-500/10 border-violet-300 dark:border-violet-500/30 shadow-lg shadow-violet-500/5'
+                                            : 'bg-neutral-50 dark:bg-black/20 border-neutral-200 dark:border-white/5 hover:bg-neutral-100 dark:hover:bg-black/30 hover:border-neutral-300 dark:hover:border-white/10'
+                                        }`}
+                                >
+                                    <div className="flex justify-between items-start mb-3">
+                                        <div className="flex-1 min-w-0">
+                                            <h3 className="text-lg font-bold text-neutral-900 dark:text-white truncate">{job.nomenclature_name}</h3>
+                                            <div className="flex items-center gap-3 mt-1 text-sm text-neutral-500 dark:text-neutral-400">
+                                                {job.nomenclature_article && <span className="font-mono">{job.nomenclature_article}</span>}
+                                                {job.batch_number && <span className="flex items-center gap-1"><Hash className="w-3 h-3" />{job.batch_number}</span>}
+                                                <span className="font-mono text-xs opacity-60">ID: {job.job_id}</span>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-2 ml-3">
+                                            <span className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border ${getStatusColor(job.status)}`}>
+                                                {getStatusIcon(job.status)} {t(`pj.status.${job.status}`)}
+                                            </span>
+                                        </div>
                                     </div>
-                                </div>
-                                <div className="flex items-center gap-2 ml-3">
-                                    <span className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border ${getStatusColor(job.status)}`}>
-                                        {getStatusIcon(job.status)} {t(`pj.status.${job.status}`)}
-                                    </span>
-                                </div>
-                            </div>
 
-                            {/* Progress bar */}
-                            <div className="mt-3">
-                                <div className="flex justify-between text-xs font-mono mb-1.5">
-                                    <span className="text-neutral-500 dark:text-neutral-400">
-                                        {formatQty(job.printed_qty, job.quantity_unit)} / {formatQty(job.quantity, job.quantity_unit)}
-                                    </span>
-                                    <span className="font-bold text-neutral-700 dark:text-neutral-300">{getProgress(job).toFixed(0)}%</span>
-                                </div>
-                                <div className="w-full bg-neutral-200 dark:bg-white/10 rounded-full h-2.5 overflow-hidden">
-                                    <div
-                                        className={`h-full rounded-full transition-all duration-500 ${job.status === 'completed' ? 'bg-emerald-500' : 'bg-gradient-to-r from-violet-500 to-blue-500'}`}
-                                        style={{ width: `${getProgress(job)}%` }}
-                                    />
-                                </div>
-                            </div>
-                        </div>
-                    ))}
-
-                    {/* Completed jobs — collapsed */}
-                    {completedJobs.length > 0 && (
-                        <div className="pt-4 border-t border-neutral-200 dark:border-white/5 mt-4">
-                            <p className="text-xs uppercase tracking-widest text-neutral-400 dark:text-neutral-600 font-bold mb-3">{t('pj.status.completed')} ({completedJobs.length})</p>
-                            {completedJobs.map(job => (
-                                <div key={job.job_id}
-                                    className="p-3 rounded-xl border border-neutral-200 dark:border-white/5 bg-neutral-50 dark:bg-black/10 mb-2 opacity-60 flex justify-between items-center">
-                                    <div>
-                                        <span className="font-medium text-sm text-neutral-700 dark:text-neutral-400">{job.nomenclature_name}</span>
-                                        <span className="ml-3 text-xs font-mono text-neutral-400">{formatQty(job.quantity, job.quantity_unit)}</span>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                                        <button onClick={(e) => { e.stopPropagation(); handleDeleteJob(job.job_id); }}
-                                            className="p-1.5 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-colors"
-                                            title={t('ws.delete')}>
-                                            <Trash2 className="w-3.5 h-3.5 text-neutral-400 hover:text-red-500" />
-                                        </button>
+                                    {/* Progress bar */}
+                                    <div className="mt-3">
+                                        <div className="flex justify-between text-xs font-mono mb-1.5">
+                                            <span className="text-neutral-500 dark:text-neutral-400">
+                                                {formatQty(job.printed_qty, job.quantity_unit)} / {formatQty(job.quantity, job.quantity_unit)}
+                                            </span>
+                                            <span className="font-bold text-neutral-700 dark:text-neutral-300">{getProgress(job).toFixed(0)}%</span>
+                                        </div>
+                                        <div className="w-full bg-neutral-200 dark:bg-white/10 rounded-full h-2.5 overflow-hidden">
+                                            <div
+                                                className={`h-full rounded-full transition-all duration-500 ${job.status === 'completed' ? 'bg-emerald-500' : 'bg-gradient-to-r from-violet-500 to-blue-500'}`}
+                                                style={{ width: `${getProgress(job)}%` }}
+                                            />
+                                        </div>
                                     </div>
                                 </div>
                             ))}
-                        </div>
+                        </>
+                    ) : (
+                        <>
+                            {completedJobs.length === 0 && (
+                                <div className="flex flex-col items-center justify-center h-64 text-neutral-400 dark:text-neutral-600">
+                                    <CheckCircle2 className="w-16 h-16 mb-4 opacity-30" />
+                                    <p className="text-lg font-medium">{t('pj.noCompleted')}</p>
+                                </div>
+                            )}
+
+                            {completedJobs.map(job => (
+                                <div key={job.job_id}
+                                    className="p-4 rounded-2xl border border-neutral-200 dark:border-white/5 bg-neutral-50 dark:bg-black/10 mb-2 flex justify-between items-center">
+                                    <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-2">
+                                            <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+                                            <span className="font-medium text-sm text-neutral-700 dark:text-neutral-300 truncate">{job.nomenclature_name}</span>
+                                        </div>
+                                        <div className="flex items-center gap-3 mt-1 text-xs text-neutral-400">
+                                            {job.nomenclature_article && <span className="font-mono">{job.nomenclature_article}</span>}
+                                            <span className="font-mono">{formatQty(job.quantity, job.quantity_unit)}</span>
+                                            {job.batch_number && <span className="flex items-center gap-1"><Hash className="w-3 h-3" />{job.batch_number}</span>}
+                                            {job.completed_at && <span>{new Date(job.completed_at).toLocaleDateString('ru-RU')}</span>}
+                                        </div>
+                                    </div>
+                                    <button onClick={(e) => { e.stopPropagation(); handleDeleteJob(job.job_id); }}
+                                        className="p-2 hover:bg-red-100 dark:hover:bg-red-900/30 rounded-lg transition-colors ml-3"
+                                        title={t('ws.delete')}>
+                                        <Trash2 className="w-4 h-4 text-neutral-400 hover:text-red-500" />
+                                    </button>
+                                </div>
+                            ))}
+                        </>
                     )}
                 </div>
             </div>

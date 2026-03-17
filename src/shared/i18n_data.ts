@@ -227,6 +227,9 @@ export const translations: Record<Lang, Record<string, string>> = {
         'pj.noReprintData': 'Нет данных для повторной печати',
         'pj.jobReceived': 'Получено новое задание',
         'pj.allCompleted': 'Все задания выполнены!',
+        'pj.tab.active': 'Открытые',
+        'pj.tab.completed': 'Выполненные',
+        'pj.noCompleted': 'Нет выполненных заданий',
 
     },
 
@@ -454,6 +457,9 @@ export const translations: Record<Lang, Record<string, string>> = {
         'pj.noReprintData': 'No data for reprint',
         'pj.jobReceived': 'New job received',
         'pj.allCompleted': 'All jobs completed!',
+        'pj.tab.active': 'Active',
+        'pj.tab.completed': 'Completed',
+        'pj.noCompleted': 'No completed jobs',
 
     },
 
@@ -681,6 +687,9 @@ export const translations: Record<Lang, Record<string, string>> = {
         'pj.noReprintData': 'Keine Daten für Nachdruck',
         'pj.jobReceived': 'Neuer Auftrag empfangen',
         'pj.allCompleted': 'Alle Aufträge abgeschlossen!',
+        'pj.tab.active': 'Offen',
+        'pj.tab.completed': 'Abgeschlossen',
+        'pj.noCompleted': 'Keine abgeschlossenen Aufträge',
 
     },
 };
