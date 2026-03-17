@@ -618,6 +618,39 @@ ipcMain.handle('updater:refresh-server-version', async () => {
     return { success: true };
 });
 
+// --- Print Job Handlers ---
+
+ipcMain.handle('get-print-jobs', async (_, statusFilter?: string) => {
+    const { getPrintJobs } = await import('./database');
+    return getPrintJobs(statusFilter);
+});
+
+ipcMain.handle('update-print-job-progress', async (_, { jobId, printedQty }) => {
+    const { updatePrintJobProgress } = await import('./database');
+    return updatePrintJobProgress(jobId, printedQty);
+});
+
+ipcMain.handle('complete-print-job', async (_, jobId) => {
+    const { completePrintJob } = await import('./database');
+    return completePrintJob(jobId);
+});
+
+ipcMain.handle('delete-print-job', async (_, jobId) => {
+    const { deletePrintJob } = await import('./database');
+    return deletePrintJob(jobId);
+});
+
+ipcMain.handle('import-print-job-file', async () => {
+    const { importPrintJobFile } = await import('./print_job');
+    const result = await importPrintJobFile();
+    if (result.success) {
+        BrowserWindow.getAllWindows().forEach(win => {
+            win.webContents.send('print-jobs-updated');
+        });
+    }
+    return result;
+});
+
 // Import and start Sync Server
 import { startSyncServer } from './server';
 import { CanvasBitmapGenerator } from './printer/generator/CanvasBitmapGenerator';
@@ -633,6 +666,12 @@ startSyncServer((data) => {
         BrowserWindow.getAllWindows().forEach(win => {
             win.webContents.send('data-updated');
         });
+        // If this was a print job, also notify print-jobs-updated
+        if (data?.type === 'print_job') {
+            BrowserWindow.getAllWindows().forEach(win => {
+                win.webContents.send('print-jobs-updated');
+            });
+        }
         log.info('[Sync] data-updated sent to all windows');
     } else {
         log.warn('[Sync] mainWindow is null — cannot send data-updated');

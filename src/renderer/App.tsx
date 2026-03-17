@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import WeighingStation from './components/WeighingStation';
 import FixedWeightStation from './components/FixedWeightStation';
+import PrintJobStation from './components/PrintJobStation';
 import Products from './components/Products';
 import Settings from './components/Settings';
 import PrintView from './components/PrintView';
@@ -128,6 +129,9 @@ const App = () => {
                     </div>
                     <div style={{ display: activeTab === 'fixedWeight' ? 'block' : 'none', height: '100%' }}>
                         <FixedWeightStation activeTab={activeTab} />
+                    </div>
+                    <div style={{ display: activeTab === 'printJob' ? 'block' : 'none', height: '100%' }}>
+                        <PrintJobStation activeTab={activeTab} />
                     </div>
                     <div style={{ display: activeTab === 'products' ? 'block' : 'none', height: '100%' }}>
                         <Products />

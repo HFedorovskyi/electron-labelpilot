@@ -764,3 +764,68 @@ export function deleteBox(boxId: number) {
     return { success: true, palletId: pallet.id };
   })();
 }
+
+// --- Print Jobs ---
+
+export function savePrintJob(job: {
+  job_id: number;
+  nomenclature_id: number;
+  nomenclature_name: string;
+  nomenclature_article?: string;
+  quantity: number;
+  quantity_unit: string;
+  batch_number?: string;
+}) {
+  const db = initDatabase();
+  db.prepare(`
+    INSERT OR REPLACE INTO print_jobs (job_id, nomenclature_id, nomenclature_name, nomenclature_article, quantity, quantity_unit, batch_number, printed_qty, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT printed_qty FROM print_jobs WHERE job_id = ?), 0), COALESCE((SELECT status FROM print_jobs WHERE job_id = ? AND status = 'completed'), 'pending'))
+  `).run(
+    job.job_id,
+    job.nomenclature_id,
+    job.nomenclature_name,
+    job.nomenclature_article || null,
+    job.quantity,
+    job.quantity_unit || 'pcs',
+    job.batch_number || null,
+    job.job_id,
+    job.job_id
+  );
+}
+
+export function getPrintJobs(statusFilter?: string) {
+  const db = initDatabase();
+  if (statusFilter) {
+    return db.prepare('SELECT * FROM print_jobs WHERE status = ? ORDER BY created_at DESC').all(statusFilter);
+  }
+  return db.prepare('SELECT * FROM print_jobs ORDER BY CASE status WHEN \'in_progress\' THEN 0 WHEN \'pending\' THEN 1 WHEN \'completed\' THEN 2 END, created_at DESC').all();
+}
+
+export function updatePrintJobProgress(jobId: number, printedQty: number) {
+  const db = initDatabase();
+  const job = db.prepare('SELECT * FROM print_jobs WHERE job_id = ?').get(jobId) as any;
+  if (!job) throw new Error(`Print job #${jobId} not found`);
+
+  const newPrintedQty = printedQty;
+  const newStatus = newPrintedQty >= job.quantity ? 'completed' : 'in_progress';
+
+  db.prepare(`
+    UPDATE print_jobs SET printed_qty = ?, status = ?, completed_at = CASE WHEN ? = 'completed' THEN CURRENT_TIMESTAMP ELSE completed_at END
+    WHERE job_id = ?
+  `).run(newPrintedQty, newStatus, newStatus, jobId);
+
+  return { success: true, status: newStatus, printed_qty: newPrintedQty, quantity: job.quantity };
+}
+
+export function completePrintJob(jobId: number) {
+  const db = initDatabase();
+  db.prepare("UPDATE print_jobs SET status = 'completed', completed_at = CURRENT_TIMESTAMP WHERE job_id = ?").run(jobId);
+  return { success: true };
+}
+
+export function deletePrintJob(jobId: number) {
+  const db = initDatabase();
+  db.prepare('DELETE FROM print_jobs WHERE job_id = ?').run(jobId);
+  return { success: true };
+}
+
