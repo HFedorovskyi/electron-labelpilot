@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { ClipboardList, Play, Square, Printer, RefreshCw, Upload, CheckCircle2, Clock, Loader2, Trash2, Box, Hash, Calendar, AlertCircle } from 'lucide-react';
+import { ClipboardList, Play, Printer, RefreshCw, Upload, CheckCircle2, Clock, Loader2, Trash2, Box, Hash, Calendar, AlertCircle } from 'lucide-react';
 import { generateBarcode, type BarcodeData } from '../utils/barcodeGenerator';
 import { useTranslation } from '../i18n';
 import DatePickerModal from './DatePickerModal';
@@ -36,7 +36,6 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
     const [numberingConfig, setNumberingConfig] = useState<any>(null);
     const [stationNumber, setStationNumber] = useState<string | null>(null);
     const [alertMessage, setAlertMessage] = useState<string | null>(null);
-    const [isPrinting, setIsPrinting] = useState(false);
     const [labelingDate, setLabelingDate] = useState<Date>(new Date());
     const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
     const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
@@ -424,86 +423,70 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
         };
     };
 
-    // --- START JOB (pcs mode — batch print) ---
-    const handleStartPcsJob = async () => {
+    // --- PRINT SINGLE PACK (pcs mode — scale-based) ---
+    const handlePrintPcsPack = async () => {
         if (!activeJob || !product || !labelDoc) return;
         if (isPrintingRef.current) return;
-
-        setIsPrinting(true);
         isPrintingRef.current = true;
-        cancelRef.current = false;
 
-        const fixedWeightKg = (product.is_fixed_weight ? (product.fixed_weight_grams || 0) : 0) / 1000;
-        const packWeight = fixedWeightKg > 0 ? fixedWeightKg : 0.1; // fallback for non-fixed products
-
-        let localTotalUnits = totalUnits;
-        let localTotalBoxes = totalBoxes;
-        let localUnitsInBox = unitsInBox;
-        let localBoxNetWeight = boxNetWeight;
-        let localBoxesInPallet = boxesInPallet;
-        let localCurrentBoxNumber = currentBoxNumber;
-        let localCurrentBoxId = currentBoxId;
-        let localPrintedQty = activeJob.printed_qty;
-        const boxLimit = product.close_box_counter || 999999;
-
-        const remaining = Math.ceil(activeJob.quantity - activeJob.printed_qty);
-
-        for (let i = 0; i < remaining; i++) {
-            if (cancelRef.current) break;
-
-            try {
-                const overrides = { totalUnits: localTotalUnits, totalBoxes: localTotalBoxes, unitsInBox: localUnitsInBox, boxNetWeight: localBoxNetWeight };
-                const result = await printSinglePack(packWeight, overrides);
-                if (!result) break;
-
-                if (result.recordResult.newBoxCreated) localTotalBoxes++;
-                localCurrentBoxId = result.recordResult.boxId;
-                localCurrentBoxNumber = result.recordResult.boxNumber;
-                localTotalUnits++;
-                localUnitsInBox++;
-                localBoxNetWeight += result.weightNetto;
-                localPrintedQty++;
-
-                // Update progress in DB
-                await window.electron.invoke('update-print-job-progress', { jobId: activeJob.job_id, printedQty: localPrintedQty });
-
-                // Update React state for UI
-                setTotalUnits(localTotalUnits);
-                setUnitsInBox(localUnitsInBox);
-                setBoxNetWeight(localBoxNetWeight);
-                setCurrentBoxId(localCurrentBoxId);
-                setCurrentBoxNumber(localCurrentBoxNumber);
-
-                // Auto close box
-                if (localUnitsInBox >= boxLimit) {
-                    await printBoxLabel(localBoxNetWeight, localUnitsInBox, localCurrentBoxNumber!, localCurrentBoxId!);
-                    localUnitsInBox = 0;
-                    localBoxNetWeight = 0;
-                    localBoxesInPallet++;
-                    localCurrentBoxId = null;
-                    localCurrentBoxNumber = null;
-                    setUnitsInBox(0); setBoxNetWeight(0);
-                    setBoxesInPallet(localBoxesInPallet);
-                    setCurrentBoxId(null); setCurrentBoxNumber(null);
-                }
-
-                // Small delay between prints
-                await new Promise(r => setTimeout(r, 200));
-            } catch (err) {
-                console.error('Print error:', err);
-                setAlertMessage(`Ошибка: ${err instanceof Error ? err.message : String(err)}`);
-                break;
+        try {
+            const cw = parseFloat(weightRef.current);
+            if (cw <= 0.010) {
+                setAlertMessage(t('pj.putOnScale'));
+                return;
             }
+
+            // Fixed weight: validate min/max, use fixed weight for label
+            const isFixed = product.is_fixed_weight;
+            let labelWeight: number;
+
+            if (isFixed) {
+                const wGrams = cw * 1000;
+                const min = product.min_weight_grams || 0;
+                const max = product.max_weight_grams || Infinity;
+                if (wGrams < min || wGrams > max) {
+                    setAlertMessage(t('fw.printNotAllowed'));
+                    return;
+                }
+                labelWeight = (product.fixed_weight_grams || 0) / 1000;
+            } else {
+                // Non-fixed: use actual scale weight
+                labelWeight = cw;
+            }
+
+            const boxLimit = product.close_box_counter || 999999;
+            const result = await printSinglePack(labelWeight);
+            if (!result) return;
+
+            if (result.recordResult.newBoxCreated) setTotalBoxes(prev => prev + 1);
+            setCurrentBoxId(result.recordResult.boxId);
+            setCurrentBoxNumber(result.recordResult.boxNumber);
+
+            const newUnitsInBox = unitsInBox + 1;
+            const newBoxNetWeight = boxNetWeight + result.weightNetto;
+            kgPrintedQtyRef.current += 1; // pcs mode: count by weighings
+            const newPrintedQty = kgPrintedQtyRef.current;
+
+            // Update job progress
+            await window.electron.invoke('update-print-job-progress', { jobId: activeJob.job_id, printedQty: newPrintedQty });
+
+            if (newUnitsInBox >= boxLimit) {
+                await printBoxLabel(newBoxNetWeight, newUnitsInBox, result.recordResult.boxNumber, result.recordResult.boxId);
+                setUnitsInBox(0); setBoxNetWeight(0); setBoxesInPallet(prev => prev + 1);
+                setTotalUnits(prev => prev + 1);
+                setCurrentBoxId(null); setCurrentBoxNumber(null);
+            } else {
+                setUnitsInBox(newUnitsInBox); setBoxNetWeight(newBoxNetWeight);
+                setTotalUnits(prev => prev + 1);
+            }
+
+            loadJobs();
+        } catch (err) {
+            console.error('Print error:', err);
+            setAlertMessage(`Ошибка: ${err instanceof Error ? err.message : String(err)}`);
+        } finally {
+            isPrintingRef.current = false;
         }
-
-        // Final sync
-        setTotalUnits(localTotalUnits);
-        setTotalBoxes(localTotalBoxes);
-        setBoxesInPallet(localBoxesInPallet);
-
-        setIsPrinting(false);
-        isPrintingRef.current = false;
-        loadJobs(); // Refresh job list
     };
 
     // --- PRINT SINGLE (kg mode — manual print per weigh) ---
@@ -669,8 +652,8 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
                     </button>
                 </div>
 
-                {/* Weight Display (only for kg mode when a job is active) */}
-                {activeJob && activeJob.quantity_unit === 'kg' && (
+                {/* Weight Display (for all modes when a job is active) */}
+                {activeJob && (
                     <div className="mb-6 grid grid-cols-2 gap-4">
                         <div className="bg-neutral-50 dark:bg-black/30 border border-neutral-200 dark:border-white/10 rounded-3xl p-8 text-center relative overflow-hidden group">
                             <div className="absolute inset-0 bg-gradient-to-br from-emerald-100/50 dark:from-emerald-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
@@ -843,46 +826,12 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
                         </div>
 
                         {/* Print Button */}
-                        {activeJob.quantity_unit === 'pcs' ? (
-                            !isPrinting ? (
-                                <button
-                                    onClick={handleStartPcsJob}
-                                    className="w-full py-8 bg-violet-600 hover:bg-violet-500 active:bg-violet-700 transition-all rounded-3xl font-bold text-2xl shadow-[0_10px_40px_-10px_rgba(139,92,246,0.5)] flex items-center justify-center gap-3 border-t border-white/10 text-white"
-                                >
-                                    <Play className="w-8 h-8" /> {t('pj.start')}
-                                </button>
-                            ) : (
-                                <button
-                                    onClick={() => { cancelRef.current = true; }}
-                                    className="w-full py-8 bg-red-600 hover:bg-red-500 active:bg-red-700 transition-all rounded-3xl font-bold text-2xl shadow-[0_10px_40px_-10px_rgba(239,68,68,0.5)] flex items-center justify-center gap-3 border-t border-white/10 text-white animate-pulse"
-                                >
-                                    <Square className="w-8 h-8" /> {t('pj.pause')}
-                                </button>
-                            )
-                        ) : (
-                            <button
-                                onClick={handlePrintKgPack}
-                                className="w-full py-8 bg-violet-600 hover:bg-violet-500 active:bg-violet-700 transition-all rounded-3xl font-bold text-2xl shadow-[0_10px_40px_-10px_rgba(139,92,246,0.5)] flex items-center justify-center gap-3 border-t border-white/10 text-white"
-                            >
-                                <Printer className="w-8 h-8" /> {t('ws.print')}
-                            </button>
-                        )}
-
-                        {/* Progress bar for pcs printing */}
-                        {isPrinting && activeJob.quantity_unit === 'pcs' && (
-                            <div className="p-4 bg-neutral-50 dark:bg-black/30 border border-neutral-200 dark:border-white/10 rounded-2xl">
-                                <div className="flex justify-between text-xs font-mono mb-2">
-                                    <span className="text-neutral-500">{t('pj.progress')}</span>
-                                    <span className="font-bold text-neutral-700 dark:text-neutral-300">
-                                        {formatQty(activeJob.printed_qty, activeJob.quantity_unit)} / {formatQty(activeJob.quantity, activeJob.quantity_unit)}
-                                    </span>
-                                </div>
-                                <div className="w-full bg-neutral-200 dark:bg-white/10 rounded-full h-3 overflow-hidden">
-                                    <div className="h-full bg-gradient-to-r from-violet-500 to-blue-500 rounded-full transition-all duration-300"
-                                        style={{ width: `${getProgress(activeJob)}%` }} />
-                                </div>
-                            </div>
-                        )}
+                        <button
+                            onClick={activeJob.quantity_unit === 'pcs' ? handlePrintPcsPack : handlePrintKgPack}
+                            className="w-full py-8 bg-violet-600 hover:bg-violet-500 active:bg-violet-700 transition-all rounded-3xl font-bold text-2xl shadow-[0_10px_40px_-10px_rgba(139,92,246,0.5)] flex items-center justify-center gap-3 border-t border-white/10 text-white"
+                        >
+                            <Printer className="w-8 h-8" /> {t('ws.print')}
+                        </button>
 
                         {/* Action buttons */}
                         <div className="grid grid-cols-2 gap-4">
