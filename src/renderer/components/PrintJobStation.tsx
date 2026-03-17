@@ -625,6 +625,18 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
         return Math.min(100, (job.printed_qty / job.quantity) * 100);
     };
 
+    const getNetWeight = () => {
+        if (!product) return weight;
+        const currentWeight = parseFloat(weight);
+        const portionContainerId = product.portion_container_id;
+        const portionContainer = portionContainerId
+            ? containers.find(c => String(c.id) === String(portionContainerId))
+            : null;
+        const tareGrams = portionContainer?.weight || product.portion_weight || 0;
+        const tareKg = tareGrams / 1000;
+        return Math.max(0, currentWeight - tareKg).toFixed(3);
+    };
+
     const activeJobs = jobs.filter(j => j.status !== 'completed');
     const completedJobs = jobs.filter(j => j.status === 'completed');
 
@@ -645,6 +657,35 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
                         <Upload className="w-4 h-4" /> {t('pj.importFile')}
                     </button>
                 </div>
+
+                {/* Weight Display (only for kg mode when a job is active) */}
+                {activeJob && activeJob.quantity_unit === 'kg' && (
+                    <div className="mb-6 grid grid-cols-2 gap-4">
+                        <div className="bg-neutral-50 dark:bg-black/30 border border-neutral-200 dark:border-white/10 rounded-3xl p-8 text-center relative overflow-hidden group">
+                            <div className="absolute inset-0 bg-gradient-to-br from-emerald-100/50 dark:from-emerald-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                            <div className="flex justify-between items-center mb-2">
+                                <label className="text-xs uppercase tracking-widest text-neutral-500 font-bold">{t('ws.gross')}</label>
+                                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${scaleStatus === 'connected' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-red-500/10 text-red-500'}`}>
+                                    {scaleStatus === 'connected' ? t('ws.scaleStatus.connected') : t('ws.scaleStatus.disconnected')}
+                                </span>
+                            </div>
+                            <div className="text-7xl font-mono text-emerald-600 dark:text-emerald-400 mt-2 font-light tracking-tighter">
+                                {weight} <span className="text-2xl text-emerald-500/50">{t('ws.kg')}</span>
+                            </div>
+                            {isStable && (
+                                <div className="mt-2 text-emerald-600 dark:text-emerald-500/60 text-xs font-bold uppercase tracking-widest animate-pulse flex items-center justify-center gap-2">
+                                    <div className="w-1 h-1 rounded-full bg-emerald-500"></div> {t('ws.stable')}
+                                </div>
+                            )}
+                        </div>
+                        <div className="bg-neutral-50 dark:bg-black/30 border border-neutral-200 dark:border-white/10 rounded-3xl p-8 text-center">
+                            <label className="text-xs uppercase tracking-widest text-neutral-500 font-bold">{t('ws.net')}</label>
+                            <div className="text-7xl font-mono text-neutral-700 dark:text-neutral-300 mt-2 font-light tracking-tighter">
+                                {getNetWeight()} <span className="text-2xl text-neutral-500 dark:text-neutral-600">{t('ws.kg')}</span>
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 {/* Active Jobs */}
                 <div className="flex-1 overflow-y-auto space-y-3 pr-1">
@@ -747,26 +788,6 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
                                 )}
                             </div>
                         </div>
-
-                        {/* Kg mode: Show scale weight */}
-                        {activeJob.quantity_unit === 'kg' && (
-                            <div className="bg-neutral-50 dark:bg-black/30 border border-neutral-200 dark:border-white/10 rounded-2xl p-5 text-center">
-                                <div className="flex justify-between items-center mb-2">
-                                    <label className="text-xs uppercase tracking-widest text-neutral-500 font-bold">{t('ws.gross')}</label>
-                                    <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${scaleStatus === 'connected' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-red-500/10 text-red-500'}`}>
-                                        {scaleStatus === 'connected' ? t('ws.scaleStatus.connected') : t('ws.scaleStatus.disconnected')}
-                                    </span>
-                                </div>
-                                <div className="text-5xl font-mono text-emerald-600 dark:text-emerald-400 font-light tracking-tighter">
-                                    {weight} <span className="text-xl text-emerald-500/50">{t('ws.kg')}</span>
-                                </div>
-                                {isStable && (
-                                    <div className="mt-2 text-emerald-600 dark:text-emerald-500/60 text-xs font-bold uppercase tracking-widest animate-pulse flex items-center justify-center gap-2">
-                                        <div className="w-1 h-1 rounded-full bg-emerald-500"></div> {t('ws.stable')}
-                                    </div>
-                                )}
-                            </div>
-                        )}
 
                         {/* Print Button */}
                         {activeJob.quantity_unit === 'pcs' ? (
