@@ -775,11 +775,12 @@ export function savePrintJob(job: {
   quantity: number;
   quantity_unit: string;
   batch_number?: string;
+  marking_date?: string | null;
 }) {
   const db = initDatabase();
   db.prepare(`
-    INSERT OR REPLACE INTO print_jobs (job_id, nomenclature_id, nomenclature_name, nomenclature_article, quantity, quantity_unit, batch_number, printed_qty, status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT printed_qty FROM print_jobs WHERE job_id = ?), 0), COALESCE((SELECT status FROM print_jobs WHERE job_id = ? AND status = 'completed'), 'pending'))
+    INSERT OR REPLACE INTO print_jobs (job_id, nomenclature_id, nomenclature_name, nomenclature_article, quantity, quantity_unit, batch_number, marking_date, printed_qty, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT printed_qty FROM print_jobs WHERE job_id = ?), 0), COALESCE((SELECT status FROM print_jobs WHERE job_id = ? AND status = 'completed'), 'pending'))
   `).run(
     job.job_id,
     job.nomenclature_id,
@@ -788,6 +789,7 @@ export function savePrintJob(job: {
     job.quantity,
     job.quantity_unit || 'pcs',
     job.batch_number || null,
+    job.marking_date || null,
     job.job_id,
     job.job_id
   );

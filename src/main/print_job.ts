@@ -15,6 +15,7 @@ export interface PrintJob {
     quantity: number;
     quantity_unit: 'pcs' | 'kg';
     batch_number: string;
+    marking_date: string | null;
 }
 
 // ── Online (HTTP POST /api/print_job) ──
@@ -32,6 +33,7 @@ export function processOnlinePrintJob(data: any): PrintJob {
         quantity: data.quantity,
         quantity_unit: data.quantity_unit === 'kg' ? 'kg' : 'pcs',
         batch_number: data.batch_number || '',
+        marking_date: data.marking_date || null,
     };
 
     validateJob(job);
@@ -133,6 +135,7 @@ function normalizeJob(raw: any): PrintJob {
         quantity: raw.quantity,
         quantity_unit: raw.quantity_unit === 'kg' ? 'kg' : 'pcs',
         batch_number: raw.batch_number || '',
+        marking_date: raw.marking_date || null,
     };
 }
 

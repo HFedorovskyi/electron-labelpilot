@@ -138,6 +138,18 @@ export const migrations: Migration[] = [
             db.exec('DROP TABLE IF EXISTS print_jobs;');
         }
     },
+    {
+        version: 6,
+        description: 'Add marking_date column to print_jobs table',
+        up(db) {
+            db.exec(`ALTER TABLE print_jobs ADD COLUMN marking_date TEXT;`);
+            console.log('[Migration v6] Added marking_date column to print_jobs');
+        },
+        down(_db) {
+            // SQLite doesn't support DROP COLUMN easily; this is a no-op
+            console.log('[Migration v6 down] No-op for marking_date removal');
+        }
+    },
 ];
 
 /**

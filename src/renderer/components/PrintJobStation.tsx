@@ -14,6 +14,7 @@ interface PrintJobData {
     quantity: number;
     quantity_unit: 'pcs' | 'kg';
     batch_number: string;
+    marking_date: string | null;
     printed_qty: number;
     status: 'pending' | 'in_progress' | 'completed';
     created_at: string;
@@ -147,6 +148,12 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
         setActiveJob(job);
         cancelRef.current = false;
         kgPrintedQtyRef.current = job.printed_qty || 0;
+
+        // Set labeling date from job's marking_date (if provided by server)
+        if (job.marking_date) {
+            const md = new Date(job.marking_date + 'T00:00:00');
+            if (!isNaN(md.getTime())) setLabelingDate(md);
+        }
 
         // Load product data from nomenclature
         try {
