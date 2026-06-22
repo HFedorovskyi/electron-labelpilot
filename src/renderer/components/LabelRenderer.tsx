@@ -1,5 +1,6 @@
 import { useRef, useEffect } from 'react';
 import bwipjs from 'bwip-js';
+import { normalizeBarcodeType } from '../../shared/barcodeTypes';
 
 interface LabelRendererProps {
     doc: any; // LabelDoc
@@ -144,20 +145,9 @@ const BarcodeElement = ({ el, processText, style }: { el: any; processText: (t: 
                     return;
                 }
 
-                const getBwipType = (type: any) => {
-                    const t = String(type).toLowerCase();
-                    if (t === '21' || t === 'ean13' || t === 'ean13_kz') return 'ean13';
-                    if (t === '22' || t === 'ean8') return 'ean8';
-                    if (t === '23' || t === 'code128') return 'code128';
-                    if (t === 'qr' || t === 'qrcode') return 'qrcode';
-                    if (t === 'datamatrix') return 'datamatrix';
-                    if (t === 'gs1datamatrix') return 'gs1datamatrix';
-                    if (t === 'gs1qr' || t === 'gs1qrcode' || t === 'qrdatabar' || t === 'gs-1') return 'gs1qrcode';
-                    if (t === 'gs1databar' || t === 'databar') return 'gs1databarexpandedstacked';
-                    return t || 'code128';
-                };
-
-                bcid = getBwipType(el.barcodeType);
+                // Shared with the print path (CanvasBitmapGenerator) so preview and
+                // printed label always resolve a template's barcodeType identically.
+                bcid = normalizeBarcodeType(el.barcodeType);
                 const logMsg = `BWIP-JS Rendering Pipeline: RawType="${el.barcodeType}" -> BCID="${bcid}", Value="${processedValue}"`;
                 console.log(logMsg);
                 (window as any).electron.send('log-to-main', logMsg);

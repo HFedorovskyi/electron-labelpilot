@@ -21,6 +21,7 @@ const logger_1 = __importDefault(require("../../logger"));
 const path_1 = __importDefault(require("path"));
 const electron_1 = require("electron");
 const canvas_1 = require("@napi-rs/canvas");
+const barcodeTypes_1 = require("../../../shared/barcodeTypes");
 // Register custom fonts
 try {
     const isDev = !electron_1.app.isPackaged;
@@ -59,36 +60,175 @@ try {
             logger_1.default.info(`[CanvasBitmapGenerator] Registered font "${font.name}" (${font.weight}) from ${finalPath}`);
         }
         else {
-            logger_1.default.warn(`[CanvasBitmapGenerator] Font file not found for "${font.name}": searched in ${serverFontPath} and ${rootFontPath}`);
+            // Not bundled. On Windows/macOS @napi-rs/canvas resolves standard families
+            // (Arial, Times New Roman, Courier New, Georgia, Verdana) from system fonts,
+            // so this is benign there — only debug-level noise, not a real failure.
+            logger_1.default.debug(`[CanvasBitmapGenerator] Font "${font.name}" not bundled; will use a system font if available (searched ${serverFontPath})`);
         }
     }
 }
 catch (e) {
     logger_1.default.error(`[CanvasBitmapGenerator] Failed to register fonts:`, e);
 }
+// 256-entry uppercase hex lookup table — replaces per-byte toString(16).padStart in the
+// RLE/hex hot path (tens of thousands of calls per full-label bitmap on a weak CPU).
+const BYTE_HEX = (() => {
+    const t = new Array(256);
+    for (let i = 0; i < 256; i++)
+        t[i] = i.toString(16).padStart(2, '0').toUpperCase();
+    return t;
+})();
 class CanvasBitmapGenerator {
-    // Session cache for backgrounds, move to global to ensure persistence across re-instantiations
+    // ── RAM-cache path ────────────────────────────────────────────────
+    // Tracks which `~DG R:<file>.GRF` hashes are already on each printer's RAM-drive.
+    // Stored on `global` so it survives HMR / re-instantiation.
+    // Scoped per printer so a hash uploaded to printer A isn't assumed present on printer B.
     static get uploadedBackgrounds() {
-        if (!global.zplBackgroundCache) {
-            global.zplBackgroundCache = new Set();
+        const g = global;
+        if (!(g.zplBackgroundCache instanceof Map)) {
+            // Replace any legacy Set with a fresh Map.
+            g.zplBackgroundCache = new Map();
         }
-        return global.zplBackgroundCache;
+        return g.zplBackgroundCache;
+    }
+    static getCacheForPrinter(printerId) {
+        const map = CanvasBitmapGenerator.uploadedBackgrounds;
+        let set = map.get(printerId);
+        if (!set) {
+            set = new Set();
+            map.set(printerId, set);
+        }
+        return set;
+    }
+    // ── Inline-cache path ─────────────────────────────────────────────
+    // Holds the compressed static-layer hex per cache key, so the inline path
+    // doesn't re-render/compress the static layer on every print. The payload
+    // still travels in every job — we just skip the canvas + RLE work.
+    static get inlineStaticCache() {
+        const g = global;
+        if (!(g.zplInlineStaticCache instanceof Map)) {
+            g.zplInlineStaticCache = new Map();
+        }
+        return g.zplInlineStaticCache;
+    }
+    static getInlineCacheForPrinter(printerId) {
+        const map = CanvasBitmapGenerator.inlineStaticCache;
+        let m = map.get(printerId);
+        if (!m) {
+            m = new Map();
+            map.set(printerId, m);
+        }
+        return m;
+    }
+    static isCacheDisabled() {
+        return process.env.LABELPILOT_DISABLE_BG_CACHE === '1';
+    }
+    // ── Barcode raster path ───────────────────────────────────────────
+    // bwip-js node build, lazily required. The explicit '/node' subpath avoids the
+    // package's 'electron' export condition resolving to the DOM/browser build.
+    static _bwip = null;
+    static getBwip() {
+        if (!CanvasBitmapGenerator._bwip) {
+            CanvasBitmapGenerator._bwip = require('bwip-js/node');
+        }
+        return CanvasBitmapGenerator._bwip;
+    }
+    // Cache of fully-rendered ^GFA barcode commands keyed by (bcid|value|size|text|rot).
+    // Rasterizing a barcode (bwip-js → PNG → canvas → mono → RLE) is expensive on a weak
+    // CPU; production runs repeat dates/articles/weights, so this turns repeats into a
+    // string lookup. Bounded to BARCODE_CACHE_MAX entries (oldest evicted first).
+    static BARCODE_CACHE_MAX = 500;
+    static get barcodeGfaCache() {
+        const g = global;
+        if (!(g.zplBarcodeGfaCache instanceof Map)) {
+            g.zplBarcodeGfaCache = new Map();
+        }
+        return g.zplBarcodeGfaCache;
+    }
+    static cacheBarcodeGfa(key, value) {
+        const cache = CanvasBitmapGenerator.barcodeGfaCache;
+        cache.set(key, value);
+        if (cache.size > CanvasBitmapGenerator.BARCODE_CACHE_MAX) {
+            const oldest = cache.keys().next().value;
+            if (oldest !== undefined)
+                cache.delete(oldest);
+        }
+    }
+    // ── Structural layout cache ───────────────────────────────────────
+    // Keyed by the doc object (WeakMap → GC-friendly) then by a layout-affecting options
+    // key. Holds the result of the expensive element split + dimension math + MD5 hash so
+    // cached prints skip all of it. A re-synced template is a NEW object → automatic miss.
+    static structuralCache = new WeakMap();
+    // ── Dynamic text clip cache ───────────────────────────────────────
+    // Caches the final '^FO..^GFA..^FS' command per (element identity + substituted text +
+    // scale). Production runs repeat dates/articles/weights, turning a canvas raster + RLE
+    // into a string lookup. Bounded; oldest evicted first. global-backed to survive HMR.
+    static CLIP_CACHE_MAX = 800;
+    static get clipGfaCache() {
+        const g = global;
+        if (!(g.zplClipGfaCache instanceof Map)) {
+            g.zplClipGfaCache = new Map();
+        }
+        return g.zplClipGfaCache;
+    }
+    static cacheClipGfa(key, value) {
+        const cache = CanvasBitmapGenerator.clipGfaCache;
+        cache.set(key, value);
+        if (cache.size > CanvasBitmapGenerator.CLIP_CACHE_MAX) {
+            const oldest = cache.keys().next().value;
+            if (oldest !== undefined)
+                cache.delete(oldest);
+        }
     }
     /**
-     * Clear the background GRF cache. Call after data sync to ensure
-     * updated label templates get fresh backgrounds uploaded to the printer.
+     * Clear the background cache (both RAM tracking and inline static cache).
+     * - With no argument: clear all printers (call after data sync — templates may have changed).
+     * - With a printerId: clear only that printer (call on reconnect — printer may have rebooted
+     *   and lost its RAM-stored graphics, or its RAM-cache decision was invalidated).
      */
-    static clearBackgroundCache() {
-        const cache = CanvasBitmapGenerator.uploadedBackgrounds;
-        const size = cache.size;
-        cache.clear();
-        logger_1.default.info(`[CanvasBitmapGenerator] Background cache cleared (${size} entries removed)`);
+    static clearBackgroundCache(printerId) {
+        const ramMap = CanvasBitmapGenerator.uploadedBackgrounds;
+        const inlineMap = CanvasBitmapGenerator.inlineStaticCache;
+        if (printerId) {
+            const ramSize = ramMap.get(printerId)?.size || 0;
+            const inlineSize = inlineMap.get(printerId)?.size || 0;
+            ramMap.delete(printerId);
+            inlineMap.delete(printerId);
+            logger_1.default.info(`[CanvasBitmapGenerator] BG cache cleared for printer "${printerId}" (ram=${ramSize}, inline=${inlineSize})`);
+        }
+        else {
+            let ramTotal = 0;
+            let inlineTotal = 0;
+            for (const s of ramMap.values())
+                ramTotal += s.size;
+            for (const m of inlineMap.values())
+                inlineTotal += m.size;
+            ramMap.clear();
+            inlineMap.clear();
+            const bcSize = CanvasBitmapGenerator.barcodeGfaCache.size;
+            CanvasBitmapGenerator.barcodeGfaCache.clear();
+            logger_1.default.info(`[CanvasBitmapGenerator] BG cache cleared globally (ram=${ramTotal}, inline=${inlineTotal}, barcode=${bcSize})`);
+        }
     }
-    async generate(doc, data, options) {
-        const t0 = Date.now();
+    /**
+     * Compute the structural part of the layout (dimensions, static/dynamic split,
+     * structural MD5 hash → bgName). Pure and data-independent, so it is memoized per
+     * (doc object, layout-affecting options) and reused across every print of a template.
+     */
+    computeStructure(doc, options) {
         const dpi = options.dpi || doc.dpi || 203;
+        const optsKey = `${dpi}|${options.widthMm ?? ''}|${options.heightMm ?? ''}`;
+        let perDoc = CanvasBitmapGenerator.structuralCache.get(doc);
+        if (perDoc) {
+            const hit = perDoc.get(optsKey);
+            if (hit)
+                return hit;
+        }
+        else {
+            perDoc = new Map();
+            CanvasBitmapGenerator.structuralCache.set(doc, perDoc);
+        }
         const srcDpi = doc.canvas?.dpi || 96;
-        // ── Physical dimensions (mm → dots) ──────────────────────────
         let targetWidthMm = doc.widthMm || options.widthMm;
         let targetHeightMm = doc.heightMm || options.heightMm;
         if (!targetWidthMm && doc.canvas?.widthCm)
@@ -101,14 +241,10 @@ class CanvasBitmapGenerator {
         let scaleY = 1;
         if (targetWidthMm) {
             printWidth = Math.round(targetWidthMm * dpi / 25.4);
-            // If canvas width is provided, it defines the source coordinate system.
-            // If it's missing, we assume elements are in mm and need to be scaled to dots.
-            if (doc.canvas.width > 0) {
+            if (doc.canvas.width > 0)
                 scaleX = printWidth / doc.canvas.width;
-            }
-            else {
-                scaleX = dpi / 25.4; // 1mm -> X dots
-            }
+            else
+                scaleX = dpi / 25.4;
         }
         else {
             scaleX = dpi / srcDpi;
@@ -116,36 +252,59 @@ class CanvasBitmapGenerator {
         }
         if (targetHeightMm) {
             labelLength = Math.round(targetHeightMm * dpi / 25.4);
-            if (doc.canvas.height > 0) {
+            if (doc.canvas.height > 0)
                 scaleY = labelLength / doc.canvas.height;
-            }
-            else {
+            else
                 scaleY = dpi / 25.4;
-            }
         }
         else {
             scaleY = scaleX;
             labelLength = Math.round((doc.canvas.height || (doc.canvas.width * 0.5)) * scaleY);
         }
-        logger_1.default.info(`[CanvasBitmapGenerator] FULL DATA OBJECT: ${JSON.stringify(data)}`);
-        logger_1.default.info(`[CanvasBitmapGenerator] BARCODE FIELDS: barcode="${data.barcode}" article="${data.article}" Код_ШК="${data['Код ШК']}"`);
-        const t2 = Date.now();
         const hasVariables = (text) => /\{\{\s*[^{}]+\s*\}\}/.test(text);
-        // ── Split elements into static vs dynamic ─────────────────────
         const staticElements = [];
         const dynamicElements = [];
         for (const el of doc.elements) {
             const isDynamic = (el.type === 'text' && hasVariables(el.text || '')) ||
                 (el.type === 'barcode' && hasVariables(el.value || el.text || '')) ||
-                (el.type === 'barcode'); // Treat all barcodes as dynamic to be safe
-            if (isDynamic) {
+                (el.type === 'barcode');
+            if (isDynamic)
                 dynamicElements.push(el);
-            }
-            else {
+            else
                 staticElements.push(el);
-            }
         }
-        // ── Render Static Layer ──────────────────────────────────────
+        const bytesPerRow = Math.ceil(printWidth / 8);
+        const totalBytes = bytesPerRow * labelLength;
+        const bgHash = this.getStructuralHash(staticElements, printWidth, labelLength);
+        const bgName = `R:BG${bgHash.substring(0, 6).toUpperCase()}.GRF`;
+        const result = {
+            printWidth, labelLength, scaleX, scaleY,
+            staticElements, dynamicElements,
+            bytesPerRow, totalBytes, bgHash, bgName,
+        };
+        perDoc.set(optsKey, result);
+        return result;
+    }
+    /**
+     * Build the full per-print layout: the memoized structural part plus the cheap,
+     * per-printer/live cache state (cacheKey, printerCache, bgCached). Only the structural
+     * part is expensive, and it comes from cache after the first print of a template.
+     */
+    prepareLayout(doc, options) {
+        const s = this.computeStructure(doc, options);
+        const cacheKey = `${s.bgName}_${s.totalBytes}`;
+        const printerId = options.printerId || '__default__';
+        const cacheDisabled = CanvasBitmapGenerator.isCacheDisabled();
+        const printerCache = cacheDisabled ? null : CanvasBitmapGenerator.getCacheForPrinter(printerId);
+        const bgCached = !!printerCache && printerCache.has(cacheKey);
+        return { ...s, cacheKey, printerId, cacheDisabled, printerCache, bgCached };
+    }
+    /**
+     * Canvas-renders the static layer and produces a compressed RLE string.
+     * Shared by both the RAM (~DG) and inline (^GFA) paths.
+     */
+    async renderStaticCompressed(layout, data) {
+        const { printWidth, labelLength, scaleX, scaleY, staticElements, bytesPerRow } = layout;
         const staticCanvas = (0, canvas_1.createCanvas)(printWidth, labelLength);
         const sctx = staticCanvas.getContext('2d');
         sctx.fillStyle = '#FFFFFF';
@@ -156,14 +315,83 @@ class CanvasBitmapGenerator {
             await this.renderElement(sctx, el, data, scaleX, scaleY);
             sctx.restore();
         }
-        // Convert static layer to mono and hash it
         const staticImageData = sctx.getImageData(0, 0, printWidth, labelLength);
-        const bytesPerRow = Math.ceil(printWidth / 8);
-        const totalBytes = bytesPerRow * labelLength;
         const staticMono = this.rgbaToMono(staticImageData.data, printWidth, labelLength, bytesPerRow);
-        // Structural hash for background — deterministic regardless of canvas rendering nuances
-        const bgHash = this.getStructuralHash(staticElements, printWidth, labelLength);
-        const bgName = `R:BG${bgHash.substring(0, 6).toUpperCase()}.GRF`;
+        return this.compressZplRLE(staticMono, bytesPerRow, labelLength);
+    }
+    /**
+     * Render the static layer to a `~DG` (Download Graphics) command. Pure data — no print
+     * framing, so sending this to the printer just stores the bitmap in its RAM.
+     */
+    async renderStaticDgCommand(layout, data) {
+        const { bytesPerRow, totalBytes, bgName } = layout;
+        const compressed = await this.renderStaticCompressed(layout, data);
+        return {
+            dg: `~DG${bgName},${totalBytes},${bytesPerRow},${compressed}\n`,
+            compressedLen: compressed.length,
+        };
+    }
+    /**
+     * Inline path: returns the cached compressed static layer for this printer/template,
+     * rendering and caching on first miss. The compressed string travels in every print
+     * job but the expensive canvas+RLE work is amortized across prints.
+     */
+    async getOrRenderInlineStatic(layout, data) {
+        const { cacheKey, printerId, bytesPerRow, totalBytes, cacheDisabled } = layout;
+        const cache = cacheDisabled ? null : CanvasBitmapGenerator.getInlineCacheForPrinter(printerId);
+        const hit = cache?.get(cacheKey);
+        if (hit)
+            return { entry: hit, fromCache: true };
+        const compressed = await this.renderStaticCompressed(layout, data);
+        const entry = { compressed, totalBytes, bytesPerRow };
+        if (cache)
+            cache.set(cacheKey, entry);
+        return { entry, fromCache: false };
+    }
+    /**
+     * Pre-uploads the static background to the printer — no `^XA…^XZ`, so no label is printed.
+     * Returns null if already cached for this printer (caller should skip the send) or if
+     * the printer is on the inline path (no pre-upload is meaningful — bitmap travels in every job).
+     */
+    async generateBackgroundUpload(doc, options) {
+        if (options.cacheMode === 'inline')
+            return null;
+        const layout = this.prepareLayout(doc, options);
+        if (layout.bgCached)
+            return null;
+        const { dg } = await this.renderStaticDgCommand(layout, {});
+        if (layout.printerCache)
+            layout.printerCache.add(layout.cacheKey);
+        return Buffer.from(dg, 'utf-8');
+    }
+    async generate(doc, data, options) {
+        const t0 = Date.now();
+        const layout = this.prepareLayout(doc, options);
+        const { printWidth, labelLength, scaleX, scaleY, dynamicElements, bgName, printerId, cacheDisabled, printerCache, bgCached, } = layout;
+        const cacheMode = options.cacheMode || 'ram';
+        // ── Render Static Layer ─────────────────────────────────────
+        // RAM path: emit ~DG once, then ^XG to recall. Subsequent prints skip the upload.
+        // Inline path: embed ^GFA in every job (no printer RAM-drive needed). The compressed
+        // string is cached in JS memory so we don't re-canvas/RLE on every print.
+        let staticDgCommand = ''; // RAM path only
+        let inlineGfaCommand = ''; // Inline path only
+        let staticCompressedLen = 0;
+        let inlineFromCache = false;
+        const t2 = Date.now();
+        if (cacheMode === 'inline') {
+            const { entry, fromCache } = await this.getOrRenderInlineStatic(layout, data);
+            inlineFromCache = fromCache;
+            staticCompressedLen = entry.compressed.length;
+            inlineGfaCommand =
+                `^FO0,0^GFA,${entry.totalBytes},${entry.totalBytes},${entry.bytesPerRow},${entry.compressed}^FS\n`;
+        }
+        else if (!bgCached) {
+            const result = await this.renderStaticDgCommand(layout, data);
+            staticDgCommand = result.dg;
+            staticCompressedLen = result.compressedLen;
+            if (printerCache)
+                printerCache.add(layout.cacheKey);
+        }
         const t3 = Date.now();
         // ── Render Dynamic Elements — Per-Element Clips ──────────────
         // Instead of rendering ALL dynamic text on a full-label canvas (~18KB),
@@ -173,7 +401,7 @@ class CanvasBitmapGenerator {
         const dynamicClipCommands = [];
         for (const el of dynamicElements) {
             if (el.type === 'barcode' && (el.value || el.text)) {
-                const barcodeZpl = this.processBarcodeAsZpl(el, data, scaleX, scaleY);
+                const barcodeZpl = await this.renderBarcode(el, data, scaleX, scaleY);
                 if (barcodeZpl)
                     barcodeCommands.push(barcodeZpl);
             }
@@ -184,19 +412,8 @@ class CanvasBitmapGenerator {
             }
         }
         const t4 = Date.now();
-        // ── Build ZPL with Caching ──────────────────────────────────
-        let zpl = '';
-        // ~DG (Download Graphics) only if background is NOT in session cache
-        const staticCompressed = this.compressZplRLE(staticMono, bytesPerRow, labelLength);
-        const cacheKey = `${bgName}_${totalBytes}`;
-        if (!CanvasBitmapGenerator.uploadedBackgrounds.has(cacheKey)) {
-            zpl += `~DG${bgName},${totalBytes},${bytesPerRow},${staticCompressed}\n`;
-            CanvasBitmapGenerator.uploadedBackgrounds.add(cacheKey);
-            logger_1.default.info(`[CanvasBitmapGenerator] Uploading NEW background to printer: ${bgName} (${staticCompressed.length} chars)`);
-        }
-        else {
-            logger_1.default.info(`[CanvasBitmapGenerator] CACHE HIT — background already in printer: ${bgName}`);
-        }
+        // ── Assemble ZPL ─────────────────────────────────────────────
+        let zpl = staticDgCommand; // empty on inline path
         zpl += '^XA\n';
         zpl += `^PW${printWidth}\n`;
         zpl += `^LL${labelLength}\n`;
@@ -205,8 +422,13 @@ class CanvasBitmapGenerator {
             zpl += `^MD${options.darkness}\n`;
         if (options.printSpeed !== undefined)
             zpl += `^PR${options.printSpeed}\n`;
-        // Recall Background
-        zpl += `^FO0,0^XG${bgName},1,1^FS\n`;
+        // Recall Background (RAM path) or embed it inline (^GFA path).
+        if (cacheMode === 'inline') {
+            zpl += inlineGfaCommand;
+        }
+        else {
+            zpl += `^FO0,0^XG${bgName},1,1^FS\n`;
+        }
         // Overlay Per-Element Dynamic Text Clips
         let dynamicClipTotalSize = 0;
         for (const clip of dynamicClipCommands) {
@@ -220,17 +442,29 @@ class CanvasBitmapGenerator {
         zpl += '^XZ';
         const buf = Buffer.from(zpl, 'utf-8');
         const t5 = Date.now();
-        logger_1.default.info(`[CanvasBitmapGenerator] Timing: static=${t3 - t2}ms clips=${t4 - t3}ms zpl=${t5 - t4}ms TOTAL=${t5 - t0}ms`);
-        logger_1.default.info(`[CanvasBitmapGenerator] Payload: BG=${staticCompressed.length}chars (cached=${CanvasBitmapGenerator.uploadedBackgrounds.has(cacheKey)}), Clips=${dynamicClipCommands.length}x (${dynamicClipTotalSize}chars), BC=${barcodeCommands.length}, TOTAL=${buf.length}bytes`);
-        // ── DEBUG: Dump ZPL to file ──────────────────────────────────
-        try {
-            const fs = require('fs');
-            const debugPath = path_1.default.join(electron_1.app.getPath('logs'), `debug_label_${Date.now()}.zpl`);
-            fs.writeFileSync(debugPath, zpl);
-            logger_1.default.info(`[CanvasBitmapGenerator] DEBUG: Dumped generated ZPL to ${debugPath}`);
+        let bgStatus;
+        if (cacheMode === 'inline') {
+            bgStatus = inlineFromCache
+                ? `INLINE CACHED[${printerId}] ${staticCompressedLen}c`
+                : `INLINE RENDER ${staticCompressedLen}c [${printerId}]`;
         }
-        catch (e) {
-            logger_1.default.error(`[CanvasBitmapGenerator] DEBUG: Failed to dump ZPL`, e);
+        else if (cacheDisabled) {
+            bgStatus = `RAM UPLOAD ${staticCompressedLen}c (cache-disabled)`;
+        }
+        else {
+            bgStatus = bgCached ? `RAM CACHED[${printerId}]` : `RAM UPLOAD ${staticCompressedLen}c [${printerId}]`;
+        }
+        logger_1.default.info(`[CanvasBitmapGenerator] Timing: static=${t3 - t2}ms clips=${t4 - t3}ms zpl=${t5 - t4}ms TOTAL=${t5 - t0}ms BG=${bgStatus} clips=${dynamicClipCommands.length}x(${dynamicClipTotalSize}c) bc=${barcodeCommands.length} buf=${buf.length}B`);
+        // Optional ZPL dump (off by default — set LABELPILOT_DEBUG_ZPL=1 to enable)
+        if (process.env.LABELPILOT_DEBUG_ZPL === '1') {
+            try {
+                const fs = require('fs');
+                const debugPath = path_1.default.join(electron_1.app.getPath('logs'), `debug_label_${Date.now()}.zpl`);
+                fs.promises.writeFile(debugPath, zpl).catch(() => { });
+            }
+            catch (e) {
+                logger_1.default.error(`[CanvasBitmapGenerator] DEBUG: Failed to dump ZPL`, e);
+            }
         }
         return buf;
     }
@@ -303,7 +537,6 @@ class CanvasBitmapGenerator {
         else {
             ctx.textAlign = 'left';
         }
-        console.log(`[CanvasBitmapGenerator] Drawing element "${el.id}" at (${x}, ${y}) w=${w} h=${h}. Text: "${text.substring(0, 30)}..."`);
         // Draw at x=0 relative to the translated origin
         ctx.save();
         ctx.translate(textX, y);
@@ -391,17 +624,17 @@ class CanvasBitmapGenerator {
             ctx.stroke();
         }
     }
-    imageCache = new Map();
+    static imageCache = new Map();
     async drawBarcodeImage(ctx, el, scaleX, scaleY) {
         if (!el.imageData)
             return;
         const { loadImage } = require('@napi-rs/canvas');
         const src = `data:image/png;base64,${el.imageData}`;
         try {
-            let img = this.imageCache.get(src);
+            let img = CanvasBitmapGenerator.imageCache.get(src);
             if (!img) {
                 img = await loadImage(src);
-                this.imageCache.set(src, img);
+                CanvasBitmapGenerator.imageCache.set(src, img);
             }
             const x = Math.round(el.x * scaleX);
             const y = Math.round(el.y * scaleY);
@@ -414,44 +647,37 @@ class CanvasBitmapGenerator {
         }
     }
     // ═══════════════════════════════════════════════════════════════════
-    //  BARCODE — Native ZPL commands (from ZplGenerator)
-    //  This gives pixel-perfect barcodes without any external library.
+    //  BARCODE — Hybrid: native ZPL commands for the universal set,
+    //  bwip-js → ^GFA raster for everything else (GS1, DataBar, PDF417,
+    //  Aztec, exotic 1D). Native = fast + sharp (printer firmware); raster
+    //  = identical to the renderer/preview and portable to any ZPL printer.
     // ═══════════════════════════════════════════════════════════════════
-    processBarcodeAsZpl(el, data, scaleX, scaleY) {
-        const bcVal = this.processText(el.value || el.text || '', data);
-        logger_1.default.info(`[CanvasBitmapGenerator] Barcode resolve: el.value="${el.value}" el.text="${el.text}" -> bcVal="${bcVal}" | data.barcode="${data.barcode}" data.article="${data.article}" data['Код ШК']="${data['Код ШК']}"`);
-        if (!bcVal)
+    /**
+     * Route a barcode element to the native-ZPL or raster path and return its ZPL.
+     * NATIVE_SAFE symbologies without GS1 AIs → native command; all else → ^GFA raster.
+     */
+    async renderBarcode(el, data, scaleX, scaleY) {
+        const value = this.processText(el.value || el.text || '', data);
+        if (!value)
             return '';
+        const bcid = (0, barcodeTypes_1.normalizeBarcodeType)(el.barcodeType);
+        if ((0, barcodeTypes_1.shouldRasterizeBarcode)(bcid, value)) {
+            return await this.renderBarcodeGfa(el, bcid, value, scaleX, scaleY);
+        }
+        return this.nativeBarcodeZpl(el, bcid, value, scaleX, scaleY);
+    }
+    /**
+     * Emit a native ZPL barcode command. Only called for the universal NATIVE_SAFE
+     * symbology set (code128, ean13, ean8, upca, upce, qrcode, datamatrix) — every
+     * one of these has a command supported across Zebra / TSC / Honeywell ZPL.
+     */
+    nativeBarcodeZpl(el, bcid, bcVal, scaleX, scaleY) {
         const x = Math.round(el.x * scaleX);
         const y = Math.round(el.y * scaleY);
         const width = Math.round(el.w * scaleX);
         const height = Math.round(el.h * scaleY);
-        const type = (el.barcodeType || 'code128').toLowerCase();
-        /**
-         * Module Width (mw) Calculation:
-         * EAN-13: 95 modules + room for quiet zones (standard ~115 modules total).
-         */
-        let moduleWidth = el.moduleWidth || 2;
-        if (width > 0) {
-            if (type.includes('ean13')) {
-                // EAN-13: 95 modules. Since the designer now snaps to 95-module multiples, 
-                // we trust the width and use Math.round to get the intended mw.
-                const bestMw = Math.round(width / 95);
-                if (bestMw > 0)
-                    moduleWidth = bestMw;
-            }
-            else if (type.includes('128')) {
-                // Code 128: ~11 modules per char + quiet zones
-                const estimatedModules = bcVal.length * 11 + 22;
-                const bestMw = Math.floor(width / estimatedModules);
-                if (bestMw > 0)
-                    moduleWidth = bestMw;
-            }
-        }
-        logger_1.default.info(`[CanvasBitmapGenerator] Barcode "${el.id}" (${type}): ` +
-            `box_h=${el.h} -> dots_h=${height}, box_w=${el.w} -> dots_w=${width}, ` +
-            `mw=${moduleWidth}, scales=(${scaleX.toFixed(2)},${scaleY.toFixed(2)}), val="${bcVal}"`);
-        // Rotation mapping
+        const showText = el.showText ? 'Y' : 'N';
+        // Rotation mapping (N=0, R=90, I=180, B=270)
         let orient = 'N';
         const rot = el.rotation || 0;
         if (rot === 90)
@@ -460,33 +686,180 @@ class CanvasBitmapGenerator {
             orient = 'I';
         else if (rot === 270)
             orient = 'B';
+        // Module width: fit the symbology's module count into the element width.
+        let moduleWidth = el.moduleWidth || 2;
+        const fitModules = (modules) => {
+            if (width > 0 && modules > 0) {
+                const best = Math.round(width / modules);
+                if (best > 0)
+                    moduleWidth = best;
+            }
+        };
         let cmd = `^FO${x},${y}`;
-        if (type.includes('code128')) {
-            const showText = el.showText ? 'Y' : 'N';
-            cmd += `^BY${moduleWidth},3.0,${height}`;
-            cmd += `^BC${orient},${height},${showText},N,N^FD${bcVal}^FS\n`;
-        }
-        else if (type.includes('qr') || type === 'gs-1') {
-            const mag = el.moduleWidth || Math.max(3, Math.round(scaleX * 2));
-            cmd += `^BQ${orient},2,${mag}`;
-            cmd += `^FDQA,${bcVal}^FS\n`;
-        }
-        else if (type.includes('ean13') || type.includes('ean13_kz')) {
-            const showText = el.showText ? 'Y' : 'N';
-            cmd += `^BY${moduleWidth},3.0,${height}`;
-            cmd += `^BE${orient},${height},${showText},N^FD${bcVal}^FS\n`;
-        }
-        else if (type.includes('datamatrix')) {
-            const mag = el.moduleWidth || Math.max(3, Math.round(scaleX * 2));
-            cmd += `^BX${orient},${mag},200`;
-            cmd += `^FD${bcVal}^FS\n`;
-        }
-        else {
-            const showText = el.showText ? 'Y' : 'N';
-            cmd += `^BY${moduleWidth},3.0,${height}`;
-            cmd += `^BC${orient},${height},${showText},N,N^FD${bcVal}^FS\n`;
+        switch (bcid) {
+            case 'code128': {
+                if (width > 0) {
+                    const estimatedModules = bcVal.length * 11 + 22;
+                    const best = Math.floor(width / estimatedModules);
+                    if (best > 0)
+                        moduleWidth = best;
+                }
+                cmd += `^BY${moduleWidth},3.0,${height}`;
+                cmd += `^BC${orient},${height},${showText},N,N^FD${bcVal}^FS\n`;
+                break;
+            }
+            case 'ean13': {
+                fitModules(95);
+                cmd += `^BY${moduleWidth},3.0,${height}`;
+                cmd += `^BE${orient},${height},${showText},N^FD${bcVal}^FS\n`;
+                break;
+            }
+            case 'ean8': {
+                fitModules(67);
+                cmd += `^BY${moduleWidth},3.0,${height}`;
+                cmd += `^B8${orient},${height},${showText},N^FD${bcVal}^FS\n`;
+                break;
+            }
+            case 'upca': {
+                fitModules(95);
+                cmd += `^BY${moduleWidth},3.0,${height}`;
+                cmd += `^BU${orient},${height},${showText},N,Y^FD${bcVal}^FS\n`;
+                break;
+            }
+            case 'upce': {
+                fitModules(51);
+                cmd += `^BY${moduleWidth},3.0,${height}`;
+                cmd += `^B9${orient},${height},${showText},N,Y^FD${bcVal}^FS\n`;
+                break;
+            }
+            case 'qrcode': {
+                const mag = el.moduleWidth || Math.max(3, Math.round(scaleX * 2));
+                cmd += `^BQ${orient},2,${mag}`;
+                cmd += `^FDQA,${bcVal}^FS\n`;
+                break;
+            }
+            case 'datamatrix': {
+                const mag = el.moduleWidth || Math.max(3, Math.round(scaleX * 2));
+                cmd += `^BX${orient},${mag},200`;
+                cmd += `^FD${bcVal}^FS\n`;
+                break;
+            }
+            default: {
+                // Defensive — the router only sends NATIVE_SAFE here.
+                cmd += `^BY${moduleWidth},3.0,${height}`;
+                cmd += `^BC${orient},${height},${showText},N,N^FD${bcVal}^FS\n`;
+            }
         }
         return cmd;
+    }
+    /**
+     * Raster path: render the barcode with bwip-js (same engine/options as the
+     * renderer preview), scale it into the element box, and emit a ^GFA bitmap.
+     * Portable to any ZPL printer and supports the full bwip-js symbology set.
+     * Result is cached by (bcid|value|size|text|rotation).
+     */
+    async renderBarcodeGfa(el, bcid, value, scaleX, scaleY) {
+        const x = Math.round(el.x * scaleX);
+        const y = Math.round(el.y * scaleY);
+        const w = Math.max(1, Math.round(el.w * scaleX));
+        const h = Math.max(1, Math.round(el.h * scaleY));
+        const rotation = el.rotation || 0;
+        const showText = !!el.showText;
+        const cacheKey = `${bcid}|${value}|${w}x${h}|t${showText ? 1 : 0}|r${rotation}`;
+        const cached = CanvasBitmapGenerator.barcodeGfaCache.get(cacheKey);
+        if (cached !== undefined)
+            return cached;
+        try {
+            const png = await this.rasterizeBarcodePng(bcid, value, showText);
+            const { loadImage } = require('@napi-rs/canvas');
+            const img = await loadImage(png);
+            // For 90/270 the on-label bounding box swaps to h×w (same approach as text clips).
+            let clipW = w, clipH = h, foX = x, foY = y;
+            if (rotation === 90 || rotation === 270) {
+                clipW = h;
+                clipH = w;
+                const cx = x + w / 2, cy = y + h / 2;
+                foX = Math.round(cx - clipW / 2);
+                foY = Math.round(cy - clipH / 2);
+            }
+            const canvas = (0, canvas_1.createCanvas)(clipW, clipH);
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#FFFFFF';
+            ctx.fillRect(0, 0, clipW, clipH);
+            ctx.imageSmoothingEnabled = false; // keep bars/cells crisp when scaling
+            if (rotation) {
+                ctx.translate(clipW / 2, clipH / 2);
+                ctx.rotate((rotation * Math.PI) / 180);
+                ctx.translate(-clipW / 2, -clipH / 2);
+                if (rotation === 90 || rotation === 270) {
+                    const offX = (clipW - w) / 2, offY = (clipH - h) / 2;
+                    ctx.drawImage(img, offX, offY, w, h);
+                }
+                else {
+                    ctx.drawImage(img, 0, 0, clipW, clipH); // 180°: same dimensions
+                }
+            }
+            else {
+                ctx.drawImage(img, 0, 0, w, h);
+            }
+            const imageData = ctx.getImageData(0, 0, clipW, clipH);
+            const bytesPerRow = Math.ceil(clipW / 8);
+            const mono = this.rgbaToMono(imageData.data, clipW, clipH, bytesPerRow);
+            const compressed = this.compressZplRLE(mono, bytesPerRow, clipH);
+            const totalBytes = bytesPerRow * clipH;
+            const result = `^FO${Math.max(0, foX)},${Math.max(0, foY)}^GFA,${totalBytes},${totalBytes},${bytesPerRow},${compressed}^FS\n`;
+            CanvasBitmapGenerator.cacheBarcodeGfa(cacheKey, result);
+            return result;
+        }
+        catch (e) {
+            logger_1.default.error(`[CanvasBitmapGenerator] barcode raster failed for bcid="${bcid}" value="${value}":`, e);
+            return ''; // Never emit a wrong-but-scannable fallback — skip instead.
+        }
+    }
+    /**
+     * Rasterize a barcode to a PNG buffer via bwip-js (node build). Mirrors the
+     * renderer's option set and progressive-fallback chain so the printed bitmap
+     * matches the on-screen preview exactly.
+     */
+    async rasterizeBarcodePng(bcid, value, showText) {
+        const bwip = CanvasBitmapGenerator.getBwip();
+        const parse = (0, barcodeTypes_1.needsGs1Parse)(bcid, value);
+        const oneD = ['code128', 'gs1-128', 'ean13', 'ean8', 'upca', 'upce', 'interleaved2of5', 'code39'];
+        const opts = {
+            bcid,
+            text: value,
+            scale: 3,
+            includetext: showText,
+            textxalign: 'center',
+            parse,
+            backgroundcolor: 'FFFFFF',
+            barcolor: '000000',
+        };
+        if (oneD.includes(bcid))
+            opts.height = 15;
+        try {
+            return await bwip.toBuffer(opts);
+        }
+        catch (firstErr) {
+            logger_1.default.warn(`[CanvasBitmapGenerator] bwip-js primary render failed for ${bcid} "${value}": ${firstErr}`);
+            const clean = value.replace(/[()]/g, '');
+            let fallback = 'code128';
+            if (bcid.includes('matrix'))
+                fallback = 'datamatrix';
+            else if (bcid.includes('qr'))
+                fallback = 'qrcode';
+            try {
+                return await bwip.toBuffer({ ...opts, bcid: fallback, text: clean, parse: false });
+            }
+            catch (secondErr) {
+                logger_1.default.warn(`[CanvasBitmapGenerator] bwip-js fallback ${fallback} failed: ${secondErr} — using code128`);
+                return await bwip.toBuffer({
+                    bcid: 'code128', text: clean, scale: 3, height: 15,
+                    includetext: showText, textxalign: 'center',
+                    backgroundcolor: 'FFFFFF', barcolor: '000000',
+                });
+            }
+        }
     }
     // ═══════════════════════════════════════════════════════════════════
     //  Monochrome conversion (improved threshold for thermal printers)
@@ -512,45 +885,88 @@ class CanvasBitmapGenerator {
         }
         return mono;
     }
+    /**
+     * Single-pass mono conversion + bounding box. Used for dynamic text clips
+     * where we want to auto-crop empty borders. Avoids a second full-pixel scan.
+     */
+    rgbaToMonoWithBBox(rgba, width, height, bytesPerRow) {
+        const mono = new Uint8Array(bytesPerRow * height);
+        let minRow = height, maxRow = -1, minCol = width, maxCol = -1;
+        for (let row = 0; row < height; row++) {
+            const rowOffset = row * bytesPerRow;
+            const rgbaRowOffset = row * width * 4;
+            let rowHadPixel = false;
+            let rowMinCol = width;
+            let rowMaxCol = -1;
+            for (let col = 0; col < width; col++) {
+                const idx = rgbaRowOffset + col * 4;
+                if (rgba[idx + 3] < 128)
+                    continue;
+                const lum = (rgba[idx] * 77 + rgba[idx + 1] * 150 + rgba[idx + 2] * 29) >> 8;
+                if (lum <= 180) {
+                    mono[rowOffset + (col >> 3)] |= (0x80 >> (col & 7));
+                    rowHadPixel = true;
+                    if (col < rowMinCol)
+                        rowMinCol = col;
+                    if (col > rowMaxCol)
+                        rowMaxCol = col;
+                }
+            }
+            if (rowHadPixel) {
+                if (row < minRow)
+                    minRow = row;
+                if (row > maxRow)
+                    maxRow = row;
+                if (rowMinCol < minCol)
+                    minCol = rowMinCol;
+                if (rowMaxCol > maxCol)
+                    maxCol = rowMaxCol;
+            }
+        }
+        return { mono, minRow, maxRow, minCol, maxCol };
+    }
     // ═══════════════════════════════════════════════════════════════════
     //  ZPL Compression (Run-Length Encoding for ^GFA)
     // ═══════════════════════════════════════════════════════════════════
     compressZplRLE(mono, bytesPerRow, height) {
-        let result = '';
+        const out = [];
         let prevRowHex = '';
         for (let row = 0; row < height; row++) {
             const offset = row * bytesPerRow;
-            const rowBytes = mono.subarray(offset, offset + bytesPerRow);
-            // Convert row to hex string
+            // Build the row hex (via the byte→hex LUT) and detect all-white / all-black
+            // in the SAME pass — avoids both per-byte toString(16) and a second .every() scan.
             let rowHex = '';
-            for (let i = 0; i < rowBytes.length; i++) {
-                rowHex += rowBytes[i].toString(16).padStart(2, '0').toUpperCase();
+            let allZero = true;
+            let allOnes = true;
+            for (let i = 0; i < bytesPerRow; i++) {
+                const b = mono[offset + i];
+                rowHex += BYTE_HEX[b];
+                if (b !== 0)
+                    allZero = false;
+                if (b !== 0xFF)
+                    allOnes = false;
             }
-            // Check special cases
             if (row > 0 && rowHex === prevRowHex) {
-                result += ':'; // Same as previous
+                out.push(':'); // Same as previous row
                 continue;
             }
-            // Check all zeros (white row)
-            if (rowBytes.every(b => b === 0)) {
-                result += ',';
+            if (allZero) {
+                out.push(',');
                 prevRowHex = rowHex;
                 continue;
-            }
-            // Check all ones (black row)
-            if (rowBytes.every(b => b === 0xFF)) {
-                result += '!';
+            } // white row
+            if (allOnes) {
+                out.push('!');
                 prevRowHex = rowHex;
                 continue;
-            }
-            // RLE compress the hex string
-            result += this.compressRowRLE(rowHex);
+            } // black row
+            out.push(this.compressRowRLE(rowHex));
             prevRowHex = rowHex;
         }
-        return result;
+        return out.join('');
     }
     compressRowRLE(hex) {
-        let result = '';
+        const out = [];
         let i = 0;
         while (i < hex.length) {
             const ch = hex[i];
@@ -559,14 +975,14 @@ class CanvasBitmapGenerator {
                 count++;
             }
             if (count >= 2) {
-                result += this.encodeRepeatCount(count) + ch;
+                out.push(this.encodeRepeatCount(count), ch);
             }
             else {
-                result += ch;
+                out.push(ch);
             }
             i += count;
         }
-        return result;
+        return out.join('');
     }
     encodeRepeatCount(count) {
         let result = '';
@@ -601,6 +1017,18 @@ class CanvasBitmapGenerator {
         const text = this.processText(el.text || '', data);
         if (!text)
             return '';
+        // Cache the final ^GFA command per (element identity + substituted text + scale).
+        // Repeated values (dates, articles, often weights) become a string lookup instead
+        // of a canvas raster + mono + RLE — the main steady-state CPU cost on a weak machine.
+        const cacheKey = `${el.id}|${text}|${el.x},${el.y},${el.w},${el.h}|${el.fontSize}|${el.fontFamily}|${el.fontWeight}|${el.fontStyle}|${el.textAlign}|${el.verticalAlign}|${el.rotation}|${scaleX.toFixed(4)}x${scaleY.toFixed(4)}`;
+        const cached = CanvasBitmapGenerator.clipGfaCache.get(cacheKey);
+        if (cached !== undefined)
+            return cached;
+        const result = this.renderDynamicTextClipUncached(el, text, scaleX, scaleY);
+        CanvasBitmapGenerator.cacheClipGfa(cacheKey, result);
+        return result;
+    }
+    renderDynamicTextClipUncached(el, text, scaleX, scaleY) {
         // Element position and size in printer dots
         const x = Math.round(el.x * scaleX);
         const y = Math.round(el.y * scaleY);
@@ -655,34 +1083,15 @@ class CanvasBitmapGenerator {
         // Convert to mono
         const imageData = ctx.getImageData(0, 0, clipW, clipH);
         const clipBytesPerRow = Math.ceil(clipW / 8);
-        const mono = this.rgbaToMono(imageData.data, clipW, clipH, clipBytesPerRow);
-        // ── Auto-crop: trim empty rows & columns ──────────────────
-        // Find bounding box of actual content within the clip
-        let minRow = clipH, maxRow = -1;
-        let minCol = clipW, maxCol = -1;
-        for (let row = 0; row < clipH; row++) {
-            const rowOffset = row * clipBytesPerRow;
-            for (let col = 0; col < clipW; col++) {
-                if (mono[rowOffset + (col >> 3)] & (0x80 >> (col & 7))) {
-                    if (row < minRow)
-                        minRow = row;
-                    if (row > maxRow)
-                        maxRow = row;
-                    if (col < minCol)
-                        minCol = col;
-                    if (col > maxCol)
-                        maxCol = col;
-                }
-            }
-        }
+        const { mono, minRow: bbMinRow, maxRow: bbMaxRow, minCol: bbMinCol, maxCol: bbMaxCol } = this.rgbaToMonoWithBBox(imageData.data, clipW, clipH, clipBytesPerRow);
         // Skip if empty
-        if (maxRow < 0)
+        if (bbMaxRow < 0)
             return '';
         // Add 1px padding to avoid edge clipping
-        minRow = Math.max(0, minRow - 1);
-        maxRow = Math.min(clipH - 1, maxRow + 1);
-        minCol = Math.max(0, minCol - 1);
-        maxCol = Math.min(clipW - 1, maxCol + 1);
+        const minRow = Math.max(0, bbMinRow - 1);
+        const maxRow = Math.min(clipH - 1, bbMaxRow + 1);
+        const minCol = Math.max(0, bbMinCol - 1);
+        const maxCol = Math.min(clipW - 1, bbMaxCol + 1);
         const cropW = maxCol - minCol + 1;
         const cropH = maxRow - minRow + 1;
         const cropBytesPerRow = Math.ceil(cropW / 8);
@@ -701,8 +1110,6 @@ class CanvasBitmapGenerator {
         const compressed = this.compressZplRLE(croppedMono, cropBytesPerRow, cropH);
         const adjustedX = Math.max(0, foX + minCol);
         const adjustedY = Math.max(0, foY + minRow);
-        const origBytes = clipBytesPerRow * clipH;
-        logger_1.default.info(`[CanvasBitmapGenerator] Clip "${el.id}": ${clipW}x${clipH} (${origBytes}B) -> CROPPED ${cropW}x${cropH} (${cropTotalBytes}B, ${compressed.length}chars) saved ${Math.round((1 - cropTotalBytes / origBytes) * 100)}%`);
         return `^FO${adjustedX},${adjustedY}^GFA,${cropTotalBytes},${cropTotalBytes},${cropBytesPerRow},${compressed}^FS\n`;
     }
     /**

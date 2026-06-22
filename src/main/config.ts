@@ -20,8 +20,10 @@ export interface ScaleConfig {
 const DEFAULT_CONFIG: ScaleConfig = {
     type: 'simulator',
     protocolId: 'simulator',
-    pollingInterval: 500,
-    stabilityCount: 5
+    // "Balanced" preset: ~1s perceived stabilization.
+    // User can switch to Fast (450ms) or Accurate (2.5s) in Settings.
+    pollingInterval: 250,
+    stabilityCount: 4
 };
 
 export function getConfigPath(): string {
@@ -93,6 +95,13 @@ export function saveNumberingConfig(config: NumberingConfig): void {
 
 export type ConnectionType = 'tcp' | 'serial' | 'windows_driver';
 export type PrinterProtocol = 'zpl' | 'tspl' | 'image' | 'browser';
+/**
+ * RAM-cache mode for the `image` protocol generator.
+ *  'auto'   — probe the printer once after first print; use RAM if it supports ~DG/R:, else inline.
+ *  'on'     — always use ~DG + R: + ^XG (fastest on Zebra ZPL II, no fallback).
+ *  'off'    — never use ~DG; inline the static layer as ^GFA every time (safest, works on any ZPL-compatible).
+ */
+export type RamCacheMode = 'auto' | 'on' | 'off';
 
 export interface PrinterDeviceConfig {
     id: string;
@@ -117,6 +126,10 @@ export interface PrinterDeviceConfig {
 
     darkness?: number;     // Print darkness (0-30)
     printSpeed?: number;   // Print speed (2-12)
+
+    // RAM-cache mode for `image` protocol. Default: 'auto'.
+    // Switch to 'off' for non-Zebra ZPL-compatible printers that lack ~DG/R: drive.
+    ramCache?: RamCacheMode;
 }
 
 export interface PrinterConfig {
@@ -144,7 +157,7 @@ const DEFAULT_DEVICE_CONFIG: PrinterDeviceConfig = {
 const DEFAULT_PRINTER_CONFIG: PrinterConfig = {
     packPrinter: { ...DEFAULT_DEVICE_CONFIG, id: 'pack_default', name: 'Pack Printer' },
     boxPrinter: { ...DEFAULT_DEVICE_CONFIG, id: 'box_default', name: 'Box Printer' },
-    autoPrintOnStable: false,
+    autoPrintOnStable: true,
     serverIp: '',
     language: 'ru'
 };

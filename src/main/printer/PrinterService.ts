@@ -4,11 +4,16 @@ import type { IConnectionStrategy, PrinterState } from './types';
 import { BrowserWindow } from 'electron';
 import { TcpStrategy, SerialStrategy, SpoolerStrategy } from './strategies';
 import { ZplGenerator, CanvasBitmapGenerator, type LabelDoc, type ILabelGenerator } from './generator';
+import { ramCacheCoordinator } from './ramCacheCoordinator';
 
 class PrinterService {
     private strategies: Map<string, IConnectionStrategy> = new Map();
     private states: Map<string, PrinterState> = new Map();
     private mainWindow: BrowserWindow | null = null;
+
+    // Singleton generators — avoids re-creating per print (and keeps any per-instance caches alive).
+    private zplGenerator: ILabelGenerator = new ZplGenerator();
+    private canvasGenerator: ILabelGenerator = new CanvasBitmapGenerator();
 
     constructor() {
         // Defer initialization to ensure app is ready if needed, 
@@ -35,43 +40,28 @@ class PrinterService {
     }
 
     private initDevice(config: PrinterDeviceConfig) {
-        // 1. Cleanup old strategy if exists
-        if (this.strategies.has(config.id)) {
-            // In a real app we might want to disconnect first
-            const old = this.strategies.get(config.id);
-            old?.disconnect().catch(console.error);
+        const expectedCtor =
+            config.connection === 'tcp' ? TcpStrategy :
+            config.connection === 'serial' ? SerialStrategy :
+            config.connection === 'windows_driver' ? SpoolerStrategy : null;
+
+        const existing = this.strategies.get(config.id) || null;
+        const sameType = !!existing && !!expectedCtor && existing instanceof expectedCtor;
+
+        // Tear down only when the connection TYPE changes (e.g. user switched TCP → Serial).
+        // Same-type changes (IP/port/baud) will be picked up by the next connect(),
+        // and any stale open socket will be replaced by the retry-on-error in sendBuffer.
+        if (existing && !sameType) {
+            existing.disconnect().catch(console.error);
             this.strategies.delete(config.id);
         }
 
-        // 2. Create new strategy
-        let strategy: IConnectionStrategy | null = null;
-
-        switch (config.connection) {
-            case 'tcp':
-                strategy = new TcpStrategy();
-                break;
-            case 'serial':
-                strategy = new SerialStrategy();
-                break;
-            case 'windows_driver':
-                strategy = new SpoolerStrategy();
-                break;
+        if (!sameType && expectedCtor) {
+            this.strategies.set(config.id, new expectedCtor());
         }
 
-        if (strategy) {
-            this.strategies.set(config.id, strategy);
-        }
-
-        // 3. Update State
-        this.updateDeviceState(config.id, {
-            config: config,
-            status: 'disconnected'
-        });
-
-        // 4. Auto-connect if active
-        // if (config.active && strategy) {
-        //     strategy.connect(config).then(...).catch(...);
-        // }
+        const status = sameType && existing!.isConnected() ? 'connected' : 'disconnected';
+        this.updateDeviceState(config.id, { config, status });
     }
 
     private updateDeviceState(id: string, state: PrinterState) {
@@ -143,67 +133,164 @@ class PrinterService {
         }
     }
 
-    public async printLabel(config: PrinterDeviceConfig, doc: LabelDoc, data: any): Promise<void> {
-        const startTotal = performance.now();
-        log.info(`PrinterService: === START PRINTING LABEL ===`);
-        log.info(`PrinterService: Protocol: ${config.protocol}. Printer: ${config.name} (${config.connection})`);
-
-        // 1. Select generator by protocol
-
-        let generator: ILabelGenerator;
-        switch (config.protocol) {
-            case 'image':
-                generator = new CanvasBitmapGenerator();
-                break;
-            case 'zpl':
-            default:
-                generator = new ZplGenerator();
-                break;
+    /**
+     * Eagerly open the connection to a printer. Call when entering a station so the first
+     * label doesn't pay the handshake. No-op if connection is already open or the protocol
+     * is connectionless (Windows spooler).
+     */
+    public async warmupConnection(config: PrinterDeviceConfig): Promise<void> {
+        const strategy = this.getOrCreateStrategy(config);
+        if (!strategy) return;
+        if (strategy.isConnected()) return;
+        try {
+            await strategy.connect(config);
+            this.updateDeviceState(config.id, { config, status: 'connected' });
+        } catch (e) {
+            this.updateDeviceState(config.id, { config, status: 'error', lastError: String(e) });
+            // Don't throw — warmup is best-effort; first real print will retry.
+            log.warn(`PrinterService: warmupConnection failed for ${config.name}: ${e}`);
         }
+    }
 
-        const startGen = performance.now();
-        const buffer = await generator.generate(doc, data, {
+    /**
+     * Pre-upload the static background for a label template (~DG command only).
+     * Does NOT include ^XA…^XZ — the printer just stores the bitmap, no label is printed.
+     * The next real print of this template will hit the BG cache.
+     *
+     * Only meaningful for the 'image' (canvas-bitmap) protocol; no-op otherwise.
+     */
+    public async warmupBackground(config: PrinterDeviceConfig, doc: LabelDoc): Promise<void> {
+        if (config.protocol !== 'image') return; // ZPL/TSPL/browser don't use ~DG caching
+        const cacheMode = ramCacheCoordinator.getDecision(config);
+        // Inline path travels the bitmap in every job — pre-upload is meaningless.
+        if (cacheMode === 'inline') return;
+
+        const gen = this.canvasGenerator as CanvasBitmapGenerator;
+        const dgBuffer = await gen.generateBackgroundUpload(doc, {
             dpi: config.dpi || 203,
             darkness: config.darkness,
             printSpeed: config.printSpeed,
             widthMm: config.widthMm,
-            heightMm: config.heightMm
+            heightMm: config.heightMm,
+            printerId: config.id,
+            cacheMode,
         });
-        const genTime = performance.now() - startGen;
-        log.info(`PrinterService: Label generation took ${genTime.toFixed(2)}ms. Buffer size: ${buffer.length} bytes.`);
+        if (!dgBuffer || dgBuffer.length === 0) return; // Already cached on this printer.
+        await this.sendBuffer(config, dgBuffer);
+    }
 
-        // 2. Send via Strategy
-        let strategy: IConnectionStrategy | null = null;
-        switch (config.connection) {
-            case 'tcp': strategy = new TcpStrategy(); break;
-            case 'serial': strategy = new SerialStrategy(); break;
-            case 'windows_driver': strategy = new SpoolerStrategy(); break;
+    /**
+     * Generate the printer byte stream for a label. CPU-only — does not touch the printer.
+     * Safe to run in parallel with sendBuffer for the previous label (pipelining).
+     */
+    public async generateBuffer(config: PrinterDeviceConfig, doc: LabelDoc, data: any): Promise<Buffer> {
+        const generator = config.protocol === 'image' ? this.canvasGenerator : this.zplGenerator;
+        // For the canvas-bitmap path, ask the coordinator whether this printer
+        // supports the RAM-drive flow. Unknown printers start on 'inline' (safe);
+        // a probe runs after the first print to upgrade to 'ram' if possible.
+        const cacheMode = config.protocol === 'image' ? ramCacheCoordinator.getDecision(config) : undefined;
+        return generator.generate(doc, data, {
+            dpi: config.dpi || 203,
+            darkness: config.darkness,
+            printSpeed: config.printSpeed,
+            widthMm: config.widthMm,
+            heightMm: config.heightMm,
+            // Per-printer BG cache scoping: ensures a hash uploaded to printer A
+            // isn't assumed present on printer B.
+            printerId: config.id,
+            cacheMode,
+        });
+    }
+
+    /**
+     * Send a prepared buffer to the printer over a persistent strategy.
+     * Reuses an existing open connection if available; on send error, reconnects once and retries.
+     *
+     * On reconnect, invalidates this printer's BG cache: a TCP/Serial failure often means
+     * the printer was power-cycled and its RAM-stored ~DG graphics are gone. Clearing the
+     * cache forces the NEXT generated label to include a fresh ~DG, so the printer
+     * self-heals after one possibly-incomplete label.
+     */
+    public async sendBuffer(config: PrinterDeviceConfig, buffer: Buffer): Promise<void> {
+        const strategy = this.getOrCreateStrategy(config);
+        if (!strategy) throw new Error(`PrinterService: invalid connection type "${config.connection}"`);
+
+        try {
+            if (!strategy.isConnected()) {
+                await strategy.connect(config);
+                this.updateDeviceState(config.id, { config, status: 'connected' });
+            }
+            await strategy.send(buffer);
+        } catch (err) {
+            // One reconnect-and-retry. Covers idle TCP sockets closed by the printer/NAT
+            // and serial ports that lost their handle. Also: assume the printer may have
+            // rebooted → invalidate its BG cache so subsequent labels re-upload.
+            log.warn(`PrinterService: send failed, attempting reconnect + retry — ${err}`);
+            try { await strategy.disconnect(); } catch { /* ignore */ }
+            CanvasBitmapGenerator.clearBackgroundCache(config.id);
+            // Printer may have rebooted — its RAM-cache support decision could
+            // also be stale (different firmware/profile reloaded). Re-probe.
+            ramCacheCoordinator.invalidate(config.id);
+            try {
+                await strategy.connect(config);
+                await strategy.send(buffer);
+                this.updateDeviceState(config.id, { config, status: 'connected' });
+            } catch (err2) {
+                this.updateDeviceState(config.id, { config, status: 'error', lastError: String(err2) });
+                try { await strategy.disconnect(); } catch { /* ignore */ }
+                throw err2;
+            }
+        }
+    }
+
+    public async printLabel(config: PrinterDeviceConfig, doc: LabelDoc, data: any): Promise<void> {
+        const startTotal = performance.now();
+        const startGen = performance.now();
+        const buffer = await this.generateBuffer(config, doc, data);
+        const genTime = performance.now() - startGen;
+
+        const startSend = performance.now();
+        await this.sendBuffer(config, buffer);
+        const sendTime = performance.now() - startSend;
+        const totalTime = performance.now() - startTotal;
+        log.info(`PrinterService: ${config.name} gen=${genTime.toFixed(1)}ms send=${sendTime.toFixed(1)}ms total=${totalTime.toFixed(1)}ms buf=${buffer.length}B`);
+
+        // After a successful canvas-bitmap print, kick off a one-shot probe to learn
+        // whether this printer supports ~DG/R:/^XG. Fire-and-forget — never blocks the
+        // hot path. The decision is honored by the NEXT call to generateBuffer().
+        if (config.protocol === 'image') {
+            const strategy = this.strategies.get(config.id);
+            if (strategy) ramCacheCoordinator.maybeProbe(config, strategy);
+        }
+    }
+
+    /**
+     * Returns the cached strategy for this config.id, or creates and caches a new one.
+     * If the cached strategy was for a different connection type, replaces it.
+     */
+    private getOrCreateStrategy(config: PrinterDeviceConfig): IConnectionStrategy | null {
+        let strategy = this.strategies.get(config.id) || null;
+
+        const expectedCtor =
+            config.connection === 'tcp' ? TcpStrategy :
+            config.connection === 'serial' ? SerialStrategy :
+            config.connection === 'windows_driver' ? SpoolerStrategy : null;
+
+        if (!expectedCtor) return null;
+
+        // If we have a strategy but it's the wrong type (config changed), replace it.
+        if (strategy && !(strategy instanceof expectedCtor)) {
+            try { void strategy.disconnect(); } catch { /* ignore */ }
+            strategy = null;
         }
 
         if (!strategy) {
-            log.error(`PrinterService: Invalid connection type: ${config.connection}`);
-            throw new Error('Invalid connection type');
+            strategy = new expectedCtor();
+            this.strategies.set(config.id, strategy);
+            this.updateDeviceState(config.id, { config, status: 'disconnected' });
         }
 
-        try {
-            const startSend = performance.now();
-            await strategy.connect(config);
-            await strategy.send(buffer);
-            const sendTime = performance.now() - startSend;
-            const totalTime = performance.now() - startTotal;
-            log.info(`PrinterService: Sending to printer took ${sendTime.toFixed(2)}ms.`);
-            log.info(`PrinterService: === PRINT SUCCESS (${totalTime.toFixed(2)}ms total) ===`);
-        } catch (err) {
-            log.error(`PrinterService: === PRINT FAILED ===`);
-            log.error(`PrinterService: Error details:`, err);
-            throw err;
-        } finally {
-            try {
-                await strategy.disconnect();
-            } catch (e) {
-                log.error('PrinterService: Error disconnecting strategy', e);
-            }
-        }
+        return strategy;
     }
 }
 

@@ -35,8 +35,8 @@ const Settings = () => {
         baudRate: 9600,
         host: '192.168.1.50',
         port: 8000,
-        pollingInterval: 500,
-        stabilityCount: 5
+        pollingInterval: 250,
+        stabilityCount: 4
     });
 
     const [printers, setPrinters] = useState<PrinterInfo[]>([]);
@@ -61,7 +61,7 @@ const Settings = () => {
             baudRate: 9600,
             dpi: 203
         },
-        autoPrintOnStable: false,
+        autoPrintOnStable: true,
         serverIp: ''
     });
     const [isSyncing, setIsSyncing] = useState(false);
@@ -479,6 +479,34 @@ const Settings = () => {
                                 <p className="mt-2 text-xs text-neutral-500 dark:text-white/40">
                                     {protocols.find(p => p.id === config.protocolId)?.description}
                                 </p>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm text-neutral-600 dark:text-neutral-400 mb-2">{t('settings.stabilityPreset')}</label>
+                                <div className="grid grid-cols-3 gap-2">
+                                    {([
+                                        { id: 'fast',     label: t('settings.presetFast'),     poll: 150, count: 3, hint: '~450ms' },
+                                        { id: 'balanced', label: t('settings.presetBalanced'), poll: 250, count: 4, hint: '~1s' },
+                                        { id: 'accurate', label: t('settings.presetAccurate'), poll: 500, count: 5, hint: '~2.5s' },
+                                    ] as const).map(p => {
+                                        const active = config.pollingInterval === p.poll && config.stabilityCount === p.count;
+                                        return (
+                                            <button
+                                                key={p.id}
+                                                type="button"
+                                                onClick={() => setConfig({ ...config, pollingInterval: p.poll, stabilityCount: p.count })}
+                                                className={`px-3 py-3 rounded-xl border text-sm transition-all ${
+                                                    active
+                                                        ? 'border-emerald-500 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+                                                        : 'border-neutral-200 dark:border-white/10 bg-neutral-50 dark:bg-black/20 text-neutral-700 dark:text-neutral-300 hover:border-emerald-400/50'
+                                                }`}
+                                            >
+                                                <div className="font-semibold">{p.label}</div>
+                                                <div className="text-xs opacity-60 mt-0.5">{p.hint}</div>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
                             </div>
 
                             <div className="grid grid-cols-2 gap-4">

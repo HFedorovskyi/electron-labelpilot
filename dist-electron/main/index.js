@@ -50,6 +50,18 @@ const UpdateService_1 = require("./updater/UpdateService");
 if (require('electron-squirrel-startup')) {
     electron_1.app.quit();
 }
+// ── Weak-POS / low-memory tuning ──────────────────────────────────────────
+// Must run BEFORE app is ready. Opt-in via DISABLE_GPU=true (set by the
+// electron:dev:lowmem script and intended for field/kiosk shortcuts on weak
+// machines with integrated/no GPU). Disabling HW acceleration frees the GPU
+// process (~40-80MB) and avoids software-rasterizer jank; capping V8 old-space
+// trims the heap reservation for a kiosk UI. Default launch is unchanged.
+if (process.env.DISABLE_GPU === 'true' || process.env.DISABLE_GPU === '1') {
+    electron_1.app.disableHardwareAcceleration();
+    const maxOldSpace = process.env.LABELPILOT_MAX_OLD_SPACE || '512';
+    electron_1.app.commandLine.appendSwitch('js-flags', `--max-old-space-size=${maxOldSpace}`);
+    logger_1.default.info(`[Main] Low-memory mode: GPU disabled, V8 old-space capped at ${maxOldSpace}MB`);
+}
 // Global error handler for EPIPE errors which are common in Electron main process
 // when console output pipes are closed unexpectedly.
 process.on('uncaughtException', (err) => {
@@ -66,6 +78,30 @@ process.on('unhandledRejection', (reason, _promise) => {
 });
 let mainWindow = null;
 let workerWindow = null;
+// The hidden worker window is ONLY needed for the legacy 'browser' print protocol
+// (webContents.print). On TCP/Serial/spooler sites it is never used, so we create it
+// lazily (on first browser print / test print) and destroy it after an idle period to
+// free a whole Chromium renderer process (~60-150MB) on weak machines.
+const WORKER_IDLE_MS = 60_000;
+let workerIdleTimer = null;
+function cancelWorkerIdleDestroy() {
+    if (workerIdleTimer) {
+        clearTimeout(workerIdleTimer);
+        workerIdleTimer = null;
+    }
+}
+function scheduleWorkerIdleDestroy() {
+    if (workerIdleTimer)
+        clearTimeout(workerIdleTimer);
+    workerIdleTimer = setTimeout(() => {
+        workerIdleTimer = null;
+        if (workerWindow && !workerWindow.isDestroyed()) {
+            logger_1.default.info('[Worker] idle — destroying hidden print window to free memory');
+            workerWindow.destroy();
+            workerWindow = null;
+        }
+    }, WORKER_IDLE_MS);
+}
 function createWindow() {
     logger_1.default.info('[Main] createWindow called');
     mainWindow = new electron_1.BrowserWindow({
@@ -95,6 +131,7 @@ function createWindow() {
     }
 }
 function createWorkerWindow() {
+    cancelWorkerIdleDestroy();
     workerWindow = new electron_1.BrowserWindow({
         show: false,
         webPreferences: {
@@ -125,7 +162,9 @@ electron_1.app.whenReady().then(() => {
         return getStationInfo();
     });
     createWindow();
-    createWorkerWindow();
+    // NOTE: the hidden worker window is created lazily on first browser-protocol print
+    // (see the 'print-label'/'test-print' handlers). Sites on TCP/Serial/spooler printers
+    // never pay for a second Chromium renderer.
     // Initialize Managers
     scales_1.scaleManager.init();
     // Initialize auto-updater
@@ -186,33 +225,40 @@ electron_1.app.whenReady().then(() => {
         return getContainers();
     });
     // Printing Handlers
-    let printQueue = Promise.resolve();
+    //
+    // Pipelined queues for the PrinterService path (zpl/image/tspl):
+    //   genQueue chains label generation (CPU-only)
+    //   sendQueue chains physical send (I/O), and waits for both the previous send AND its own gen
+    // This lets label N+1 generate in parallel with the send of label N.
+    let genQueue = Promise.resolve();
+    let sendQueue = Promise.resolve();
+    // Browser/webContents.print path stays strictly sequential.
+    let browserPrintQueue = Promise.resolve();
     electron_1.ipcMain.handle('print-label', async (_, options) => {
-        // Queue the print request to ensure sequential processing
-        const result = await (printQueue = printQueue.then(async () => {
+        const { silent, labelDoc, data, printerConfig, printerName } = options;
+        // ── PrinterService path: pipelined gen + send ─────────────────
+        if (printerConfig && typeof printerConfig === 'object' && printerConfig.protocol !== 'browser') {
             const startTime = Date.now();
-            const { silent, labelDoc, data, printerConfig, printerName } = options;
-            // ── DIAGNOSTIC: Log what we received to understand routing ──
-            logger_1.default.info(`[print-label] Routing: protocol=${printerConfig?.protocol}, connection=${printerConfig?.connection}, name=${printerConfig?.name}`);
-            // New Routing Logic: Use PrinterService for all native protocols (zpl, image/hybrid_zpl, tspl)
-            // Fall through to legacy webContents.print() only for "browser" protocol.
-            if (printerConfig && typeof printerConfig === 'object' && printerConfig.protocol !== 'browser') {
-                try {
-                    const { printerService } = await Promise.resolve().then(() => __importStar(require('./printer/PrinterService')));
-                    await printerService.printLabel(printerConfig, labelDoc, data);
-                    const duration = Date.now() - startTime;
-                    logger_1.default.info(`Printed via PrinterService (${printerConfig.protocol}) to ${printerConfig.name} in ${duration}ms`);
-                    return true;
-                }
-                catch (e) {
-                    logger_1.default.error('PrinterService failed:', e);
-                    return false;
-                }
+            const { printerService } = await Promise.resolve().then(() => __importStar(require('./printer/PrinterService')));
+            const myGen = genQueue.then(() => printerService.generateBuffer(printerConfig, labelDoc, data));
+            genQueue = myGen.catch(() => undefined);
+            const mySend = Promise.all([sendQueue, myGen]).then(([, buf]) => printerService.sendBuffer(printerConfig, buf));
+            sendQueue = mySend.catch(() => undefined);
+            try {
+                await mySend;
+                logger_1.default.info(`Printed via PrinterService (${printerConfig.protocol}) to ${printerConfig.name} in ${Date.now() - startTime}ms`);
+                return true;
             }
-            // IMAGE MODE: Use persistent worker window
+            catch (e) {
+                logger_1.default.error('PrinterService failed:', e);
+                return false;
+            }
+        }
+        // ── Legacy browser path: sequential, uses worker window ───────
+        return await (browserPrintQueue = browserPrintQueue.then(async () => {
+            const startTime = Date.now();
             const targetPrinter = printerName || printerConfig?.driverName;
             logger_1.default.info(`Image Mode Printing: Target=${targetPrinter || 'Default'}`);
-            // Ensure window exists (should be created on app ready)
             if (!workerWindow || workerWindow.isDestroyed()) {
                 logger_1.default.info('Worker window missing, recreating...');
                 createWorkerWindow();
@@ -237,20 +283,16 @@ electron_1.app.whenReady().then(() => {
                         else {
                             logger_1.default.error(`Print result: FAILURE (Duration: ${duration}ms) Reason: ${failureReason}`);
                         }
+                        scheduleWorkerIdleDestroy();
                         resolve(success);
                     });
                 };
-                // One-time listener for this specific print job
                 const readyHandler = (_event) => {
-                    // console.log('Received ready-to-print from renderer');
                     electron_1.ipcMain.removeListener('ready-to-print', readyHandler);
                     performPrint();
                 };
                 electron_1.ipcMain.on('ready-to-print', readyHandler);
-                // Wait for load if needed, otherwise send immediately
                 const payload = { labelDoc, data };
-                logger_1.default.info(`[print-label] Sending payload to worker. Data keys: ${Object.keys(data).join(', ')}`);
-                // log.info(`[print-label] Data sample: ${JSON.stringify(data).substring(0, 200)}...`);
                 if (currentWorker.webContents.isLoading()) {
                     logger_1.default.info('Worker is loading, waiting for finish...');
                     currentWorker.webContents.once('did-finish-load', () => {
@@ -260,17 +302,16 @@ electron_1.app.whenReady().then(() => {
                 else {
                     currentWorker.webContents.send('print-data', payload);
                 }
-                // Timeout safety
                 setTimeout(() => {
                     electron_1.ipcMain.removeListener('ready-to-print', readyHandler);
+                    scheduleWorkerIdleDestroy();
                     resolve(false);
-                }, 15000); // 15s timeout
+                }, 15000);
             });
         }).catch(err => {
             logger_1.default.error('Print queue error:', err);
             return false;
         }));
-        return result;
     });
 });
 electron_1.ipcMain.handle('get-printers', async (event) => {
@@ -319,6 +360,50 @@ electron_1.ipcMain.handle('sync-data', async (_, serverIp) => {
 });
 electron_1.ipcMain.handle('get-server-status', () => {
     return server_status_1.serverStatusManager.getStatus();
+});
+// Eager TCP/Serial warmup — call when the user enters a printing station so
+// the first print doesn't pay the connect handshake (~10-50ms LAN, ~100ms serial).
+// Idempotent: a no-op if the socket is already open.
+electron_1.ipcMain.handle('printer:warmup', async (_, args = {}) => {
+    try {
+        const { loadPrinterConfig } = await Promise.resolve().then(() => __importStar(require('./config')));
+        const { printerService } = await Promise.resolve().then(() => __importStar(require('./printer/PrinterService')));
+        const config = loadPrinterConfig();
+        const which = args?.printerIds || ['pack', 'box'];
+        await Promise.allSettled(which.map(async (role) => {
+            const dev = role === 'pack' ? config.packPrinter : config.boxPrinter;
+            if (!dev || dev.protocol === 'browser')
+                return; // Browser path uses worker window, not strategies
+            await printerService.warmupConnection(dev);
+        }));
+        return { ok: true };
+    }
+    catch (e) {
+        logger_1.default.error('[printer:warmup] failed', e);
+        return { ok: false, error: String(e) };
+    }
+});
+// Pre-upload the static background for a label template so the first print of the session
+// is already a cache hit on the printer side. Sends `~DG` only (no `^XA…^XZ`) — the printer
+// stores the bitmap but does NOT print a label. No-op for non-image protocols.
+electron_1.ipcMain.handle('printer:warmup-bg', async (_, args) => {
+    try {
+        const { labelDoc, role = 'pack' } = args || {};
+        if (!labelDoc)
+            return { ok: false, error: 'labelDoc missing' };
+        const { loadPrinterConfig } = await Promise.resolve().then(() => __importStar(require('./config')));
+        const { printerService } = await Promise.resolve().then(() => __importStar(require('./printer/PrinterService')));
+        const config = loadPrinterConfig();
+        const dev = role === 'box' ? config.boxPrinter : config.packPrinter;
+        if (!dev || dev.protocol === 'browser')
+            return { ok: true, skipped: 'non-native protocol' };
+        await printerService.warmupBackground(dev, labelDoc);
+        return { ok: true };
+    }
+    catch (e) {
+        logger_1.default.error('[printer:warmup-bg] failed', e);
+        return { ok: false, error: String(e) };
+    }
 });
 // Printer Config Handlers
 electron_1.ipcMain.handle('get-printer-config', async () => {
@@ -386,6 +471,7 @@ electron_1.ipcMain.handle('test-print', async (_event, config) => {
                     logger_1.default.info('[IPC] test-print: calling webContents.print');
                     currentWorker.webContents.print(printOptions, (success) => {
                         logger_1.default.info(`[IPC] test-print (image) finished in ${Date.now() - startTime}ms. Success: ${success}`);
+                        scheduleWorkerIdleDestroy();
                         resolve({ success });
                     });
                 }
@@ -556,6 +642,33 @@ electron_1.ipcMain.handle('updater:refresh-server-version', async () => {
     await (0, UpdateService_1.refreshServerVersion)();
     return { success: true };
 });
+// --- Print Job Handlers ---
+electron_1.ipcMain.handle('get-print-jobs', async (_, statusFilter) => {
+    const { getPrintJobs } = await Promise.resolve().then(() => __importStar(require('./database')));
+    return getPrintJobs(statusFilter);
+});
+electron_1.ipcMain.handle('update-print-job-progress', async (_, { jobId, printedQty }) => {
+    const { updatePrintJobProgress } = await Promise.resolve().then(() => __importStar(require('./database')));
+    return updatePrintJobProgress(jobId, printedQty);
+});
+electron_1.ipcMain.handle('complete-print-job', async (_, jobId) => {
+    const { completePrintJob } = await Promise.resolve().then(() => __importStar(require('./database')));
+    return completePrintJob(jobId);
+});
+electron_1.ipcMain.handle('delete-print-job', async (_, jobId) => {
+    const { deletePrintJob } = await Promise.resolve().then(() => __importStar(require('./database')));
+    return deletePrintJob(jobId);
+});
+electron_1.ipcMain.handle('import-print-job-file', async () => {
+    const { importPrintJobFile } = await Promise.resolve().then(() => __importStar(require('./print_job')));
+    const result = await importPrintJobFile();
+    if (result.success) {
+        electron_1.BrowserWindow.getAllWindows().forEach(win => {
+            win.webContents.send('print-jobs-updated');
+        });
+    }
+    return result;
+});
 // Import and start Sync Server
 const server_1 = require("./server");
 const CanvasBitmapGenerator_1 = require("./printer/generator/CanvasBitmapGenerator");
@@ -570,6 +683,12 @@ const CanvasBitmapGenerator_1 = require("./printer/generator/CanvasBitmapGenerat
         electron_1.BrowserWindow.getAllWindows().forEach(win => {
             win.webContents.send('data-updated');
         });
+        // If this was a print job, also notify print-jobs-updated
+        if (data?.type === 'print_job') {
+            electron_1.BrowserWindow.getAllWindows().forEach(win => {
+                win.webContents.send('print-jobs-updated');
+            });
+        }
         logger_1.default.info('[Sync] data-updated sent to all windows');
     }
     else {

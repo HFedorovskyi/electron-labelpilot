@@ -90,6 +90,30 @@ function startSyncServer(onSyncComplete) {
                 }
             });
         }
+        else if (normalizedUrl === '/api/print_job' && req.method === 'POST') {
+            let body = '';
+            req.on('data', (chunk) => {
+                body += chunk.toString();
+            });
+            req.on('end', () => {
+                try {
+                    const data = JSON.parse(body);
+                    const { processOnlinePrintJob } = require('./print_job');
+                    const job = processOnlinePrintJob(data);
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: true, job_id: job.job_id }));
+                    // Notify renderer about new job
+                    if (onSyncComplete) {
+                        onSyncComplete({ type: 'print_job', job });
+                    }
+                }
+                catch (err) {
+                    console.error('Print Job Error:', err);
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: err.message }));
+                }
+            });
+        }
         else {
             res.writeHead(404);
             res.end('Not Found');

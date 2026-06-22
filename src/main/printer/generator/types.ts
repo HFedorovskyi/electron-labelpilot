@@ -60,6 +60,13 @@ export interface GeneratorOptions {
     heightMm?: number;
     darkness?: number; // 0-30
     printSpeed?: number; // 2-12
+    // Identifies the physical printer instance — used to scope the BG cache
+    // so a hash uploaded to printer A isn't assumed present on printer B.
+    printerId?: string;
+    // 'ram'    → use ~DG + R: + ^XG (default, Zebra ZPL II).
+    // 'inline' → embed static layer as ^GFA in every job (safe for any ZPL-compatible).
+    // Determined by RamCacheCoordinator; the generator just executes the decision.
+    cacheMode?: 'ram' | 'inline';
 }
 
 export interface ILabelGenerator {

@@ -24,6 +24,19 @@ if (require('electron-squirrel-startup')) {
     app.quit();
 }
 
+// ── Weak-POS / low-memory tuning ──────────────────────────────────────────
+// Must run BEFORE app is ready. Opt-in via DISABLE_GPU=true (set by the
+// electron:dev:lowmem script and intended for field/kiosk shortcuts on weak
+// machines with integrated/no GPU). Disabling HW acceleration frees the GPU
+// process (~40-80MB) and avoids software-rasterizer jank; capping V8 old-space
+// trims the heap reservation for a kiosk UI. Default launch is unchanged.
+if (process.env.DISABLE_GPU === 'true' || process.env.DISABLE_GPU === '1') {
+    app.disableHardwareAcceleration();
+    const maxOldSpace = process.env.LABELPILOT_MAX_OLD_SPACE || '512';
+    app.commandLine.appendSwitch('js-flags', `--max-old-space-size=${maxOldSpace}`);
+    log.info(`[Main] Low-memory mode: GPU disabled, V8 old-space capped at ${maxOldSpace}MB`);
+}
+
 // Global error handler for EPIPE errors which are common in Electron main process
 // when console output pipes are closed unexpectedly.
 process.on('uncaughtException', (err: any) => {
@@ -42,6 +55,29 @@ process.on('unhandledRejection', (reason: any, _promise: Promise<any>) => {
 
 let mainWindow: any = null;
 let workerWindow: BrowserWindow | null = null;
+
+// The hidden worker window is ONLY needed for the legacy 'browser' print protocol
+// (webContents.print). On TCP/Serial/spooler sites it is never used, so we create it
+// lazily (on first browser print / test print) and destroy it after an idle period to
+// free a whole Chromium renderer process (~60-150MB) on weak machines.
+const WORKER_IDLE_MS = 60_000;
+let workerIdleTimer: NodeJS.Timeout | null = null;
+
+function cancelWorkerIdleDestroy() {
+    if (workerIdleTimer) { clearTimeout(workerIdleTimer); workerIdleTimer = null; }
+}
+
+function scheduleWorkerIdleDestroy() {
+    if (workerIdleTimer) clearTimeout(workerIdleTimer);
+    workerIdleTimer = setTimeout(() => {
+        workerIdleTimer = null;
+        if (workerWindow && !workerWindow.isDestroyed()) {
+            log.info('[Worker] idle — destroying hidden print window to free memory');
+            workerWindow.destroy();
+            workerWindow = null;
+        }
+    }, WORKER_IDLE_MS);
+}
 
 function createWindow() {
     log.info('[Main] createWindow called');
@@ -75,6 +111,7 @@ function createWindow() {
 }
 
 function createWorkerWindow() {
+    cancelWorkerIdleDestroy();
     workerWindow = new BrowserWindow({
         show: false,
         webPreferences: {
@@ -113,7 +150,9 @@ app.whenReady().then(() => {
 
 
     createWindow();
-    createWorkerWindow();
+    // NOTE: the hidden worker window is created lazily on first browser-protocol print
+    // (see the 'print-label'/'test-print' handlers). Sites on TCP/Serial/spooler printers
+    // never pay for a second Chromium renderer.
 
     // Initialize Managers
     scaleManager.init();
@@ -191,37 +230,48 @@ app.whenReady().then(() => {
     });
 
     // Printing Handlers
-    let printQueue: Promise<any> = Promise.resolve();
+    //
+    // Pipelined queues for the PrinterService path (zpl/image/tspl):
+    //   genQueue chains label generation (CPU-only)
+    //   sendQueue chains physical send (I/O), and waits for both the previous send AND its own gen
+    // This lets label N+1 generate in parallel with the send of label N.
+    let genQueue: Promise<any> = Promise.resolve();
+    let sendQueue: Promise<any> = Promise.resolve();
+    // Browser/webContents.print path stays strictly sequential.
+    let browserPrintQueue: Promise<any> = Promise.resolve();
 
     ipcMain.handle('print-label', async (_, options) => {
-        // Queue the print request to ensure sequential processing
-        const result = await (printQueue = printQueue.then(async () => {
+        const { silent, labelDoc, data, printerConfig, printerName } = options;
+
+        // ── PrinterService path: pipelined gen + send ─────────────────
+        if (printerConfig && typeof printerConfig === 'object' && printerConfig.protocol !== 'browser') {
             const startTime = Date.now();
-            const { silent, labelDoc, data, printerConfig, printerName } = options;
+            const { printerService } = await import('./printer/PrinterService');
 
-            // ── DIAGNOSTIC: Log what we received to understand routing ──
-            log.info(`[print-label] Routing: protocol=${printerConfig?.protocol}, connection=${printerConfig?.connection}, name=${printerConfig?.name}`);
+            const myGen = genQueue.then(() => printerService.generateBuffer(printerConfig, labelDoc, data));
+            genQueue = myGen.catch(() => undefined);
 
-            // New Routing Logic: Use PrinterService for all native protocols (zpl, image/hybrid_zpl, tspl)
-            // Fall through to legacy webContents.print() only for "browser" protocol.
-            if (printerConfig && typeof printerConfig === 'object' && printerConfig.protocol !== 'browser') {
-                try {
-                    const { printerService } = await import('./printer/PrinterService');
-                    await printerService.printLabel(printerConfig, labelDoc, data);
-                    const duration = Date.now() - startTime;
-                    log.info(`Printed via PrinterService (${printerConfig.protocol}) to ${printerConfig.name} in ${duration}ms`);
-                    return true;
-                } catch (e) {
-                    log.error('PrinterService failed:', e);
-                    return false;
-                }
+            const mySend = Promise.all([sendQueue, myGen]).then(([, buf]) =>
+                printerService.sendBuffer(printerConfig, buf as Buffer)
+            );
+            sendQueue = mySend.catch(() => undefined);
+
+            try {
+                await mySend;
+                log.info(`Printed via PrinterService (${printerConfig.protocol}) to ${printerConfig.name} in ${Date.now() - startTime}ms`);
+                return true;
+            } catch (e) {
+                log.error('PrinterService failed:', e);
+                return false;
             }
+        }
 
-            // IMAGE MODE: Use persistent worker window
+        // ── Legacy browser path: sequential, uses worker window ───────
+        return await (browserPrintQueue = browserPrintQueue.then(async () => {
+            const startTime = Date.now();
             const targetPrinter = printerName || printerConfig?.driverName;
             log.info(`Image Mode Printing: Target=${targetPrinter || 'Default'}`);
 
-            // Ensure window exists (should be created on app ready)
             if (!workerWindow || workerWindow.isDestroyed()) {
                 log.info('Worker window missing, recreating...');
                 createWorkerWindow();
@@ -229,8 +279,6 @@ app.whenReady().then(() => {
 
             return new Promise((resolve) => {
                 const currentWorker = workerWindow!;
-
-
 
                 const performPrint = () => {
                     const printOptions: any = {
@@ -250,23 +298,19 @@ app.whenReady().then(() => {
                         } else {
                             log.error(`Print result: FAILURE (Duration: ${duration}ms) Reason: ${failureReason}`);
                         }
+                        scheduleWorkerIdleDestroy();
                         resolve(success);
                     });
                 };
 
-                // One-time listener for this specific print job
                 const readyHandler = (_event: any) => {
-                    // console.log('Received ready-to-print from renderer');
                     ipcMain.removeListener('ready-to-print', readyHandler);
                     performPrint();
                 };
 
                 ipcMain.on('ready-to-print', readyHandler);
 
-                // Wait for load if needed, otherwise send immediately
                 const payload = { labelDoc, data };
-                log.info(`[print-label] Sending payload to worker. Data keys: ${Object.keys(data).join(', ')}`);
-                // log.info(`[print-label] Data sample: ${JSON.stringify(data).substring(0, 200)}...`);
 
                 if (currentWorker.webContents.isLoading()) {
                     log.info('Worker is loading, waiting for finish...');
@@ -277,18 +321,16 @@ app.whenReady().then(() => {
                     currentWorker.webContents.send('print-data', payload);
                 }
 
-                // Timeout safety
                 setTimeout(() => {
                     ipcMain.removeListener('ready-to-print', readyHandler);
+                    scheduleWorkerIdleDestroy();
                     resolve(false);
-                }, 15000); // 15s timeout
+                }, 15000);
             });
         }).catch(err => {
             log.error('Print queue error:', err);
             return false;
         }));
-
-        return result;
     });
 });
 
@@ -342,6 +384,51 @@ ipcMain.handle('sync-data', async (_, serverIp) => {
 
 ipcMain.handle('get-server-status', () => {
     return serverStatusManager.getStatus();
+});
+
+// Eager TCP/Serial warmup — call when the user enters a printing station so
+// the first print doesn't pay the connect handshake (~10-50ms LAN, ~100ms serial).
+// Idempotent: a no-op if the socket is already open.
+ipcMain.handle('printer:warmup', async (_, args: { printerIds?: ('pack' | 'box')[] } = {}) => {
+    try {
+        const { loadPrinterConfig } = await import('./config');
+        const { printerService } = await import('./printer/PrinterService');
+        const config = loadPrinterConfig();
+        const which = args?.printerIds || ['pack', 'box'];
+
+        await Promise.allSettled(which.map(async (role) => {
+            const dev = role === 'pack' ? config.packPrinter : config.boxPrinter;
+            if (!dev || dev.protocol === 'browser') return; // Browser path uses worker window, not strategies
+            await printerService.warmupConnection(dev);
+        }));
+        return { ok: true };
+    } catch (e) {
+        log.error('[printer:warmup] failed', e);
+        return { ok: false, error: String(e) };
+    }
+});
+
+// Pre-upload the static background for a label template so the first print of the session
+// is already a cache hit on the printer side. Sends `~DG` only (no `^XA…^XZ`) — the printer
+// stores the bitmap but does NOT print a label. No-op for non-image protocols.
+ipcMain.handle('printer:warmup-bg', async (_, args: { labelDoc: any; role?: 'pack' | 'box' }) => {
+    try {
+        const { labelDoc, role = 'pack' } = args || {};
+        if (!labelDoc) return { ok: false, error: 'labelDoc missing' };
+
+        const { loadPrinterConfig } = await import('./config');
+        const { printerService } = await import('./printer/PrinterService');
+        const config = loadPrinterConfig();
+        const dev = role === 'box' ? config.boxPrinter : config.packPrinter;
+
+        if (!dev || dev.protocol === 'browser') return { ok: true, skipped: 'non-native protocol' };
+
+        await printerService.warmupBackground(dev, labelDoc);
+        return { ok: true };
+    } catch (e) {
+        log.error('[printer:warmup-bg] failed', e);
+        return { ok: false, error: String(e) };
+    }
 });
 
 // Printer Config Handlers
@@ -417,6 +504,7 @@ ipcMain.handle('test-print', async (_event, config) => {
                     log.info('[IPC] test-print: calling webContents.print');
                     currentWorker.webContents.print(printOptions, (success) => {
                         log.info(`[IPC] test-print (image) finished in ${Date.now() - startTime}ms. Success: ${success}`);
+                        scheduleWorkerIdleDestroy();
                         resolve({ success });
                     });
                 }

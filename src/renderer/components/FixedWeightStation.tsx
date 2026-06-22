@@ -38,7 +38,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
     const [lastPrinted, setLastPrinted] = useState<{ doc: any, data: any } | null>(null);
     const [stationNumber, setStationNumber] = useState<string | null>(null);
     const [isStable, setIsStable] = useState(false);
-    const [printerConfig, setPrinterConfig] = useState<any>({ packPrinter: '', boxPrinter: '', autoPrintOnStable: false });
+    const [printerConfig, setPrinterConfig] = useState<any>({ packPrinter: '', boxPrinter: '', autoPrintOnStable: true });
     const [isReady, setIsReady] = useState(false);
     const [stableTrigger, setStableTrigger] = useState(0);
     const [batchNumber, setBatchNumber] = useState<string>('');
@@ -52,6 +52,9 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
     const autoPrintFiredRef = useRef(false);
     const isPrintingRef = useRef(false);
     const weightRef = useRef('0.000');
+    // Latest active tab for the mounted-once scale-reading listener (avoids stale closure).
+    const activeTabRef = useRef(activeTab);
+    activeTabRef.current = activeTab;
 
     // --- COUNT MODE STATE ---
     const [packsPerBoxInput, setPacksPerBoxInput] = useState(0);
@@ -237,6 +240,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
     // --- EFFECTS ---
     useEffect(() => {
         const removeReadingListener = window.electron.on('scale-reading', (data: any) => {
+            if (activeTabRef.current !== 'fixedWeight') return; // skip while hidden
             if (data && typeof data === 'object' && 'weight' in data) {
                 const w = typeof data.weight === 'number' ? data.weight : parseFloat(String(data.weight));
                 setWeight(w.toFixed(3)); weightRef.current = w.toFixed(3);
@@ -283,6 +287,23 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
         const rm = window.electron.on('printer-config-updated', (c: any) => setPrinterConfig(c));
         return () => rm();
     }, []);
+
+    // Eagerly open TCP/Serial to configured printers so first label doesn't pay the handshake.
+    // Re-runs when printerConfig changes (new IP, new connection type).
+    useEffect(() => {
+        if (!printerConfig.packPrinter && !printerConfig.boxPrinter) return;
+        window.electron.invoke('printer:warmup', { printerIds: ['pack', 'box'] }).catch(() => { /* best-effort */ });
+    }, [printerConfig]);
+
+    // Pre-upload static backgrounds for the current templates so first print is a cache hit.
+    useEffect(() => {
+        if (labelDoc) {
+            window.electron.invoke('printer:warmup-bg', { labelDoc, role: 'pack' }).catch(() => { /* best-effort */ });
+        }
+        if (boxLabelDoc) {
+            window.electron.invoke('printer:warmup-bg', { labelDoc: boxLabelDoc, role: 'box' }).catch(() => { /* best-effort */ });
+        }
+    }, [labelDoc, boxLabelDoc]);
 
     useEffect(() => {
         window.electron.invoke('get-containers').then(setContainers).catch(console.error);

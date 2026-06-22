@@ -62,6 +62,9 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
     const isPrintingRef = useRef(false);
     const cancelRef = useRef(false);
     const weightRef = useRef('0.000');
+    // Latest active tab for the mounted-once scale-reading listener (avoids stale closure).
+    const activeTabRef = useRef(_props.activeTab);
+    activeTabRef.current = _props.activeTab;
     const kgPrintedQtyRef = useRef(0);
     const autoPrintFiredRef = useRef(false);
 
@@ -115,6 +118,7 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
 
         // Scale listeners
         const removeScaleReading = window.electron.on('scale-reading', (data: any) => {
+            if (activeTabRef.current !== 'printJob') return; // skip while hidden
             if (data && typeof data === 'object' && 'weight' in data) {
                 const w = typeof data.weight === 'number' ? data.weight : parseFloat(String(data.weight));
                 setWeight(w.toFixed(3));
@@ -134,6 +138,22 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
             removeScaleStatus();
         };
     }, []);
+
+    // Eagerly open TCP/Serial to configured printers so first label doesn't pay the handshake.
+    useEffect(() => {
+        if (!printerConfig.packPrinter && !printerConfig.boxPrinter) return;
+        window.electron.invoke('printer:warmup', { printerIds: ['pack', 'box'] }).catch(() => { /* best-effort */ });
+    }, [printerConfig]);
+
+    // Pre-upload static backgrounds for the current templates so first print is a cache hit.
+    useEffect(() => {
+        if (labelDoc) {
+            window.electron.invoke('printer:warmup-bg', { labelDoc, role: 'pack' }).catch(() => { /* best-effort */ });
+        }
+        if (boxLabelDoc) {
+            window.electron.invoke('printer:warmup-bg', { labelDoc: boxLabelDoc, role: 'box' }).catch(() => { /* best-effort */ });
+        }
+    }, [labelDoc, boxLabelDoc]);
 
     // --- SELECT JOB ---
     const selectJob = useCallback(async (job: PrintJobData) => {
@@ -418,10 +438,12 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
 
         const finalData = getLabelData(packWeight, false, undefined, overrides);
         finalData.box_number = recordResult.boxNumber;
-        await window.electron.invoke('print-label', {
+        // Fire-and-forget: UI doesn't depend on print success, and main-process queue preserves order.
+        // Lets this function return as soon as DB is recorded, shaving an IPC roundtrip off perceived latency.
+        window.electron.invoke('print-label', {
             silent: true, labelDoc, data: finalData,
             printerConfig: printerConfig.packPrinter || undefined
-        });
+        }).catch((e: any) => console.error('[printSinglePack] print failed', e));
         setLastPrinted({ doc: labelDoc, data: finalData });
 
         return {

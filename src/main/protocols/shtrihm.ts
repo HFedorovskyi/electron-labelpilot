@@ -20,7 +20,10 @@ export const Shtrih_M: ScaleProtocol = {
             return {
                 weight: parseFloat(match[1]),
                 unit: 'kg',
-                stable: true
+                // This text-extraction parser carries no reliable stability marker, so let
+                // the software stability window (checkStability) decide rather than forcing
+                // "stable" on every reading (which would auto-print an unsettled weight).
+                stable: false
             };
         }
         return null;

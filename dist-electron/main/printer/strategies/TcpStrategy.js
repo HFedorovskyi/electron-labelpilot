@@ -94,5 +94,38 @@ class TcpStrategy {
         // We might want to check if socket is actually writable
         return this.connected && !!this.socket && !this.socket.destroyed;
     }
+    async query(data, timeoutMs) {
+        if (!this.socket || !this.connected)
+            return null;
+        const socket = this.socket;
+        return new Promise((resolve) => {
+            const chunks = [];
+            let settled = false;
+            const finish = (result) => {
+                if (settled)
+                    return;
+                settled = true;
+                socket.removeListener('data', onData);
+                socket.removeListener('error', onError);
+                clearTimeout(timer);
+                resolve(result);
+            };
+            const onData = (buf) => {
+                chunks.push(buf);
+                // Don't resolve eagerly — let the timeout collect the full reply.
+                // Printers may send the response in multiple packets.
+            };
+            const onError = () => finish(null);
+            const timer = setTimeout(() => {
+                finish(chunks.length ? Buffer.concat(chunks) : Buffer.alloc(0));
+            }, timeoutMs);
+            socket.on('data', onData);
+            socket.once('error', onError);
+            socket.write(data, (err) => {
+                if (err)
+                    finish(null);
+            });
+        });
+    }
 }
 exports.TcpStrategy = TcpStrategy;

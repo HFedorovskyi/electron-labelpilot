@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import { Printer, RefreshCw, Box, AlertCircle, X, Hash, Layers, Calendar, Search } from 'lucide-react';
 import { generateBarcode, type BarcodeData } from '../utils/barcodeGenerator';
 import { useTranslation } from '../i18n';
@@ -42,7 +42,7 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
     const [printerConfig, setPrinterConfig] = useState<any>({
         packPrinter: '',
         boxPrinter: '',
-        autoPrintOnStable: false
+        autoPrintOnStable: true
     });
 
     const [isReady, setIsReady] = useState(false);
@@ -61,6 +61,11 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
     const autoPrintFiredRef = useRef(false);
     const isPrintingRef = useRef(false);
     const weightRef = useRef('0.000');
+    // Latest active tab, readable inside the (mounted-once) scale-reading listener without a
+    // stale closure. Lets this station skip weight state updates while it's hidden — all three
+    // stations stay mounted, so without this each reading would re-render all three.
+    const activeTabRef = useRef(activeTab);
+    activeTabRef.current = activeTab;
 
     // --- EFFECTS ---
     useEffect(() => {
@@ -124,7 +129,6 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
         const tareKg = tareGrams / 1000;
 
         const result = Math.max(0, currentWeight - tareKg).toFixed(3);
-        console.log(`DEBUG [getNetWeight]: weight=${weight}, tareKg=${tareKg}, result=${result}`);
         return result;
     };
 
@@ -288,11 +292,6 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
             ...extra
         };
 
-        console.log('DEBUG: Generated Label Data:', dataObj);
-        if (window.electron && window.electron.send) {
-            window.electron.send('log-to-main', `DEBUG Renderer: Data keys: ${Object.keys(dataObj).join(', ')}`);
-        }
-
         // Barcode Generation
         dataObj.barcode = (() => {
             if (packBarcodeTemplate) {
@@ -341,18 +340,12 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
 
 
 
-    // Label Structure Diagnostic
-    useEffect(() => {
-        window.electron.invoke('get-all-labels').then((labels: any) => {
-            window.electron.send('log-to-main', `DEBUG: Full Labels Dump: ${JSON.stringify(labels)}`);
-        }).catch(err => {
-            console.error('Failed to dump labels', err);
-        });
-    }, []);
-
     // Scale, Status, Sync Listeners
     useEffect(() => {
         const removeReadingListener = window.electron.on('scale-reading', (data: any) => {
+            // Skip weight updates while this station is hidden — avoids re-rendering an
+            // off-screen component on every reading. Status/error listeners stay active.
+            if (activeTabRef.current !== 'weighing') return;
             if (data && typeof data === 'object' && 'weight' in data) {
                 const w = typeof data.weight === 'number' ? data.weight : parseFloat(String(data.weight));
                 console.log(`[WeighingStation] Event received: ${w.toFixed(3)} (stable: ${data.stable})`);
@@ -456,6 +449,22 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
 
         return () => removeListener();
     }, []);
+
+    // Eagerly open TCP/Serial to configured printers so first label doesn't pay the handshake.
+    useEffect(() => {
+        if (!printerConfig.packPrinter && !printerConfig.boxPrinter) return;
+        window.electron.invoke('printer:warmup', { printerIds: ['pack', 'box'] }).catch(() => { /* best-effort */ });
+    }, [printerConfig]);
+
+    // Pre-upload static backgrounds for the current templates so first print is a cache hit.
+    useEffect(() => {
+        if (labelDoc) {
+            window.electron.invoke('printer:warmup-bg', { labelDoc, role: 'pack' }).catch(() => { /* best-effort */ });
+        }
+        if (boxLabelDoc) {
+            window.electron.invoke('printer:warmup-bg', { labelDoc: boxLabelDoc, role: 'box' }).catch(() => { /* best-effort */ });
+        }
+    }, [labelDoc, boxLabelDoc]);
 
     // Auto-print on weight stabilization
     // Only reacts to isStable changes (not every weight reading) to avoid blocking React rendering
@@ -924,7 +933,20 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
         setIsProductModalOpen(false);
     };
 
-    console.log('[WeighingStation] Render State:', { weight, isStable, selectedProductName: selectedProduct?.name, containersCount: containers.length });
+    // Display-only counters shown in "Session Stats". Memoized so they don't recompute
+    // (each call runs getFormattedCounter + barcode generation) on every weight tick —
+    // only when the underlying counters/template/config actually change. pack_number and
+    // box_number do not depend on the live weight, so excluding it from deps is correct.
+    const displayPackNumber = useMemo(
+        () => getLabelData().pack_number,
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [totalUnits, stationNumber, labelDoc, numberingConfig, selectedProduct]
+    );
+    const displayBoxNumber = useMemo(
+        () => getLabelData(undefined, true).box_number,
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [totalBoxes, stationNumber, boxLabelDoc, numberingConfig, selectedProduct]
+    );
 
     return (
         <div className="grid grid-cols-12 gap-6 h-full p-4 relative">
@@ -1091,11 +1113,11 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
                         </div>
                         <div className="flex justify-between text-sm py-2 border-b border-neutral-200 dark:border-white/5">
                             <span className="text-neutral-500">{t('ws.packNum')}</span>
-                            <span className="font-mono text-emerald-600 dark:text-emerald-400">{getLabelData().pack_number || '--'}</span>
+                            <span className="font-mono text-emerald-600 dark:text-emerald-400">{displayPackNumber || '--'}</span>
                         </div>
                         <div className="flex justify-between text-sm py-2 border-b border-neutral-200 dark:border-white/5">
                             <span className="text-neutral-500">{t('ws.boxNum')}</span>
-                            <span className="font-mono text-emerald-600 dark:text-emerald-400">{getLabelData(undefined, true).box_number || '--'}</span>
+                            <span className="font-mono text-emerald-600 dark:text-emerald-400">{displayBoxNumber || '--'}</span>
                         </div>
                         <div className="flex justify-between text-sm py-2 border-b border-neutral-200 dark:border-white/5">
                             <span className="text-neutral-500">{t('ws.inBox')}</span>

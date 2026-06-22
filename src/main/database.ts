@@ -16,6 +16,17 @@ export function initDatabase() {
     db = new Database(dbPath);
     log.info('Database instance created');
 
+    // Pragmas for responsiveness on slow eMMC/HDD POS storage. Defaults (rollback journal +
+    // synchronous=FULL) fsync on every commit, adding visible lag to each pack write.
+    //   WAL          → readers don't block the writer; far fewer fsyncs.
+    //   NORMAL       → durable under WAL, no per-commit fsync (safe across app crashes).
+    //   busy_timeout → wait for a lock (e.g. during a sync import) instead of throwing.
+    //   temp_store   → keep temp B-trees in RAM, not on disk.
+    db.pragma('journal_mode = WAL');
+    db.pragma('synchronous = NORMAL');
+    db.pragma('busy_timeout = 5000');
+    db.pragma('temp_store = MEMORY');
+
     // Use a transaction for schema creation to ensure atomicity
     const init = db.transaction(() => {
       db!.exec(`
@@ -106,6 +117,12 @@ export function initDatabase() {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME
       );
+
+      -- Indexes for the per-print hot queries (recordPack / counters / closeBox).
+      -- Without these, every pack does full table scans on pack/boxes that grow unbounded.
+      CREATE INDEX IF NOT EXISTS idx_pack_box_status ON pack(box_id, status);
+      CREATE INDEX IF NOT EXISTS idx_boxes_nom_status ON boxes(nomenclature_id, status);
+      CREATE INDEX IF NOT EXISTS idx_boxes_pallet_status ON boxes(pallete_id, status);
     `);
     });
 

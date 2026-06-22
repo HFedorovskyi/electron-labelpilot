@@ -22,6 +22,15 @@ class ScaleManager {
     recentReadings = [];
     STABILITY_THRESHOLD = 0.005; // deviation
     STABILITY_COUNT = 5;
+    // Dedup/throttle of outbound 'scale-reading' IPC. Identical consecutive readings are
+    // dropped (no renderer re-render when nothing changed); rapid weight-only changes are
+    // capped to ~8 Hz. A stable-flag transition is always sent immediately — it drives
+    // auto-print. This cuts IPC + React re-renders by an order of magnitude on a static load.
+    lastSentWeight = null;
+    lastSentStable = null;
+    lastSentTime = 0;
+    READING_THROTTLE_MS = 120;
+    WEIGHT_EPSILON = 0.0005;
     constructor() {
         this.config = (0, config_1.loadScaleConfig)();
     }
@@ -85,6 +94,14 @@ class ScaleManager {
             }
             this.config = config;
             this.currentProtocol = (0, protocols_1.getProtocol)(config.protocolId);
+            // Apply the user's stability preset (Settings: Fast=3 / Balanced=4 / Accurate=5)
+            // — previously hardcoded to 5, so the preset had no effect. Reset per-session
+            // state so stale readings/dedup don't leak across reconnects.
+            this.STABILITY_COUNT = Math.max(2, config.stabilityCount ?? 4);
+            this.recentReadings = [];
+            this.lastSentWeight = null;
+            this.lastSentStable = null;
+            this.lastSentTime = 0;
             logger_1.default.info(`ScaleManager: [CONNECT] #${myId} Internal type: ${config.type}, Protocol: ${this.currentProtocol.name}`);
             this.emitStatus('reconnecting');
             if (config.type === 'serial') {
@@ -246,7 +263,11 @@ class ScaleManager {
             logger_1.default.info(`ScaleManager: [POLLING] Protocol ${this.currentProtocol.name} does not require polling`);
             return;
         }
-        const interval = this.config?.pollingInterval || 500;
+        // The simulator generates data locally, so decouple it from the real polling
+        // interval and run it slower (≥700ms) — no need to spam 4 IPC/sec on an idle POS.
+        const interval = this.config?.type === 'simulator'
+            ? Math.max(this.config?.pollingInterval || 0, 700)
+            : (this.config?.pollingInterval || 500);
         const cmd = this.currentProtocol.getWeightCommand ? this.currentProtocol.getWeightCommand() : null;
         logger_1.default.info(`ScaleManager: [POLLING] Starting interval: ${interval}ms. Cmd: ${!!cmd}, Window: ${!!this.mainWindow}`);
         this.pollingInterval = setInterval(() => {
@@ -272,7 +293,7 @@ class ScaleManager {
                     };
                     if (this.mainWindow) {
                         this.lastDataTime = Date.now(); // Update watchdog
-                        this.mainWindow.webContents.send('scale-reading', reading);
+                        this.emitReading(reading);
                     }
                     else {
                         // Very important log: why the simulator might look dead
@@ -299,10 +320,30 @@ class ScaleManager {
             }
             const isStable = this.checkStability(reading.weight, reading.stable);
             reading.stable = isStable;
-            this.mainWindow?.webContents.send('scale-reading', reading);
-            // reset status to connecting if handled check is done outside? 
+            this.emitReading(reading);
+            // reset status to connecting if handled check is done outside?
             // no, watchdog handles timeouts.
         }
+    }
+    /**
+     * Send a 'scale-reading' to the renderer only when something meaningful changed,
+     * throttling rapid weight-only updates. Identical readings (very common with a static
+     * load on the platform) are dropped entirely — no IPC, no React re-render.
+     */
+    emitReading(reading) {
+        const now = Date.now();
+        const weightChanged = this.lastSentWeight === null
+            || Math.abs(reading.weight - this.lastSentWeight) > this.WEIGHT_EPSILON;
+        const stableChanged = this.lastSentStable === null || reading.stable !== this.lastSentStable;
+        if (!weightChanged && !stableChanged)
+            return;
+        // Cap weight-only churn to ~8 Hz; a stable-flag transition is never delayed.
+        if (!stableChanged && (now - this.lastSentTime) < this.READING_THROTTLE_MS)
+            return;
+        this.lastSentWeight = reading.weight;
+        this.lastSentStable = reading.stable;
+        this.lastSentTime = now;
+        this.mainWindow?.webContents.send('scale-reading', reading);
     }
     checkStability(weight, protocolReportedStable) {
         this.recentReadings.push(weight);

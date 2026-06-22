@@ -1,6 +1,8 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.MassaK_J = exports.MassaK_A_TB_P = exports.MassaK_Continuous = exports.MassaK_A_TB = exports.MassaK_Lite = exports.MassaK_Protocol1 = exports.MassaK_100 = void 0;
+// Hoisted to module scope so parse() doesn't allocate a new header Buffer on every read.
+const MASSAK_HEADER = Buffer.from([0xF8, 0x55, 0xCE]);
 // Massa-K Protocol 100 (Binary Packet) - Aligned with User Emulator
 // Request: [F8 55 CE] [LEN_L] [LEN_H] [CMD=A0] [CRC_L] [CRC_H] ... (8 bytes total read by emulator)
 // Response: [F8 55 CE] [LEN=7] [CMD=10] [Weight(4)] [Div] [Stable] [CRC(2)]
@@ -32,36 +34,27 @@ exports.MassaK_100 = {
     stopBits: 1,
     getWeightCommand: () => {
         // [F8 55 CE] [LEN_L] [LEN_H] [CMD] [CRC_L] [CRC_H]
-        const header = Buffer.from([0xF8, 0x55, 0xCE]);
         const data = Buffer.from([0x01, 0x00, 0xA0]); // Len=1 (A0), data=[A0]
         const crcValue = calculateCRC16(data);
         const crc = Buffer.alloc(2);
         crc.writeUInt16LE(crcValue);
-        return Buffer.concat([header, data, crc]);
+        return Buffer.concat([MASSAK_HEADER, data, crc]);
     },
     parse: (data) => {
         if (typeof data === 'string')
             return null;
         // Find Header [F8 55 CE]
-        const headerIdx = data.indexOf(Buffer.from([0xF8, 0x55, 0xCE]));
-        if (headerIdx === -1) {
-            // Log if we received data but header is missing
-            if (data.length > 0) {
-                console.log(`MassaK_100: Header not found in ${data.length} bytes`);
-            }
+        const headerIdx = data.indexOf(MASSAK_HEADER);
+        if (headerIdx === -1)
             return null;
-        }
         const pkt = data.subarray(headerIdx);
-        if (pkt.length < 14) {
-            console.log(`MassaK_100: Waiting for more data, current pkt length: ${pkt.length}`);
+        if (pkt.length < 14)
             return null;
-        }
         // Response format: [Header(3)] [Len(2)] [Data(7)] [CRC(2)]
         // Data: [10] [Weight(4LE)] [Div] [Stable]
         const weightRaw = pkt.readInt32LE(3 + 2 + 1); // Skip Header(3), Len(2), Cmd(1)
         const stableFlag = pkt.readUInt8(3 + 2 + 1 + 4 + 1); // Stable byte
         const isStable = stableFlag === 1;
-        console.log(`MassaK_100: Parsed weightRaw=${weightRaw}, stable=${isStable}`);
         return {
             weight: weightRaw / 1000.0,
             unit: 'kg',
@@ -82,8 +75,6 @@ exports.MassaK_Protocol1 = {
         const str = data.toString().trim();
         if (!str)
             return null;
-        // Log raw string for ASCII debugging
-        console.log(`MassaK_Protocol1: Received Raw: "${str}"`);
         // Standard format: "S  +001.234 kg" or "U  -000.500 kg"
         // Regex: [Status][any space][Sign][Weight][any space][Unit]
         const match = str.match(/([SU\?])\s*([+-]?\d+\.\d+)\s*(\w+)?/);
@@ -148,7 +139,10 @@ exports.MassaK_A_TB = {
             return {
                 weight: weightVal,
                 unit: (match[2] || 'kg').toLowerCase(),
-                stable: text.includes('S') || true
+                // Was `|| true` — that forced every reading to "stable", causing auto-print
+                // on an unsettled weight. Trust the protocol's 'S' marker; when absent the
+                // software stability window (checkStability) decides.
+                stable: text.includes('S')
             };
         }
         return null;
@@ -164,7 +158,6 @@ exports.MassaK_Continuous = {
         const str = data.toString().trim();
         if (!str)
             return null;
-        console.log(`MassaK_Continuous: Received Raw: "${str}"`);
         // Try numeric extraction if standard formats fail
         const match = str.match(/([+-]?\d+\.\d+)/);
         if (match) {
@@ -190,13 +183,14 @@ exports.MassaK_A_TB_P = {
         const str = data.toString().trim();
         if (!str)
             return null;
-        console.log(`MassaK_A_TB_P: Received Raw: "${str}"`);
         const match = str.match(/([+-]?\d+\.\d+)/);
         if (match) {
             return {
                 weight: parseFloat(match[1]),
                 unit: 'kg',
-                stable: true
+                // Was hardcoded `true` (auto-print fired on the first reading regardless of
+                // stability). Defer to the 'S' marker / software stability window instead.
+                stable: str.includes('S')
             };
         }
         return null;

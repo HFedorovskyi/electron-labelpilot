@@ -114,6 +114,44 @@ exports.migrations = [
             // SQLite < 3.35 doesn't support DROP COLUMN — columns will remain but be unused
         }
     },
+    {
+        version: 5,
+        description: 'Create print_jobs table for task-based labeling',
+        up(db) {
+            db.exec(`
+                CREATE TABLE IF NOT EXISTS print_jobs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    job_id INTEGER NOT NULL UNIQUE,
+                    nomenclature_id INTEGER NOT NULL,
+                    nomenclature_name TEXT NOT NULL,
+                    nomenclature_article TEXT,
+                    quantity REAL NOT NULL,
+                    quantity_unit TEXT NOT NULL DEFAULT 'pcs',
+                    batch_number TEXT,
+                    printed_qty REAL NOT NULL DEFAULT 0,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    completed_at DATETIME
+                );
+            `);
+            console.log('[Migration v5] Created print_jobs table');
+        },
+        down(db) {
+            db.exec('DROP TABLE IF EXISTS print_jobs;');
+        }
+    },
+    {
+        version: 6,
+        description: 'Add marking_date column to print_jobs table',
+        up(db) {
+            db.exec(`ALTER TABLE print_jobs ADD COLUMN marking_date TEXT;`);
+            console.log('[Migration v6] Added marking_date column to print_jobs');
+        },
+        down(_db) {
+            // SQLite doesn't support DROP COLUMN easily; this is a no-op
+            console.log('[Migration v6 down] No-op for marking_date removal');
+        }
+    },
 ];
 /**
  * Ensures the _migrations tracking table exists.

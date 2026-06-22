@@ -24,6 +24,11 @@ exports.getExportData = getExportData;
 exports.getOpenPalletContent = getOpenPalletContent;
 exports.deletePack = deletePack;
 exports.deleteBox = deleteBox;
+exports.savePrintJob = savePrintJob;
+exports.getPrintJobs = getPrintJobs;
+exports.updatePrintJobProgress = updatePrintJobProgress;
+exports.completePrintJob = completePrintJob;
+exports.deletePrintJob = deletePrintJob;
 const better_sqlite3_1 = __importDefault(require("better-sqlite3"));
 const path_1 = __importDefault(require("path"));
 const electron_1 = require("electron");
@@ -38,6 +43,16 @@ function initDatabase() {
         logger_1.default.info('Initializing database at:', dbPath);
         db = new better_sqlite3_1.default(dbPath);
         logger_1.default.info('Database instance created');
+        // Pragmas for responsiveness on slow eMMC/HDD POS storage. Defaults (rollback journal +
+        // synchronous=FULL) fsync on every commit, adding visible lag to each pack write.
+        //   WAL          → readers don't block the writer; far fewer fsyncs.
+        //   NORMAL       → durable under WAL, no per-commit fsync (safe across app crashes).
+        //   busy_timeout → wait for a lock (e.g. during a sync import) instead of throwing.
+        //   temp_store   → keep temp B-trees in RAM, not on disk.
+        db.pragma('journal_mode = WAL');
+        db.pragma('synchronous = NORMAL');
+        db.pragma('busy_timeout = 5000');
+        db.pragma('temp_store = MEMORY');
         // Use a transaction for schema creation to ensure atomicity
         const init = db.transaction(() => {
             db.exec(`
@@ -128,6 +143,12 @@ function initDatabase() {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME
       );
+
+      -- Indexes for the per-print hot queries (recordPack / counters / closeBox).
+      -- Without these, every pack does full table scans on pack/boxes that grow unbounded.
+      CREATE INDEX IF NOT EXISTS idx_pack_box_status ON pack(box_id, status);
+      CREATE INDEX IF NOT EXISTS idx_boxes_nom_status ON boxes(nomenclature_id, status);
+      CREATE INDEX IF NOT EXISTS idx_boxes_pallet_status ON boxes(pallete_id, status);
     `);
         });
         init();
@@ -667,4 +688,42 @@ function deleteBox(boxId) {
         db.prepare("UPDATE pallet SET weight_netto = ?, weight_brutto = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(newPalletNet, newPalletBrut, pallet.id);
         return { success: true, palletId: pallet.id };
     })();
+}
+// --- Print Jobs ---
+function savePrintJob(job) {
+    const db = initDatabase();
+    db.prepare(`
+    INSERT OR REPLACE INTO print_jobs (job_id, nomenclature_id, nomenclature_name, nomenclature_article, quantity, quantity_unit, batch_number, marking_date, printed_qty, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT printed_qty FROM print_jobs WHERE job_id = ?), 0), COALESCE((SELECT status FROM print_jobs WHERE job_id = ? AND status = 'completed'), 'pending'))
+  `).run(job.job_id, job.nomenclature_id, job.nomenclature_name, job.nomenclature_article || null, job.quantity, job.quantity_unit || 'pcs', job.batch_number || null, job.marking_date || null, job.job_id, job.job_id);
+}
+function getPrintJobs(statusFilter) {
+    const db = initDatabase();
+    if (statusFilter) {
+        return db.prepare('SELECT * FROM print_jobs WHERE status = ? ORDER BY created_at DESC').all(statusFilter);
+    }
+    return db.prepare('SELECT * FROM print_jobs ORDER BY CASE status WHEN \'in_progress\' THEN 0 WHEN \'pending\' THEN 1 WHEN \'completed\' THEN 2 END, created_at DESC').all();
+}
+function updatePrintJobProgress(jobId, printedQty) {
+    const db = initDatabase();
+    const job = db.prepare('SELECT * FROM print_jobs WHERE job_id = ?').get(jobId);
+    if (!job)
+        throw new Error(`Print job #${jobId} not found`);
+    const newPrintedQty = printedQty;
+    const newStatus = newPrintedQty >= job.quantity ? 'completed' : 'in_progress';
+    db.prepare(`
+    UPDATE print_jobs SET printed_qty = ?, status = ?, completed_at = CASE WHEN ? = 'completed' THEN CURRENT_TIMESTAMP ELSE completed_at END
+    WHERE job_id = ?
+  `).run(newPrintedQty, newStatus, newStatus, jobId);
+    return { success: true, status: newStatus, printed_qty: newPrintedQty, quantity: job.quantity };
+}
+function completePrintJob(jobId) {
+    const db = initDatabase();
+    db.prepare("UPDATE print_jobs SET status = 'completed', completed_at = CURRENT_TIMESTAMP WHERE job_id = ?").run(jobId);
+    return { success: true };
+}
+function deletePrintJob(jobId) {
+    const db = initDatabase();
+    db.prepare('DELETE FROM print_jobs WHERE job_id = ?').run(jobId);
+    return { success: true };
 }

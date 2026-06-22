@@ -1,7 +1,7 @@
 {
   "name": "electron-labelpilot",
   "private": true,
-  "version": "1.1.27",
+  "version": "1.2.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/HFedorovskyi/electron-labelpilot.git"
@@ -11,6 +11,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "electron:build": "tsc -p tsconfig.electron.json",
+    "rebuild:electron": "node scripts/rebuild-electron-natives.cjs",
     "electron:dev": "concurrently -k \"vite\" \"tsc -p tsconfig.electron.json -w\" \"set ELECTRON_RUN_AS_NODE=&& electron .\"",
     "electron:dev:lowmem": "concurrently -k \"vite\" \"tsc -p tsconfig.electron.json -w\" \"set DISABLE_GPU=true&& set ELECTRON_RUN_AS_NODE=&& electron .\"",
     "electron:dist": "npm run build && npm run electron:build && electron-builder",
@@ -33,7 +34,12 @@
     "files": [
       "dist-electron/**/*",
       "dist/**/*",
-      "package.json"
+      "package.json",
+      "!dist-electron/main/printer/offscreen.js",
+      "!node_modules/{lucide-react,react,react-dom,scheduler,clsx,tailwind-merge}/**",
+      "!node_modules/better-sqlite3/build/**/*.{iobj,ipdb,pdb,exp,lib,obj}",
+      "!node_modules/better-sqlite3/deps/**",
+      "!node_modules/@serialport/bindings-cpp/prebuilds/{android-arm,android-arm64,darwin-x64+arm64,linux-arm,linux-arm64,linux-x64,win32-arm64,win32-ia32}/**"
     ],
     "win": {
       "icon": "resources/icons/app-icon.png",
@@ -69,7 +75,7 @@
     "@napi-rs/canvas": "^0.1.93",
     "@types/bwip-js": "^3.2.3",
     "axios": "^1.13.4",
-    "better-sqlite3": "^12.6.2",
+    "better-sqlite3": "^12.11.1",
     "bonjour-service": "^1.3.0",
     "bwip-js": "^4.8.0",
     "clsx": "^2.1.1",
@@ -94,12 +100,13 @@
     "@vitejs/plugin-react": "^5.1.1",
     "autoprefixer": "^10.4.24",
     "concurrently": "^9.2.1",
-    "electron": "^28.3.3",
+    "electron": "^42.4.1",
     "electron-builder": "^26.7.0",
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
     "globals": "^16.5.0",
+    "node-abi": "^4.31.0",
     "postcss": "^8.5.6",
     "tailwindcss": "^4.1.18",
     "typescript": "~5.9.3",

@@ -21,8 +21,10 @@ const PRINTER_CONFIG_FILE = 'printer-config.json';
 const DEFAULT_CONFIG = {
     type: 'simulator',
     protocolId: 'simulator',
-    pollingInterval: 500,
-    stabilityCount: 5
+    // "Balanced" preset: ~1s perceived stabilization.
+    // User can switch to Fast (450ms) or Accurate (2.5s) in Settings.
+    pollingInterval: 250,
+    stabilityCount: 4
 };
 function getConfigPath() {
     return path_1.default.join(electron_1.app.getPath('userData'), CONFIG_FILE);
@@ -92,7 +94,7 @@ const DEFAULT_DEVICE_CONFIG = {
 const DEFAULT_PRINTER_CONFIG = {
     packPrinter: { ...DEFAULT_DEVICE_CONFIG, id: 'pack_default', name: 'Pack Printer' },
     boxPrinter: { ...DEFAULT_DEVICE_CONFIG, id: 'box_default', name: 'Box Printer' },
-    autoPrintOnStable: false,
+    autoPrintOnStable: true,
     serverIp: '',
     language: 'ru'
 };
