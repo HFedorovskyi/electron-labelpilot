@@ -36,6 +36,7 @@ class PrinterService {
 
         this.initDevice(config.packPrinter);
         this.initDevice(config.boxPrinter);
+        if (config.palletPrinter) this.initDevice(config.palletPrinter);
         console.log(`[PrinterService] initializeStrategies finished in ${Date.now() - startTime}ms`);
     }
 
@@ -112,17 +113,19 @@ class PrinterService {
         try {
             await strategy.connect(config);
 
-            // Generate Test ZPL
-            // Simple ZPL for now, just to test connection
-            const zpl = `
-    ^ XA
-    ^ FO50, 50 ^ A0N, 50, 50 ^ FDTest Print ^ FS
-        ^ FO50, 120 ^ A0N, 30, 30 ^ FD${config.name}^ FS
-            ^ FO50, 160 ^ A0N, 30, 30 ^ FD${config.connection}^ FS
-                ^ FO50, 220 ^ BY3, 3, 100 ^ BCN, 100, Y, N, N ^ FDTEST123456 ^ FS
-                ^ XZ`;
+            // Simple connectivity test label. NOTE: ZPL commands must have NO space after
+            // the caret (`^XA`, not `^ XA`) and no leading indentation, or printers/parsers
+            // (e.g. Labelary / Virtual ZPL Printer) reject it with "generated no labels".
+            const zpl =
+                '^XA\n' +
+                '^CI28\n' +
+                '^FO40,40^A0N,50,50^FDTest Print^FS\n' +
+                `^FO40,110^A0N,28,28^FD${config.name}^FS\n` +
+                `^FO40,150^A0N,28,28^FD${config.connection}^FS\n` +
+                '^FO40,200^BY2,3,90^BCN,90,Y,N,N^FDTEST123456^FS\n' +
+                '^XZ';
 
-            await strategy.send(Buffer.from(zpl));
+            await strategy.send(Buffer.from(zpl, 'utf-8'));
 
         } finally {
             try {
@@ -138,17 +141,19 @@ class PrinterService {
      * label doesn't pay the handshake. No-op if connection is already open or the protocol
      * is connectionless (Windows spooler).
      */
-    public async warmupConnection(config: PrinterDeviceConfig): Promise<void> {
+    public async warmupConnection(config: PrinterDeviceConfig): Promise<'connected' | 'error' | 'skipped'> {
         const strategy = this.getOrCreateStrategy(config);
-        if (!strategy) return;
-        if (strategy.isConnected()) return;
+        if (!strategy) return 'skipped';
+        if (strategy.isConnected()) return 'connected';
         try {
             await strategy.connect(config);
             this.updateDeviceState(config.id, { config, status: 'connected' });
+            return 'connected';
         } catch (e) {
             this.updateDeviceState(config.id, { config, status: 'error', lastError: String(e) });
             // Don't throw — warmup is best-effort; first real print will retry.
             log.warn(`PrinterService: warmupConnection failed for ${config.name}: ${e}`);
+            return 'error';
         }
     }
 

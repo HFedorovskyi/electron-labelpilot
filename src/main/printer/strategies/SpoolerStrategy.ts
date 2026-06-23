@@ -73,27 +73,41 @@ export class SpoolerStrategy implements IConnectionStrategy {
         }
     }
 
-    private invokeHelper(printerName: string, filePath: string): Promise<void> {
+    private invokeHelper(printerName: string, filePath: string, timeoutMs = 20000): Promise<void> {
         return new Promise((resolve, reject) => {
             console.log(`Spawning: ${this.helperPath} "${printerName}" "${filePath}"`);
 
             const child = spawn(this.helperPath, [printerName, filePath]);
 
             let stderr = '';
+            let settled = false;
+            const finish = (fn: () => void) => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timer);
+                fn();
+            };
+
+            // Hard timeout so a stuck spooler job never hangs the UI forever. This happens
+            // with document/GDI drivers (e.g. "Microsoft Print to PDF") that can't render raw
+            // ZPL and pop a hidden "Save As" dialog — RawPrint then never returns.
+            const timer = setTimeout(() => {
+                finish(() => {
+                    try { child.kill(); } catch { /* ignore */ }
+                    reject(new Error(
+                        `Print timed out after ${timeoutMs}ms on "${printerName}". ` +
+                        `If this is a document/PDF driver (e.g. Microsoft Print to PDF), use the "browser" protocol — ` +
+                        `raw ZPL only works on ZPL/thermal printers.`
+                    ));
+                });
+            }, timeoutMs);
 
             child.stderr.on('data', (d) => stderr += d.toString());
-
-            child.on('close', (code) => {
-                if (code === 0) {
-                    resolve();
-                } else {
-                    reject(new Error(`RawPrint failed with code ${code}: ${stderr}`));
-                }
-            });
-
-            child.on('error', (err) => {
-                reject(err);
-            });
+            child.on('close', (code) => finish(() => {
+                if (code === 0) resolve();
+                else reject(new Error(`RawPrint failed with code ${code}: ${stderr}`));
+            }));
+            child.on('error', (err) => finish(() => reject(err)));
         });
     }
 

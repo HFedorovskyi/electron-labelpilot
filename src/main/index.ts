@@ -389,19 +389,46 @@ ipcMain.handle('get-server-status', () => {
 // Eager TCP/Serial warmup — call when the user enters a printing station so
 // the first print doesn't pay the connect handshake (~10-50ms LAN, ~100ms serial).
 // Idempotent: a no-op if the socket is already open.
-ipcMain.handle('printer:warmup', async (_, args: { printerIds?: ('pack' | 'box')[] } = {}) => {
+ipcMain.handle('printer:warmup', async (_, args: { printerIds?: ('pack' | 'box' | 'pallet')[] } = {}) => {
     try {
         const { loadPrinterConfig } = await import('./config');
         const { printerService } = await import('./printer/PrinterService');
         const config = loadPrinterConfig();
+        // Default does NOT include 'pallet' — pallet prints are on-demand button presses,
+        // not per-stable-weight, so warming a third socket on station entry is wasteful.
         const which = args?.printerIds || ['pack', 'box'];
 
+        // Per-role readiness so the UI can show an honest printer indicator:
+        //   'ready'        — TCP/serial socket opened (real reachability) OR driver printer present
+        //   'unreachable'  — TCP/serial connect failed
+        //   'unconfigured' — no device, or no target (ip/serialPort/driverName) set
+        //   'driver'       — windows_driver / browser (GDI) printer: configured but not network-probeable
+        const results: Record<string, 'ready' | 'unreachable' | 'unconfigured' | 'driver'> = {};
+        const hasTarget = (d: any) =>
+            d && (d.connection === 'tcp' ? !!d.ip : d.connection === 'serial' ? !!d.serialPort : !!d.driverName);
+
         await Promise.allSettled(which.map(async (role) => {
-            const dev = role === 'pack' ? config.packPrinter : config.boxPrinter;
-            if (!dev || dev.protocol === 'browser') return; // Browser path uses worker window, not strategies
-            await printerService.warmupConnection(dev);
+            const dev = role === 'pack' ? config.packPrinter : role === 'box' ? config.boxPrinter : config.palletPrinter;
+            if (!hasTarget(dev)) { results[role] = 'unconfigured'; return; }
+            if (dev.protocol === 'browser' || dev.connection === 'windows_driver') {
+                // Browser/GDI path uses the worker window + OS spooler, not a probeable socket.
+                results[role] = 'driver';
+                return;
+            }
+            const r = await printerService.warmupConnection(dev);
+            results[role] = r === 'connected' ? 'ready' : r === 'error' ? 'unreachable' : 'driver';
         }));
-        return { ok: true };
+
+        // If any printer prints via the browser/GDI protocol (e.g. a pallet sheet to a PDF /
+        // office printer), pre-create the hidden worker window now so the FIRST such print
+        // isn't slow (cold window creation + renderer bundle load take ~10-20s otherwise).
+        const anyBrowser = [config.packPrinter, config.boxPrinter, config.palletPrinter]
+            .some((d) => d && d.protocol === 'browser');
+        if (anyBrowser && (!workerWindow || workerWindow.isDestroyed())) {
+            log.info('[printer:warmup] pre-creating worker window for browser-protocol printing');
+            createWorkerWindow();
+        }
+        return { ok: true, results };
     } catch (e) {
         log.error('[printer:warmup] failed', e);
         return { ok: false, error: String(e) };
@@ -492,6 +519,15 @@ ipcMain.handle('test-print', async (_event, config) => {
         const currentWorker = workerWindow!;
 
         return new Promise((resolve) => {
+            let settled = false;
+            const done = (r: any) => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timer);
+                ipcMain.removeListener('ready-to-print', readyHandler);
+                scheduleWorkerIdleDestroy();
+                resolve(r);
+            };
             const readyHandler = (ev: any) => {
                 if (ev.sender === currentWorker.webContents) {
                     ipcMain.removeListener('ready-to-print', readyHandler);
@@ -504,13 +540,17 @@ ipcMain.handle('test-print', async (_event, config) => {
                     log.info('[IPC] test-print: calling webContents.print');
                     currentWorker.webContents.print(printOptions, (success) => {
                         log.info(`[IPC] test-print (image) finished in ${Date.now() - startTime}ms. Success: ${success}`);
-                        scheduleWorkerIdleDestroy();
-                        resolve({ success });
+                        done({ success });
                     });
                 }
             };
             ipcMain.on('ready-to-print', readyHandler);
             currentWorker.webContents.send('print-data', { labelDoc: testDoc, data: testData });
+            // Never hang the UI: a print/save dialog (e.g. Microsoft Print to PDF) may be
+            // hidden behind the kiosk window. Resolve as failure after a grace period.
+            const timer = setTimeout(() => {
+                done({ success: false, message: 'Test print timed out (a print/save dialog may be open or hidden behind the app window).' });
+            }, 60000);
         });
     }
 
@@ -525,21 +565,11 @@ ipcMain.handle('test-print', async (_event, config) => {
     }
 });
 
-// Database Viewer Handlers
-ipcMain.handle('get-tables', async () => {
-    const { getTables } = await import('./database');
-    return getTables();
-});
-
+// Used by the pallet-sheet flow to find a label whose canvas.labelType === 'pallet'.
 ipcMain.handle('get-all-labels', async () => {
     const { initDatabase } = await import('./database');
     const db = initDatabase();
     return db.prepare('SELECT * FROM labels').all();
-});
-
-ipcMain.handle('get-table-data', async (_, tableName) => {
-    const { getTableData } = await import('./database');
-    return getTableData(tableName);
 });
 
 ipcMain.handle('record-pack', async (_, data) => {
@@ -555,6 +585,31 @@ ipcMain.handle('close-box', async (_, { boxId, weightNetto, weightBrutto }) => {
 ipcMain.handle('get-open-pallet-content', async () => {
     const { getOpenPalletContent } = await import('./database');
     return getOpenPalletContent();
+});
+
+// Aggregated render-data for the pallet sheet (current open pallet). Returns null if no
+// open pallet. ctx may carry operator_name. Joins nomenclature for name/article.
+ipcMain.handle('get-pallet-render-data', async (_, ctx) => {
+    const { getPalletRenderData } = await import('./database');
+    return getPalletRenderData(ctx || {});
+});
+
+// Close the current open pallet after its sheet is printed, so the next pack starts a new
+// pallet. Broadcasts data-updated so stations refresh their pallet counters.
+ipcMain.handle('close-pallet', async () => {
+    try {
+        const { closeCurrentPallet } = await import('./database');
+        const res = closeCurrentPallet();
+        if (res.success) {
+            BrowserWindow.getAllWindows().forEach(win => win.webContents.send('data-updated'));
+        }
+        return res;
+    } catch (err) {
+        // Never let a DB-level failure reject the IPC: the caller runs this AFTER a successful
+        // print, so a rejection would be misreported as a print failure (prompting a reprint).
+        log.error('[close-pallet] failed to close pallet:', err);
+        return { success: false as const, error: err instanceof Error ? err.message : String(err) };
+    }
 });
 
 ipcMain.handle('delete-pack', async (_, packId) => {

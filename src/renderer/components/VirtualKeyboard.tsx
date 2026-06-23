@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, memo } from 'react';
 import { Delete, ArrowUp, Globe } from 'lucide-react';
 
 interface VirtualKeyboardProps {
@@ -114,4 +114,4 @@ const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({ value, onChange }) =>
     );
 };
 
-export default VirtualKeyboard;
+export default memo(VirtualKeyboard);

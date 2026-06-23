@@ -15,7 +15,7 @@
 import log from '../../logger';
 import path from 'path';
 import { app } from 'electron';
-import type { ILabelGenerator, LabelDoc, GeneratorOptions, LabelElement } from './types';
+import type { ILabelGenerator, LabelDoc, GeneratorOptions, LabelElement, TableColumn } from './types';
 import { createCanvas, type SKRSContext2D, GlobalFonts } from '@napi-rs/canvas';
 import { normalizeBarcodeType, shouldRasterizeBarcode, needsGs1Parse } from '../../../shared/barcodeTypes';
 
@@ -294,8 +294,8 @@ export class CanvasBitmapGenerator implements ILabelGenerator {
         for (const el of doc.elements) {
             const isDynamic =
                 (el.type === 'text' && hasVariables(el.text || '')) ||
-                (el.type === 'barcode' && hasVariables(el.value || el.text || '')) ||
-                (el.type === 'barcode');
+                (el.type === 'barcode') ||
+                (el.type === 'table'); // tables read data.items → never bake into the cached static layer
             if (isDynamic) dynamicElements.push(el);
             else staticElements.push(el);
         }
@@ -459,6 +459,9 @@ export class CanvasBitmapGenerator implements ILabelGenerator {
             } else if (el.type === 'text') {
                 const clipZpl = this.renderDynamicTextClip(el, data, scaleX, scaleY);
                 if (clipZpl) dynamicClipCommands.push(clipZpl);
+            } else if (el.type === 'table') {
+                const tableZpl = await this.renderTableGfa(el, data, scaleX, scaleY);
+                if (tableZpl) dynamicClipCommands.push(tableZpl);
             }
         }
 
@@ -565,6 +568,10 @@ export class CanvasBitmapGenerator implements ILabelGenerator {
                 break;
             case 'barcode':
                 await this.drawBarcodeImage(ctx, el, scaleX, scaleY);
+                break;
+            case 'table':
+                // Tables are dynamic-only (rendered per-print via renderTableGfa); never
+                // baked into the cached static layer. No-op here documents that invariant.
                 break;
         }
     }
@@ -1288,6 +1295,244 @@ export class CanvasBitmapGenerator implements ILabelGenerator {
 
         for (let i = 0; i < lines.length; i++) {
             ctx.fillText(lines[i], textX, startY + i * lineHeight);
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  Pallet TABLE (labelType 'pallet') — faithful port of the server's
+    //  canonical drawTable. Data-driven (data.items) → always rendered as a
+    //  dynamic ^GFA overlay, never baked into the cached static layer.
+    // ═══════════════════════════════════════════════════════════════════
+
+    /** Word-wrap that also hard-splits over-long words (matches the server wrapText). */
+    private wrapTextHard(ctx: SKRSContext2D, text: string, maxWidth: number): string[] {
+        if (!text) return [];
+        const out: string[] = [];
+        for (const para of String(text).split('\n')) {
+            let line = '';
+            for (const word of para.split(' ')) {
+                if (ctx.measureText(word).width > maxWidth) {
+                    if (line) { out.push(line); line = ''; }
+                    let chunk = '';
+                    for (const ch of word) {
+                        if (ctx.measureText(chunk + ch).width > maxWidth && chunk) { out.push(chunk); chunk = ch; }
+                        else chunk += ch;
+                    }
+                    line = chunk;
+                    continue;
+                }
+                const test = line ? line + ' ' + word : word;
+                if (ctx.measureText(test).width > maxWidth && line) { out.push(line); line = word; }
+                else line = test;
+            }
+            if (line) out.push(line);
+        }
+        return out;
+    }
+
+    /**
+     * Render a table element to its own clip canvas and emit a ^GFA overlay command.
+     * Box + fontSize are scaled to printer dots (the reference renders in canvas px since
+     * designer canvas == render canvas; the client renders in dots — this scaling is the
+     * key fidelity step). Cells resolve per-row via processText({{col.key}}, item).
+     */
+    private async renderTableGfa(el: LabelElement, data: Record<string, any>, scaleX: number, scaleY: number): Promise<string> {
+        const columns = el.columns || [];
+        if (!columns.length) return '';
+
+        const x = Math.round(el.x * scaleX);
+        const y = Math.round(el.y * scaleY);
+        const wDots = Math.max(1, Math.round((el.w || 0) * scaleX));
+        const hDots = Math.max(1, Math.round((el.h || 0) * scaleY));
+        const rotation = el.rotation || 0;
+
+        let clipW = wDots, clipH = hDots, foX = x, foY = y;
+        if (rotation === 90 || rotation === 270) {
+            clipW = hDots; clipH = wDots;
+            const cx = x + wDots / 2, cy = y + hDots / 2;
+            foX = Math.round(cx - clipW / 2);
+            foY = Math.round(cy - clipH / 2);
+        }
+
+        const canvas = createCanvas(clipW, clipH);
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, clipW, clipH);
+
+        ctx.save();
+        if (rotation) {
+            ctx.translate(clipW / 2, clipH / 2);
+            ctx.rotate((rotation * Math.PI) / 180);
+            ctx.translate(-clipW / 2, -clipH / 2);
+            if (rotation === 90 || rotation === 270) ctx.translate((clipW - wDots) / 2, (clipH - hDots) / 2);
+        }
+        ctx.scale(scaleX, scaleY); // map source px → printer dots; draw in source coords below
+        this.drawTableLocal(ctx, el, data, columns);
+        ctx.restore();
+
+        const imageData = ctx.getImageData(0, 0, clipW, clipH);
+        const bytesPerRow = Math.ceil(clipW / 8);
+        const mono = this.rgbaToMono(imageData.data, clipW, clipH, bytesPerRow);
+        const compressed = this.compressZplRLE(mono, bytesPerRow, clipH);
+        const totalBytes = bytesPerRow * clipH;
+        return `^FO${Math.max(0, foX)},${Math.max(0, foY)}^GFA,${totalBytes},${totalBytes},${bytesPerRow},${compressed}^FS\n`;
+    }
+
+    /** drawTable body in LOCAL source coordinates (origin 0,0). Caller applies scale + ^FO. */
+    private drawTableLocal(ctx: SKRSContext2D, el: LabelElement, data: Record<string, any>, columns: TableColumn[]): void {
+        const w = el.w || 0;
+        const h = el.h || 0;
+        const fontSize = el.fontSize || 10;
+        const showHeaders = el.showHeaders !== false;
+        const showBorders = el.showBorders !== false;
+        const fontFamily = el.fontFamily || 'Inter';
+        const italic = el.fontStyle === 'italic' ? 'italic ' : '';
+        const padding = 4;
+        const rowHeight = fontSize * 1.5;
+        const lineH = fontSize * 1.1;
+        // Grid lines: the reference uses light gray (#cbd5e1) for screen; on a 1-bit thermal
+        // printer that thresholds to white (invisible). Use a dark line so the grid prints.
+        const LINE = '#334155';
+
+        const headerFont = `bold ${fontSize}px "${fontFamily}", "Arial", sans-serif`;
+        const bodyFont = `${italic}${fontSize}px "${fontFamily}", "Arial", sans-serif`;
+
+        let headerHeight = showHeaders ? rowHeight : 0;
+        const headerLines: string[][] = [];
+        if (showHeaders) {
+            ctx.font = headerFont;
+            let maxHeaderLines = 1;
+            for (const col of columns) {
+                const colWidth = (w * col.widthRatio) / 100;
+                const lines = this.wrapTextHard(ctx, col.title, colWidth - padding * 2);
+                headerLines.push(lines);
+                maxHeaderLines = Math.max(maxHeaderLines, lines.length);
+            }
+            headerHeight = Math.max(rowHeight, maxHeaderLines * lineH + padding * 2);
+
+            ctx.fillStyle = '#f8fafc';
+            ctx.fillRect(0, 0, w, headerHeight);
+            ctx.font = headerFont;
+            ctx.fillStyle = '#000000';
+            ctx.textBaseline = 'top';
+            let cx = 0;
+            columns.forEach((col, ci) => {
+                const colWidth = (w * col.widthRatio) / 100;
+                headerLines[ci].forEach((line, li) => {
+                    ctx.fillText(line, cx + padding, padding + li * lineH, colWidth - padding * 2);
+                });
+                cx += colWidth;
+            });
+        }
+
+        if (showBorders) {
+            ctx.strokeStyle = LINE;
+            ctx.lineWidth = 1;
+            ctx.strokeRect(0, 0, w, h);
+            if (showHeaders) {
+                ctx.beginPath(); ctx.moveTo(0, headerHeight); ctx.lineTo(w, headerHeight); ctx.stroke();
+            }
+            let cx = 0;
+            columns.forEach((col, idx) => {
+                if (idx < columns.length - 1) {
+                    cx += (w * col.widthRatio) / 100;
+                    ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, h); ctx.stroke();
+                }
+            });
+        }
+
+        let items: any[] = Array.isArray(data.items) ? [...data.items] : [];
+        if (el.sortBy === 'name') items.sort((a, b) => String(a?.name ?? '').localeCompare(String(b?.name ?? ''), 'ru'));
+        else if (el.sortBy === 'date') items.sort((a, b) => String(a?.production_date_batch ?? '').localeCompare(String(b?.production_date_batch ?? '')));
+        if (el.maxRows && el.maxRows > 0) items = items.slice(0, el.maxRows);
+
+        const totalCount = items.length;
+        let drawnCount = 0;
+        const footerH = Math.round(rowHeight * 3.0);
+        const bodyLimit = h - footerH;
+        let currentY = headerHeight;
+
+        const drawDataRow = (item: any): boolean => {
+            ctx.font = bodyFont;
+            ctx.fillStyle = '#000000';
+            ctx.textBaseline = 'top';
+            let maxLines = 1;
+            const colLines: string[][] = [];
+            for (const col of columns) {
+                const colWidth = (w * col.widthRatio) / 100;
+                const val = this.processText(`{{ ${col.key} }}`, item);
+                const lines = this.wrapTextHard(ctx, val, colWidth - padding * 2);
+                colLines.push(lines);
+                maxLines = Math.max(maxLines, lines.length);
+            }
+            const rh = Math.max(rowHeight, maxLines * lineH + padding * 2);
+            if (currentY + rh > bodyLimit) return false;
+            let cx = 0;
+            columns.forEach((col, ci) => {
+                const colWidth = (w * col.widthRatio) / 100;
+                colLines[ci].forEach((line, li) => {
+                    ctx.fillText(line, cx + padding, currentY + padding + li * lineH, colWidth - padding * 2);
+                });
+                cx += colWidth;
+            });
+            if (showBorders) {
+                ctx.strokeStyle = LINE; ctx.lineWidth = 1;
+                ctx.beginPath(); ctx.moveTo(0, currentY + rh); ctx.lineTo(w, currentY + rh); ctx.stroke();
+            }
+            currentY += rh; drawnCount++; return true;
+        };
+
+        const drawGroupHeader = (label: string): boolean => {
+            if (currentY + rowHeight > bodyLimit) return false;
+            ctx.fillStyle = '#e8edf3'; ctx.fillRect(0, currentY, w, rowHeight);
+            ctx.font = headerFont; ctx.fillStyle = '#0f172a'; ctx.textBaseline = 'middle';
+            ctx.fillText(label, padding, currentY + rowHeight / 2, w - padding * 2);
+            if (showBorders) {
+                ctx.strokeStyle = LINE; ctx.lineWidth = 1;
+                ctx.beginPath(); ctx.moveTo(0, currentY + rowHeight); ctx.lineTo(w, currentY + rowHeight); ctx.stroke();
+            }
+            currentY += rowHeight; return true;
+        };
+
+        if (el.groupBy === 'nomenclature' || el.groupBy === 'batch') {
+            const groupField = el.groupBy === 'batch' ? 'batch_number' : 'name';
+            const order: string[] = [];
+            const groups: Record<string, any[]> = {};
+            for (const it of items) {
+                const k = String(it?.[groupField] ?? '—');
+                if (!(k in groups)) { groups[k] = []; order.push(k); }
+                groups[k].push(it);
+            }
+            for (const k of order) {
+                const gi = groups[k]; const first = gi[0] || {};
+                let label: string;
+                if (el.groupBy === 'batch') {
+                    const prod = first.production_date_batch ? ` · Произв.: ${first.production_date_batch}` : '';
+                    const exp = first.exp_date_full ? ` · Годен до: ${first.exp_date_full}` : '';
+                    label = `Партия ${k}${prod}${exp}`;
+                } else label = String(k);
+                if (!drawGroupHeader(label)) break;
+                let stop = false;
+                for (const it of gi) { if (!drawDataRow(it)) { stop = true; break; } }
+                if (stop) break;
+            }
+        } else {
+            for (const it of items) { if (!drawDataRow(it)) break; }
+        }
+
+        if (totalCount > 0) {
+            const truncated = drawnCount < totalCount;
+            const pages = truncated ? Math.max(2, Math.ceil(totalCount / Math.max(1, drawnCount))) : 1;
+            const fy = h - footerH;
+            ctx.fillStyle = '#e2e8f0'; ctx.fillRect(0, fy, w, footerH);
+            ctx.strokeStyle = LINE; ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(0, fy); ctx.lineTo(w, fy); ctx.stroke();
+            ctx.font = `bold ${Math.max(13, Math.round(fontSize * 1.8))}px "${fontFamily}", "Arial", sans-serif`;
+            ctx.fillStyle = '#1e293b'; ctx.textBaseline = 'middle';
+            const txt = truncated
+                ? `Стр. 1 / ${pages}   ·   показано ${drawnCount} из ${totalCount} позиций`
+                : `Стр. 1 / 1   ·   всего ${totalCount} позиций`;
+            ctx.fillText(txt, padding * 2, fy + footerH / 2, w - padding * 4);
         }
     }
 

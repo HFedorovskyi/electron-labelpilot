@@ -4,6 +4,38 @@ import { initDatabase } from './database';
 
 const PORT = 5556;
 
+// Body-size caps: a full DB dump can be sizable, a print job is tiny. Caps prevent a
+// runaway/malicious POST from doubling RSS on a weak station.
+const MAX_BODY_SYNC = 64 * 1024 * 1024;   // 64 MB
+const MAX_BODY_PRINT_JOB = 1 * 1024 * 1024; // 1 MB
+
+/**
+ * Read a request body into a string with a hard size cap. Buffers chunks (no O(n^2) string
+ * concat) and decodes once at the end. On overflow it responds 413 and destroys the socket;
+ * resolves null so the caller stops. Resolves null on stream error too.
+ */
+function readBody(req: http.IncomingMessage, res: http.ServerResponse, maxBytes: number): Promise<string | null> {
+    return new Promise((resolve) => {
+        const chunks: Buffer[] = [];
+        let size = 0;
+        let done = false;
+        req.on('data', (chunk: Buffer) => {
+            if (done) return;
+            size += chunk.length;
+            if (size > maxBytes) {
+                done = true;
+                try { res.writeHead(413, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'Payload too large' })); } catch { /* ignore */ }
+                req.destroy();
+                resolve(null);
+                return;
+            }
+            chunks.push(chunk);
+        });
+        req.on('end', () => { if (!done) { done = true; resolve(Buffer.concat(chunks).toString('utf8')); } });
+        req.on('error', () => { if (!done) { done = true; resolve(null); } });
+    });
+}
+
 export function startSyncServer(onSyncComplete?: (data: any) => void) {
     const server = http.createServer((req: http.IncomingMessage, res: http.ServerResponse) => {
         // Set CORS headers
@@ -55,25 +87,12 @@ export function startSyncServer(onSyncComplete?: (data: any) => void) {
             }
         }
         else if ((normalizedUrl === '/api/sync_db' || normalizedUrl === '/api/full_sync') && req.method === 'POST') {
-            let body = '';
-            req.on('data', (chunk: Buffer) => {
-                body += chunk.toString();
-            });
-
-            req.on('end', async () => {
+            readBody(req, res, MAX_BODY_SYNC).then(async (body) => {
+                if (body === null) return; // 413 already sent / stream error
                 const { processSyncData } = require('./processor');
                 try {
                     const data = JSON.parse(body);
                     console.log(`Sync Server: Received POST sync request. Type: ${data?.meta?.type || 'Online'}`);
-
-                    // Debug: Log incoming labels
-                    if (data?.payload?.labels) {
-                        console.log(`Sync Server: Incoming labels count: ${data.payload.labels.length}`);
-                        data.payload.labels.forEach((l: any) => {
-                            const structStr = typeof l.structure === 'string' ? l.structure : JSON.stringify(l.structure);
-                            console.log(`  Label ${l.id} (${l.name}): structure length=${structStr?.length || 0}`);
-                        });
-                    }
 
                     const result = await processSyncData(data);
 
@@ -96,12 +115,8 @@ export function startSyncServer(onSyncComplete?: (data: any) => void) {
             });
         }
         else if (normalizedUrl === '/api/print_job' && req.method === 'POST') {
-            let body = '';
-            req.on('data', (chunk: Buffer) => {
-                body += chunk.toString();
-            });
-
-            req.on('end', () => {
+            readBody(req, res, MAX_BODY_PRINT_JOB).then((body) => {
+                if (body === null) return;
                 try {
                     const data = JSON.parse(body);
                     const { processOnlinePrintJob } = require('./print_job');
@@ -126,6 +141,10 @@ export function startSyncServer(onSyncComplete?: (data: any) => void) {
             res.end('Not Found');
         }
     });
+
+    // Reap slow/half-open clients so a stalled connection can't pin a buffer/socket forever.
+    server.requestTimeout = 60_000;
+    server.headersTimeout = 30_000;
 
     server.listen(PORT, '0.0.0.0', () => {
         console.log(`Sync Server listening on port ${PORT}`);

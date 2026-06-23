@@ -290,4 +290,4 @@ const DeleteItemsModal: React.FC<DeleteItemsModalProps> = ({ isOpen, onClose, on
     );
 };
 
-export default DeleteItemsModal;
+export default React.memo(DeleteItemsModal);

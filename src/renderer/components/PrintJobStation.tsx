@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { ClipboardList, Play, Printer, RefreshCw, Upload, CheckCircle2, Clock, Loader2, Trash2, Box, Hash, Calendar, AlertCircle } from 'lucide-react';
+import { ClipboardList, Play, Printer, RefreshCw, Upload, CheckCircle2, Clock, Loader2, Trash2, Box, Hash, Calendar, AlertCircle, Layers, ArrowLeft } from 'lucide-react';
+import { printPalletSheet } from '../utils/palletPrint';
 import { generateBarcode, type BarcodeData } from '../utils/barcodeGenerator';
 import { useTranslation } from '../i18n';
 import DatePickerModal from './DatePickerModal';
@@ -57,11 +58,18 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
     const [currentBoxId, setCurrentBoxId] = useState<number | null>(null);
     const [currentBoxNumber, setCurrentBoxNumber] = useState<string | null>(null);
     const [lastPrinted, setLastPrinted] = useState<{ doc: any; data: any } | null>(null);
+    // Printer-readiness indicator + manual-print feedback + complete-job confirmation (parity).
+    const [printerStatus, setPrinterStatus] = useState<'unknown' | 'ready' | 'unreachable' | 'unconfigured' | 'driver'>('unknown');
+    const [printToast, setPrintToast] = useState<string | null>(null);
+    const [lastPrintInfo, setLastPrintInfo] = useState<{ label: string; time: string } | null>(null);
+    const printToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const [confirmCompleteJobId, setConfirmCompleteJobId] = useState<number | null>(null);
 
     // Refs
     const isPrintingRef = useRef(false);
     const cancelRef = useRef(false);
     const weightRef = useRef('0.000');
+    const isPalletPrintingRef = useRef(false);
     // Latest active tab for the mounted-once scale-reading listener (avoids stale closure).
     const activeTabRef = useRef(_props.activeTab);
     activeTabRef.current = _props.activeTab;
@@ -141,8 +149,10 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
 
     // Eagerly open TCP/Serial to configured printers so first label doesn't pay the handshake.
     useEffect(() => {
-        if (!printerConfig.packPrinter && !printerConfig.boxPrinter) return;
-        window.electron.invoke('printer:warmup', { printerIds: ['pack', 'box'] }).catch(() => { /* best-effort */ });
+        if (!printerConfig.packPrinter && !printerConfig.boxPrinter) { setPrinterStatus('unconfigured'); return; }
+        window.electron.invoke('printer:warmup', { printerIds: ['pack', 'box'] })
+            .then((res: any) => { if (res?.results?.pack) setPrinterStatus(res.results.pack); })
+            .catch(() => { /* best-effort */ });
     }, [printerConfig]);
 
     // Pre-upload static backgrounds for the current templates so first print is a cache hit.
@@ -246,7 +256,9 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
             } catch (e) { console.error('Failed to load counters', e); }
         };
         if (product) syncCounters();
-    }, [product]);
+        // syncVersion: re-fetch counters after data-updated (e.g. pallet sheet printed → pallet
+        // closed) so box/pallet counters reset instead of showing stale values.
+    }, [product, syncVersion]);
 
     // --- helper: getLabelData (reuse pattern from WeighingStation) ---
     const getLabelData = (overrideWeight?: number, isBoxLabel = false, overrideUnits?: number, overrides?: any) => {
@@ -396,6 +408,14 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
         setLastPrinted({ doc: boxLabelDoc, data: boxData });
     };
 
+    // Brief auto-dismissing success toast for the manual print.
+    const showPrintToast = (msg: string) => {
+        setPrintToast(msg);
+        if (printToastTimer.current) clearTimeout(printToastTimer.current);
+        printToastTimer.current = setTimeout(() => setPrintToast(null), 1800);
+    };
+    useEffect(() => () => { if (printToastTimer.current) clearTimeout(printToastTimer.current); }, []);
+
     // --- PRINT SINGLE PACK (for pcs mode or scale weigh mode) ---
     const printSinglePack = async (packWeight: number, overrides?: any) => {
         if (!labelDoc || !product || !activeJob) return;
@@ -443,8 +463,13 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
         window.electron.invoke('print-label', {
             silent: true, labelDoc, data: finalData,
             printerConfig: printerConfig.packPrinter || undefined
-        }).catch((e: any) => console.error('[printSinglePack] print failed', e));
+        })
+            .then((ok: any) => { if (printerConfig.packPrinter) setPrinterStatus(ok === false ? 'unreachable' : 'ready'); })
+            .catch((e: any) => { console.error('[printSinglePack] print failed', e); if (printerConfig.packPrinter) setPrinterStatus('unreachable'); });
         setLastPrinted({ doc: labelDoc, data: finalData });
+        const time = new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+        setLastPrintInfo({ label: String(finalData.pack_number || ''), time });
+        showPrintToast(t('ws.printSentToast'));
 
         return {
             recordResult,
@@ -512,7 +537,7 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
             loadJobs();
         } catch (err) {
             console.error('Print error:', err);
-            setAlertMessage(`Ошибка: ${err instanceof Error ? err.message : String(err)}`);
+            setAlertMessage(`${t('ws.errorPrefix')}: ${err instanceof Error ? err.message : String(err)}`);
         } finally {
             isPrintingRef.current = false;
         }
@@ -560,10 +585,16 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
             loadJobs();
         } catch (err) {
             console.error('Print error:', err);
-            setAlertMessage(`Ошибка: ${err instanceof Error ? err.message : String(err)}`);
+            setAlertMessage(`${t('ws.errorPrefix')}: ${err instanceof Error ? err.message : String(err)}`);
         } finally {
             isPrintingRef.current = false;
         }
+    };
+
+    // --- BACK TO JOB SELECTION (deselect active job) ---
+    const handleBackToJobs = () => {
+        if (unitsInBox > 0) { setAlertMessage(t('ws.closeBoxBeforeChange')); return; }
+        setActiveJob(null);
     };
 
     // --- CLOSE BOX ---
@@ -663,6 +694,11 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
     const activeJobs = jobs.filter(j => j.status !== 'completed');
     const completedJobs = jobs.filter(j => j.status === 'completed');
 
+    // Glanceable box-fill progress (emerald → amber ≥80% → red full).
+    const boxFillLimit = Number(product?.close_box_counter) || 0;
+    const boxFillPct = boxFillLimit > 0 ? Math.min(100, Math.round((unitsInBox / boxFillLimit) * 100)) : 0;
+    const boxFillColor = boxFillPct >= 100 ? 'bg-red-500' : boxFillPct >= 80 ? 'bg-amber-500' : 'bg-emerald-500';
+
     return (
         <div className="grid grid-cols-12 gap-6 h-full p-4 relative">
             {/* Main Panel — Job List */}
@@ -681,16 +717,50 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
                     </button>
                 </div>
 
+                {/* Active Job — shown above the weight display, with a back-to-jobs button */}
+                {activeJob && (
+                    <div className="mb-4 p-4 bg-violet-50 dark:bg-violet-500/5 border border-violet-200 dark:border-violet-500/10 rounded-2xl">
+                        <div className="flex justify-between items-start gap-3">
+                            <div className="flex-1 min-w-0">
+                                <h3 className="text-xs uppercase tracking-wider text-violet-600 dark:text-violet-500/60 font-bold mb-1">{t('pj.activeJob')}</h3>
+                                <div className="text-lg font-bold text-violet-700 dark:text-violet-100 mb-2">{activeJob.nomenclature_name}</div>
+                                <div className="flex flex-wrap gap-2 text-sm">
+                                    <span className="font-mono bg-violet-100 dark:bg-violet-500/10 px-2 py-0.5 rounded text-violet-700 dark:text-violet-300">
+                                        {t('pj.quantity')}: {formatQty(activeJob.quantity, activeJob.quantity_unit)}
+                                    </span>
+                                    <span className="font-mono bg-violet-100 dark:bg-violet-500/10 px-2 py-0.5 rounded text-violet-700 dark:text-violet-300">
+                                        {t('pj.printed')}: {formatQty(activeJob.printed_qty, activeJob.quantity_unit)}
+                                    </span>
+                                    {activeJob.batch_number && (
+                                        <span className="font-mono bg-amber-100 dark:bg-amber-500/10 px-2 py-0.5 rounded text-amber-700 dark:text-amber-300">
+                                            {t('pj.batch')}: {activeJob.batch_number}
+                                        </span>
+                                    )}
+                                </div>
+                            </div>
+                            <button onClick={handleBackToJobs} className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-white/10 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-white/10 text-sm font-semibold transition-colors">
+                                <ArrowLeft className="w-4 h-4" /> {t('pj.backToJobs')}
+                            </button>
+                        </div>
+                    </div>
+                )}
+
                 {/* Weight Display (for all modes when a job is active) */}
                 {activeJob && (
                     <div className="mb-6 grid grid-cols-2 gap-4">
                         <div className="bg-neutral-50 dark:bg-black/30 border border-neutral-200 dark:border-white/10 rounded-3xl p-8 text-center relative overflow-hidden group">
                             <div className="absolute inset-0 bg-gradient-to-br from-emerald-100/50 dark:from-emerald-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                            <div className="flex justify-between items-center mb-2">
+                            <div className="flex justify-between items-center mb-2 gap-1.5">
                                 <label className="text-xs uppercase tracking-widest text-neutral-500 font-bold">{t('ws.gross')}</label>
-                                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${scaleStatus === 'connected' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-red-500/10 text-red-500'}`}>
-                                    {scaleStatus === 'connected' ? t('ws.scaleStatus.connected') : t('ws.scaleStatus.disconnected')}
-                                </span>
+                                <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                                    <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${scaleStatus === 'connected' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-red-500/10 text-red-500'}`}>
+                                        {t('ws.scaleShort')}: {scaleStatus === 'connected' ? t('ws.scaleStatus.connected') : t('ws.scaleStatus.disconnected')}
+                                    </span>
+                                    <span className={`text-xs font-bold px-2 py-0.5 rounded-full flex items-center gap-1 ${(printerStatus === 'ready' || printerStatus === 'driver') ? 'bg-emerald-500/10 text-emerald-500' : printerStatus === 'unknown' ? 'bg-neutral-500/10 text-neutral-400' : 'bg-red-500/10 text-red-500'}`}>
+                                        <Printer className="w-3 h-3" />
+                                        {printerStatus === 'ready' ? t('ws.printerStatus.ready') : printerStatus === 'driver' ? t('ws.printerStatus.driver') : printerStatus === 'unreachable' ? t('ws.printerStatus.unreachable') : printerStatus === 'unconfigured' ? t('ws.printerStatus.unconfigured') : t('ws.printerStatus')}
+                                    </span>
+                                </div>
                             </div>
                             <div className="text-7xl font-mono text-emerald-600 dark:text-emerald-400 mt-2 font-light tracking-tighter">
                                 {weight} <span className="text-2xl text-emerald-500/50">{t('ws.kg')}</span>
@@ -831,48 +901,34 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
                 </div>
             </div>
 
-            {/* Right Panel — Controls */}
-            <div className="col-span-4 space-y-4 flex flex-col">
+            {/* Right Panel — Controls (scrolls if it doesn't fit, so nothing clips on small screens) */}
+            <div className="col-span-4 space-y-4 flex flex-col overflow-y-auto min-h-0">
                 {activeJob ? (
                     <>
-                        {/* Active Job Info */}
-                        <div className="p-5 bg-violet-50 dark:bg-violet-500/5 border border-violet-200 dark:border-violet-500/10 rounded-2xl">
-                            <h3 className="text-sm uppercase tracking-wider text-violet-600 dark:text-violet-500/60 font-bold mb-1">{t('pj.activeJob')}</h3>
-                            <div className="text-xl font-bold text-violet-700 dark:text-violet-100 mb-2">{activeJob.nomenclature_name}</div>
-                            <div className="flex flex-wrap gap-3 text-sm">
-                                <span className="font-mono bg-violet-100 dark:bg-violet-500/10 px-2 py-0.5 rounded text-violet-700 dark:text-violet-300">
-                                    {t('pj.quantity')}: {formatQty(activeJob.quantity, activeJob.quantity_unit)}
-                                </span>
-                                <span className="font-mono bg-violet-100 dark:bg-violet-500/10 px-2 py-0.5 rounded text-violet-700 dark:text-violet-300">
-                                    {t('pj.printed')}: {formatQty(activeJob.printed_qty, activeJob.quantity_unit)}
-                                </span>
-                                {activeJob.batch_number && (
-                                    <span className="font-mono bg-amber-100 dark:bg-amber-500/10 px-2 py-0.5 rounded text-amber-700 dark:text-amber-300">
-                                        {t('pj.batch')}: {activeJob.batch_number}
-                                    </span>
-                                )}
-                            </div>
-                        </div>
-
                         {/* Print Button */}
                         <button
                             onClick={activeJob.quantity_unit === 'pcs' ? handlePrintPcsPack : handlePrintKgPack}
-                            className="w-full py-8 bg-violet-600 hover:bg-violet-500 active:bg-violet-700 transition-all rounded-3xl font-bold text-2xl shadow-[0_10px_40px_-10px_rgba(139,92,246,0.5)] flex items-center justify-center gap-3 border-t border-white/10 text-white"
+                            disabled={!activeJob || !labelDoc || scaleStatus !== 'connected'}
+                            className="w-full py-8 bg-violet-600 hover:bg-violet-500 active:bg-violet-700 transition-all rounded-3xl font-bold text-2xl shadow-[0_10px_40px_-10px_rgba(139,92,246,0.5)] flex items-center justify-center gap-3 border-t border-white/10 text-white disabled:opacity-40 disabled:pointer-events-none disabled:shadow-none"
                         >
                             <Printer className="w-8 h-8" /> {t('ws.print')}
                         </button>
 
                         {/* Action buttons */}
                         <div className="grid grid-cols-2 gap-4">
-                            <button onClick={handleRepeat} className="py-6 bg-neutral-100 dark:bg-neutral-800/50 hover:bg-neutral-200 dark:hover:bg-neutral-800 border border-neutral-300 dark:border-white/5 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group">
+                            <button onClick={handleRepeat} className="py-8 bg-neutral-100 dark:bg-neutral-800/50 hover:bg-neutral-200 dark:hover:bg-neutral-800 border border-neutral-300 dark:border-white/5 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group">
                                 <RefreshCw className="w-6 h-6 text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-800 dark:group-hover:text-white transition-colors" />
                                 <span className="text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-800 dark:group-hover:text-white uppercase text-xs tracking-widest">{t('ws.reprintSmall')}</span>
                             </button>
-                            <button onClick={handleCloseBox} className="py-6 bg-neutral-100 dark:bg-neutral-800/50 hover:bg-neutral-200 dark:hover:bg-neutral-800 border border-neutral-300 dark:border-white/5 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group">
+                            <button onClick={handleCloseBox} disabled={unitsInBox === 0} className="py-8 bg-neutral-100 dark:bg-neutral-800/50 hover:bg-neutral-200 dark:hover:bg-neutral-800 border border-neutral-300 dark:border-white/5 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group disabled:opacity-40 disabled:pointer-events-none">
                                 <Box className="w-6 h-6 text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-800 dark:group-hover:text-white transition-colors" />
                                 <span className="text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-800 dark:group-hover:text-white uppercase text-xs tracking-widest">{t('ws.closeBox')}</span>
                             </button>
-                            <button onClick={() => handleCompleteJob(activeJob.job_id)} className="py-6 bg-emerald-50 dark:bg-emerald-500/5 hover:bg-emerald-100 dark:hover:bg-emerald-500/10 border border-emerald-300 dark:border-emerald-500/20 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group col-span-2">
+                            <button onClick={() => setIsDeleteModalOpen(true)} className="py-8 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/40 border border-red-300 dark:border-red-500/30 hover:border-red-400 dark:hover:border-red-500/50 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group col-span-2">
+                                <Trash2 className="w-6 h-6 text-red-500 dark:text-red-400 transition-colors" />
+                                <span className="text-red-600 dark:text-red-400 uppercase text-xs tracking-widest">{t('ws.delete')}</span>
+                            </button>
+                            <button onClick={() => setConfirmCompleteJobId(activeJob.job_id)} className="py-8 bg-emerald-50 dark:bg-emerald-500/5 hover:bg-emerald-100 dark:hover:bg-emerald-500/10 border border-emerald-300 dark:border-emerald-500/20 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group col-span-2">
                                 <CheckCircle2 className="w-6 h-6 text-emerald-500 group-hover:text-emerald-600 transition-colors" />
                                 <span className="text-emerald-600 dark:text-emerald-400 group-hover:text-emerald-700 dark:group-hover:text-emerald-300 uppercase text-xs tracking-widest">{t('pj.complete')}</span>
                             </button>
@@ -884,6 +940,14 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
                         <p className="text-center text-sm">{t('pj.selectJob')}</p>
                     </div>
                 )}
+
+                <button
+                    onClick={() => printPalletSheet({ printerConfig, selectedProduct: product, t, setAlert: setAlertMessage, operatorName: stationNumber || '', busyRef: isPalletPrintingRef })}
+                    className="w-full py-5 bg-violet-600 hover:bg-violet-500 active:bg-violet-700 transition-all rounded-2xl font-bold text-lg text-white flex items-center justify-center gap-3 shadow-[0_10px_30px_-12px_rgba(124,58,237,0.6)] border-t border-white/10"
+                >
+                    <Layers className="w-6 h-6" />
+                    {t('pallet.printSheet')}
+                </button>
 
                 {/* Session Stats */}
                 <div className="mt-auto p-6 bg-white dark:bg-neutral-900/50 border border-neutral-200 dark:border-white/5 shadow-sm dark:shadow-none rounded-3xl backdrop-blur">
@@ -902,8 +966,18 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
                             </div>
                         </div>
 
+                        <div className="p-3 bg-neutral-100 dark:bg-white/5 border border-neutral-300 dark:border-white/10 rounded-xl">
+                            <div className="flex justify-between items-center mb-1.5">
+                                <span className="text-xs uppercase tracking-wider text-neutral-500 font-bold">{t('ws.inBox')}</span>
+                                <span className="text-lg font-mono font-bold text-neutral-900 dark:text-white">{unitsInBox}{boxFillLimit > 0 ? ` / ${boxFillLimit}` : ''}</span>
+                            </div>
+                            {boxFillLimit > 0 && (
+                                <div className="h-2 w-full rounded-full bg-neutral-200 dark:bg-white/10 overflow-hidden">
+                                    <div className={`h-full rounded-full transition-all duration-300 ${boxFillColor}`} style={{ width: `${boxFillPct}%` }}></div>
+                                </div>
+                            )}
+                        </div>
                         {[
-                            { label: t('ws.inBox'), value: unitsInBox },
                             { label: t('ws.boxesOnPallet'), value: boxesInPallet },
                             { label: t('ws.totalUnits'), value: totalUnits },
                         ].map((stat, i) => (
@@ -912,9 +986,43 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
                                 <span className="text-lg font-mono font-bold text-neutral-900 dark:text-white">{stat.value}</span>
                             </div>
                         ))}
+                        {lastPrintInfo && (
+                            <div className="flex justify-between text-xs pt-1 text-violet-600 dark:text-violet-400/80">
+                                <span className="uppercase tracking-wider">{t('ws.lastPrinted')}</span>
+                                <span className="font-mono">#{lastPrintInfo.label} · {lastPrintInfo.time}</span>
+                            </div>
+                        )}
                     </div>
                 </div>
             </div>
+
+            {/* Transient print-success toast */}
+            {printToast && (
+                <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[250] px-6 py-3 rounded-2xl bg-violet-600 text-white font-semibold shadow-[0_10px_30px_-8px_rgba(139,92,246,0.6)] flex items-center gap-2 animate-in fade-in slide-in-from-bottom-2 duration-200">
+                    <Printer className="w-5 h-5" />
+                    {printToast}
+                </div>
+            )}
+
+            {/* Complete-job confirmation (prevents accidental taps on a touchscreen) */}
+            {confirmCompleteJobId !== null && (
+                <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/30 backdrop-blur-sm" onClick={() => setConfirmCompleteJobId(null)}>
+                    <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-white/10 p-8 rounded-3xl shadow-2xl text-center max-w-md mx-4" onClick={e => e.stopPropagation()}>
+                        <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto mb-4" />
+                        <p className="text-neutral-900 dark:text-white text-lg mb-6">{t('pj.completeConfirm')}</p>
+                        <div className="flex gap-3">
+                            <button onClick={() => setConfirmCompleteJobId(null)}
+                                className="flex-1 px-6 py-3 bg-neutral-100 dark:bg-white/5 text-neutral-700 dark:text-neutral-300 rounded-2xl font-bold hover:bg-neutral-200 dark:hover:bg-white/10 transition-colors">
+                                {t('ws.cancel')}
+                            </button>
+                            <button onClick={() => { const id = confirmCompleteJobId; setConfirmCompleteJobId(null); if (id !== null) handleCompleteJob(id); }}
+                                className="flex-1 px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl font-bold transition-colors">
+                                {t('pj.complete')}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Alert Modal */}
             {alertMessage && (

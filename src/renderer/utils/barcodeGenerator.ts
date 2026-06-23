@@ -30,12 +30,14 @@ const formatDate = (date: Date, format: string): string => {
     const year = String(d.getFullYear());
     const shortYear = year.slice(-2);
 
-    // Simple replacement for common GS1 formats
+    // Simple replacement for common GS1 formats.
+    // NOTE: yyyy MUST be replaced before yy — otherwise `.replace('yy', ...)` corrupts the
+    // first half of "yyyy" and the four-digit year format breaks.
     return format
-        .replace('dd', day)
-        .replace('MM', month)
+        .replace('yyyy', year)
         .replace('yy', shortYear)
-        .replace('yyyy', year);
+        .replace('dd', day)
+        .replace('MM', month);
 };
 
 const formatWeight = (weight: number | undefined, length: number = 6, decimals: number = 3): string => {

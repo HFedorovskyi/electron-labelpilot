@@ -1,4 +1,4 @@
-import { } from 'react';
+import { memo } from 'react';
 import { X, Delete, Check } from 'lucide-react';
 
 interface NumericKeypadProps {
@@ -82,4 +82,4 @@ const NumericKeypad: React.FC<NumericKeypadProps> = ({ value, onUpdate, onClose,
     );
 };
 
-export default NumericKeypad;
+export default memo(NumericKeypad);

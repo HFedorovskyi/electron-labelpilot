@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, memo } from 'react';
 import { X, Check, ChevronLeft, ChevronRight, Calendar as CalendarIcon } from 'lucide-react';
 
 interface DatePickerModalProps {
@@ -124,4 +124,4 @@ const DatePickerModal: React.FC<DatePickerModalProps> = ({ value, onUpdate, onCl
     );
 };
 
-export default DatePickerModal;
+export default memo(DatePickerModal);

@@ -34,16 +34,30 @@ export class DiscoveryManager {
         this.startBroadcasting();
     }
 
-    private getLocalIp() {
+    private cachedIp: string | null = null;
+    private cachedIpAt = 0;
+
+    private getLocalIp(): string {
+        // Cache the local IP: it almost never changes on a fixed POS, yet getLocalIp() was
+        // called every 3s broadcast AND on every inbound packet (self-filter), each walking
+        // os.networkInterfaces(). Recompute at most once a minute to still follow DHCP changes.
+        const now = Date.now();
+        if (this.cachedIp && now - this.cachedIpAt < 60000) return this.cachedIp;
+
+        let found = '127.0.0.1';
         const nets = networkInterfaces();
         for (const name of Object.keys(nets)) {
             for (const net of nets[name]!) {
                 if (net.family === 'IPv4' && !net.internal) {
-                    return net.address;
+                    found = net.address;
+                    break;
                 }
             }
+            if (found !== '127.0.0.1') break;
         }
-        return '127.0.0.1';
+        this.cachedIp = found;
+        this.cachedIpAt = now;
+        return found;
     }
 
     private startBroadcasting() {

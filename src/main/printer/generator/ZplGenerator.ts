@@ -1,10 +1,15 @@
 import type { ILabelGenerator, LabelDoc, GeneratorOptions, LabelElement } from './types';
+import { normalizeBarcodeType } from '../../../shared/barcodeTypes';
+
+const ZPL_DEBUG = process.env.LABELPILOT_DEBUG_ZPL === '1';
 
 export class ZplGenerator implements ILabelGenerator {
 
     async generate(doc: LabelDoc, data: Record<string, any>, options: GeneratorOptions): Promise<Buffer> {
-        console.log('ZplGenerator: Incoming doc:', JSON.stringify(doc, null, 2));
-        console.log('ZplGenerator: Options:', JSON.stringify(options, null, 2));
+        if (ZPL_DEBUG) {
+            console.log('ZplGenerator: Incoming doc:', JSON.stringify(doc, null, 2));
+            console.log('ZplGenerator: Options:', JSON.stringify(options, null, 2));
+        }
 
         const dpi = options.dpi || doc.dpi || 203;
 
@@ -63,8 +68,10 @@ export class ZplGenerator implements ILabelGenerator {
             labelLength = Math.round(doc.canvas.height * scaleY);
         }
 
-        console.log(`ZplGenerator: DPI=${dpi}, TargetWidthMm=${targetWidthMm}, TargetHeightMm=${targetHeightMm}, CanvasW=${doc.canvas.width}, CanvasH=${doc.canvas.height}`);
-        console.log(`ZplGenerator: Calculated PrintWidth=${printWidth}, LabelLength=${labelLength}, ScaleX=${scaleX.toFixed(4)}, ScaleY=${scaleY.toFixed(4)}`);
+        if (ZPL_DEBUG) {
+            console.log(`ZplGenerator: DPI=${dpi}, TargetWidthMm=${targetWidthMm}, TargetHeightMm=${targetHeightMm}, CanvasW=${doc.canvas.width}, CanvasH=${doc.canvas.height}`);
+            console.log(`ZplGenerator: Calculated PrintWidth=${printWidth}, LabelLength=${labelLength}, ScaleX=${scaleX.toFixed(4)}, ScaleY=${scaleY.toFixed(4)}`);
+        }
 
         let zpl = '^XA\n'; // Start Format
         zpl += `^PW${printWidth}\n`; // Print Width
@@ -175,37 +182,66 @@ export class ZplGenerator implements ILabelGenerator {
                 }
                 break;
 
-            case 'barcode':
+            case 'barcode': {
                 const bcVal = processText(el.value || '');
                 const height = Math.round(el.h * scaleY);
                 const moduleWidth = Math.max(2, Math.round(2 * (scaleX / 2.1)));
+                const showText = el.showText ? 'Y' : 'N';
+                // Shared classification (same as the image-protocol path & the preview).
+                const bcid = normalizeBarcodeType(el.barcodeType);
 
-                const type = (el.barcodeType || 'code128').toLowerCase();
-
-                if (type.includes('code128')) {
-                    // ^BC o, h, f, g, e, m
-                    const showText = el.showText ? 'Y' : 'N';
-                    cmd += `^BY${moduleWidth},3.0,${height}`;
-                    cmd += `^BC${orient},${height},${showText},N,N^FD${bcVal}^FS\n`;
-                } else if (type.includes('qr') || type === 'gs-1') {
-                    // ^BQ o, 2, mag
-                    const magnification = Math.max(3, Math.round(scaleX * 2));
-                    cmd += `^BQ${orient},2,${magnification}`;
-                    cmd += `^FDQA,${bcVal}^FS\n`;
-                } else if (type.includes('ean13') || type.includes('ean13_kz')) {
-                    const showText = el.showText ? 'Y' : 'N';
-                    cmd += `^BY${moduleWidth},3.0,${height}`;
-                    cmd += `^BE${orient},${height},${showText},N^FD${bcVal}^FS\n`;
-                } else if (type.includes('datamatrix')) {
-                    const mag = Math.max(3, Math.round(scaleX * 2));
-                    cmd += `^BX${orient},${mag},200`;
-                    cmd += `^FD${bcVal}^FS\n`;
-                } else {
-                    // Fallback to Code 128
-                    cmd += `^BY${moduleWidth},3.0,${height}`;
-                    cmd += `^BC${orient},${height},Y,N,N^FD${bcVal}^FS\n`;
+                switch (bcid) {
+                    case 'code128':
+                    case 'gs1-128':
+                        cmd += `^BY${moduleWidth},3.0,${height}`;
+                        cmd += `^BC${orient},${height},${showText},N,N^FD${bcVal}^FS\n`;
+                        break;
+                    case 'ean13':
+                        cmd += `^BY${moduleWidth},3.0,${height}`;
+                        cmd += `^BE${orient},${height},${showText},N^FD${bcVal}^FS\n`;
+                        break;
+                    case 'ean8':
+                        cmd += `^BY${moduleWidth},3.0,${height}`;
+                        cmd += `^B8${orient},${height},${showText},N^FD${bcVal}^FS\n`;
+                        break;
+                    case 'upca':
+                        cmd += `^BY${moduleWidth},3.0,${height}`;
+                        cmd += `^BU${orient},${height},${showText},N,Y^FD${bcVal}^FS\n`;
+                        break;
+                    case 'upce':
+                        cmd += `^BY${moduleWidth},3.0,${height}`;
+                        cmd += `^B9${orient},${height},${showText},N,Y^FD${bcVal}^FS\n`;
+                        break;
+                    case 'qrcode':
+                    case 'gs1qrcode': {
+                        const mag = Math.max(3, Math.round(scaleX * 2));
+                        cmd += `^BQ${orient},2,${mag}^FDQA,${bcVal}^FS\n`;
+                        break;
+                    }
+                    case 'datamatrix':
+                    case 'gs1datamatrix': {
+                        const mag = Math.max(3, Math.round(scaleX * 2));
+                        cmd += `^BX${orient},${mag},200^FD${bcVal}^FS\n`;
+                        break;
+                    }
+                    case 'code39':
+                        cmd += `^BY${moduleWidth},3.0,${height}`;
+                        cmd += `^B3${orient},N,${height},${showText},N^FD${bcVal}^FS\n`;
+                        break;
+                    case 'interleaved2of5':
+                        cmd += `^BY${moduleWidth},3.0,${height}`;
+                        cmd += `^B2${orient},${height},${showText},N,N^FD${bcVal}^FS\n`;
+                        break;
+                    default:
+                        // pdf417 / aztec / databar etc. need exact ZPL params that vary by
+                        // firmware — the 'image' protocol renders those reliably via raster.
+                        // Don't silently mislabel: warn and emit Code128 as a visible fallback.
+                        console.warn(`ZplGenerator: barcodeType "${el.barcodeType}" (bcid=${bcid}) has no verified native ZPL command on the 'zpl' protocol — use the 'image' protocol for full symbology support. Falling back to Code128.`);
+                        cmd += `^BY${moduleWidth},3.0,${height}`;
+                        cmd += `^BC${orient},${height},${showText},N,N^FD${bcVal}^FS\n`;
                 }
                 break;
+            }
         }
 
         return cmd;

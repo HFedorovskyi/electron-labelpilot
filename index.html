@@ -5,7 +5,11 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@700;900&display=swap" rel="stylesheet">
+    <!-- Load Outfit asynchronously so an offline POS doesn't block first paint on a DNS
+         timeout. media="print" keeps it non-render-blocking; onload swaps it in once fetched.
+         Offline → it simply never applies and the CSS font-stack fallback is used. -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@700;900&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+    <noscript><link href="https://fonts.googleapis.com/css2?family=Outfit:wght@700;900&display=swap" rel="stylesheet"></noscript>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>electron-labelpilot</title>
   </head>

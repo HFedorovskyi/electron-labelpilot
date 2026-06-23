@@ -31,6 +31,8 @@ export function semverGte(versionA: string, versionB: string): boolean {
 // ---------------------------------------------------------------------------
 export const COMPAT_MATRIX: Record<string, { minServerVersion: string }> = {
     '1.0.0': { minServerVersion: '1.0.0' },
+    // Client 1.3.0 uses the LPI2 license-derived crypto — needs server 1.1.0+.
+    '1.3.0': { minServerVersion: '1.1.0' },
     // Add new entries when a new client version requires a newer server:
     // '2.0.0': { minServerVersion: '2.0.0' },
 };

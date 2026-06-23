@@ -1,6 +1,13 @@
+export interface TableColumn {
+    id: string;
+    key: string;        // row field key resolved per item, e.g. 'name', 'weight_brutto_pack'
+    title: string;      // column header (may wrap)
+    widthRatio: number; // percent of table width (columns sum ≈ 100)
+}
+
 export interface LabelElement {
     id: string;
-    type: 'text' | 'rect' | 'barcode';
+    type: 'text' | 'rect' | 'barcode' | 'table';
     x: number;
     y: number;
     w: number;
@@ -30,6 +37,15 @@ export interface LabelElement {
     showText?: boolean;
     imageData?: string; // Pre-rendered barcode image from server
     moduleWidth?: number; // Explicit module width for barcodes
+
+    // Table specific (labelType 'pallet'). A table is data-driven (data.items) and is
+    // therefore always rendered dynamically — never baked into the cached static layer.
+    columns?: TableColumn[];
+    groupBy?: 'none' | 'nomenclature' | 'batch';
+    sortBy?: 'none' | 'name' | 'date';
+    showHeaders?: boolean;
+    showBorders?: boolean;
+    maxRows?: number;
 }
 
 export interface LabelDoc {

@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { Printer, RefreshCw, Box, AlertCircle, X, Hash, Calendar, Search, Scale, Package, Play, Square, CheckCircle2, Layers } from 'lucide-react';
+import { Printer, RefreshCw, Box, AlertCircle, X, Hash, Calendar, Search, Scale, Package, Play, Square, CheckCircle2, Layers, Trash2 } from 'lucide-react';
 import { generateBarcode, type BarcodeData } from '../utils/barcodeGenerator';
+import { printPalletSheet } from '../utils/palletPrint';
 import { useTranslation } from '../i18n';
 import NumericKeypad from './NumericKeypad';
 import DeleteItemsModal from './DeleteItemsModal';
@@ -47,11 +48,17 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
     const [labelingDate, setLabelingDate] = useState<Date>(new Date());
     const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
     const [syncVersion, setSyncVersion] = useState(0);
+    // Pack-printer readiness indicator + manual-print feedback (parity with WeighingStation).
+    const [printerStatus, setPrinterStatus] = useState<'unknown' | 'ready' | 'unreachable' | 'unconfigured' | 'driver'>('unknown');
+    const [printToast, setPrintToast] = useState<string | null>(null);
+    const [lastPrintInfo, setLastPrintInfo] = useState<{ label: string; time: string } | null>(null);
+    const printToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // Auto-print refs
     const autoPrintFiredRef = useRef(false);
     const isPrintingRef = useRef(false);
     const weightRef = useRef('0.000');
+    const isPalletPrintingRef = useRef(false);
     // Latest active tab for the mounted-once scale-reading listener (avoids stale closure).
     const activeTabRef = useRef(activeTab);
     activeTabRef.current = activeTab;
@@ -106,7 +113,9 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
             } catch (e) { console.error('Failed to load counters', e); }
         };
         syncCounters();
-    }, [selectedProduct]);
+        // syncVersion: re-fetch counters after data-updated (e.g. pallet sheet printed → pallet
+        // closed) so box/pallet counters reset instead of showing stale values.
+    }, [selectedProduct, syncVersion]);
 
     // --- HELPER: getNetWeight ---
     const getNetWeight = () => {
@@ -291,8 +300,10 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
     // Eagerly open TCP/Serial to configured printers so first label doesn't pay the handshake.
     // Re-runs when printerConfig changes (new IP, new connection type).
     useEffect(() => {
-        if (!printerConfig.packPrinter && !printerConfig.boxPrinter) return;
-        window.electron.invoke('printer:warmup', { printerIds: ['pack', 'box'] }).catch(() => { /* best-effort */ });
+        if (!printerConfig.packPrinter && !printerConfig.boxPrinter) { setPrinterStatus('unconfigured'); return; }
+        window.electron.invoke('printer:warmup', { printerIds: ['pack', 'box'] })
+            .then((res: any) => { if (res?.results?.pack) setPrinterStatus(res.results.pack); })
+            .catch(() => { /* best-effort */ });
     }, [printerConfig]);
 
     // Pre-upload static backgrounds for the current templates so first print is a cache hit.
@@ -359,11 +370,19 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
         const max = selectedProduct.max_weight_grams || Infinity;
         if (wGrams < min || wGrams > max) return;
         autoPrintFiredRef.current = true;
-        handlePrint().catch(err => { console.error('Auto-print failed:', err); isPrintingRef.current = false; });
+        handlePrint(true).catch(err => { console.error('Auto-print failed:', err); isPrintingRef.current = false; });
     }, [isStable, selectedProduct, labelDoc, printerConfig.autoPrintOnStable, isReady, stableTrigger, subMode]);
 
+    // Brief auto-dismissing success toast for the manual print (no toast on auto-print).
+    const showPrintToast = (msg: string) => {
+        setPrintToast(msg);
+        if (printToastTimer.current) clearTimeout(printToastTimer.current);
+        printToastTimer.current = setTimeout(() => setPrintToast(null), 1800);
+    };
+    useEffect(() => () => { if (printToastTimer.current) clearTimeout(printToastTimer.current); }, []);
+
     // --- PRINT HANDLER (Scale mode) ---
-    const handlePrint = async () => {
+    const handlePrint = async (isAuto = false) => {
         if (isPrintingRef.current) return;
         isPrintingRef.current = true;
         try {
@@ -419,7 +438,16 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
             window.electron.invoke('print-label', {
                 silent: true, labelDoc, data: finalPrintData,
                 printerConfig: printerConfig.packPrinter || undefined
-            }).catch(console.error);
+            })
+                .then((ok: any) => {
+                    if (printerConfig.packPrinter) setPrinterStatus(ok === false ? 'unreachable' : 'ready');
+                    if (ok !== false) {
+                        const time = new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+                        setLastPrintInfo({ label: String(finalPrintData.pack_number || ''), time });
+                        if (!isAuto) showPrintToast(t('ws.printSentToast'));
+                    }
+                })
+                .catch((err: any) => { console.error(err); if (printerConfig.packPrinter) setPrinterStatus('unreachable'); });
             setLastPrinted({ doc: labelDoc, data: finalPrintData });
 
             const currentNetWeight = parseFloat(finalPrintData.weight_netto_pack);
@@ -437,7 +465,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
             }
         } catch (err) {
             console.error('Print Error:', err);
-            setAlertMessage(`Ошибка: ${err instanceof Error ? err.message : String(err)}`);
+            setAlertMessage(`${t('ws.errorPrefix')}: ${err instanceof Error ? err.message : String(err)}`);
         } finally { isPrintingRef.current = false; }
     };
 
@@ -476,7 +504,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
 
     // --- CLOSE BOX ---
     const handleCloseBox = async () => {
-        if (unitsInBox === 0) { setAlertMessage('Нельзя закрыть пустой короб!'); return; }
+        if (unitsInBox === 0) { setAlertMessage(t('ws.emptyBox')); return; }
         const finalBoxWeight = boxNetWeight;
         const finalUnitsInBox = unitsInBox;
         setUnitsInBox(0); setBoxNetWeight(0); setBoxesInPallet(prev => prev + 1); setTotalBoxes(prev => prev + 1);
@@ -488,7 +516,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
 
     // --- REPEAT ---
     const handleRepeat = async () => {
-        if (!lastPrinted) { setAlertMessage('Нет данных для повторной печати.'); return; }
+        if (!lastPrinted) { setAlertMessage(t('ws.noReprintData')); return; }
         await window.electron.invoke('print-label', { silent: true, labelDoc: lastPrinted.doc, data: lastPrinted.data, printerConfig: printerConfig.packPrinter });
     };
 
@@ -598,7 +626,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                     }
                 } catch (err) {
                     console.error('Count print error:', err);
-                    setAlertMessage(`Ошибка: ${err instanceof Error ? err.message : String(err)}`);
+                    setAlertMessage(`${t('ws.errorPrefix')}: ${err instanceof Error ? err.message : String(err)}`);
                     cancelCountRef.current = true; break;
                 }
                 // Small delay between prints
@@ -627,22 +655,43 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
     // --- RENDER ---
     const inRange = isWeightInRange();
     const wGrams = getWeightGrams();
+    // Glanceable box-fill progress (scale mode), emerald → amber (≥80%) → red (full).
+    const boxFillLimit = Number(selectedProduct?.close_box_counter) || 0;
+    const boxFillPct = boxFillLimit > 0 ? Math.min(100, Math.round((unitsInBox / boxFillLimit) * 100)) : 0;
+    const boxFillColor = boxFillPct >= 100 ? 'bg-red-500' : boxFillPct >= 80 ? 'bg-amber-500' : 'bg-emerald-500';
+    // "Stable" while out-of-range is a false readiness cue → show amber, not green.
+    const stableOutOfRange = isStable && !!selectedProduct && parseFloat(weight) > 0.010 && !inRange;
 
     return (
         <div className="grid grid-cols-12 gap-6 h-full p-4 relative">
             {/* Main Card */}
             <div className="col-span-8 bg-white dark:bg-neutral-900/50 border border-neutral-200 dark:border-white/5 rounded-3xl p-8 backdrop-blur shadow-sm dark:shadow-2xl flex flex-col">
                 {/* Header */}
-                <div className="flex justify-between items-start mb-6">
+                <div className="flex justify-between items-start mb-6 gap-4">
                     <h2 className="text-2xl font-semibold text-neutral-900 dark:text-white">{t('fw.title')}</h2>
-                    {subMode === 'scale' && (
-                        <div className={`px-4 py-2 rounded-full text-sm font-medium flex items-center gap-2 border ${status === 'connected'
+                    <div className="flex items-center gap-2 flex-wrap justify-end">
+                        {subMode === 'scale' && (
+                            <div className={`px-4 py-2 rounded-full text-sm font-medium flex items-center gap-2 border ${status === 'connected'
+                                ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+                                : 'bg-red-500/10 border-red-500/20 text-red-400'}`}>
+                                <span className={`w-2 h-2 rounded-full ${status === 'connected' ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`}></span>
+                                {t('ws.scaleShort')}: {status === 'connected' ? t('ws.scaleStatus.connected') : t('ws.scaleStatus.disconnected')}
+                            </div>
+                        )}
+                        {/* Printer readiness */}
+                        <div className={`px-4 py-2 rounded-full text-sm font-medium flex items-center gap-2 border ${(printerStatus === 'ready' || printerStatus === 'driver')
                             ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
-                            : 'bg-red-500/10 border-red-500/20 text-red-400'}`}>
-                            <span className={`w-2 h-2 rounded-full ${status === 'connected' ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`}></span>
-                            {status === 'connected' ? t('ws.scaleStatus.connected') : t('ws.scaleStatus.disconnected')}
+                            : printerStatus === 'unknown'
+                                ? 'bg-neutral-500/10 border-neutral-500/20 text-neutral-400'
+                                : 'bg-red-500/10 border-red-500/20 text-red-400'}`}>
+                            <Printer className="w-3.5 h-3.5" />
+                            {printerStatus === 'ready' ? t('ws.printerStatus.ready') :
+                                printerStatus === 'driver' ? t('ws.printerStatus.driver') :
+                                    printerStatus === 'unreachable' ? t('ws.printerStatus.unreachable') :
+                                        printerStatus === 'unconfigured' ? t('ws.printerStatus.unconfigured') :
+                                            t('ws.printerStatus')}
                         </div>
-                    )}
+                    </div>
                 </div>
 
                 {/* Sub-mode tabs */}
@@ -697,8 +746,8 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                                     {weight} <span className="text-2xl text-emerald-500/50">{t('ws.kg')}</span>
                                 </div>
                                 {isStable && (
-                                    <div className="mt-2 text-emerald-600 dark:text-emerald-500/60 text-xs font-bold uppercase tracking-widest animate-pulse flex items-center justify-center gap-2">
-                                        <div className="w-1 h-1 rounded-full bg-emerald-500"></div> {t('ws.stable')}
+                                    <div className={`mt-2 text-xs font-bold uppercase tracking-widest animate-pulse flex items-center justify-center gap-2 ${stableOutOfRange ? 'text-amber-600 dark:text-amber-500' : 'text-emerald-600 dark:text-emerald-500/60'}`}>
+                                        <div className={`w-1 h-1 rounded-full ${stableOutOfRange ? 'bg-amber-500' : 'bg-emerald-500'}`}></div> {t('ws.stable')}
                                     </div>
                                 )}
                             </div>
@@ -760,29 +809,27 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                 )}
             </div>
 
-            {/* Control Panel */}
-            <div className="col-span-4 space-y-4 flex flex-col">
+            {/* Control Panel (scrolls if it doesn't fit, so nothing clips on small screens) */}
+            <div className="col-span-4 space-y-4 flex flex-col overflow-y-auto min-h-0">
                 {subMode === 'scale' ? (
                     <>
-                        <button onClick={handlePrint}
-                            disabled={subMode === 'scale' && selectedProduct && parseFloat(weight) > 0.010 && !inRange}
-                            className={`w-full py-8 transition-all rounded-3xl font-bold text-2xl flex items-center justify-center gap-3 border-t border-white/10 ${selectedProduct && parseFloat(weight) > 0.010 && !inRange
-                                ? 'bg-neutral-400 dark:bg-neutral-700 cursor-not-allowed opacity-60'
-                                : 'bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 shadow-[0_10px_40px_-10px_rgba(16,185,129,0.5)]'}`}>
+                        <button onClick={() => handlePrint()}
+                            disabled={!selectedProduct || !labelDoc || status !== 'connected' || !inRange}
+                            className="w-full py-8 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 transition-all rounded-3xl font-bold text-2xl flex items-center justify-center gap-3 border-t border-white/10 shadow-[0_10px_40px_-10px_rgba(16,185,129,0.5)] disabled:opacity-40 disabled:pointer-events-none disabled:shadow-none">
                             <Printer className="w-8 h-8" /> {t('ws.print')}
                         </button>
                         <div className="grid grid-cols-2 gap-4">
-                            <button onClick={handleRepeat} className="py-6 bg-neutral-100 dark:bg-neutral-800/50 hover:bg-neutral-200 dark:hover:bg-neutral-800 border border-neutral-300 dark:border-white/5 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group">
+                            <button onClick={handleRepeat} className="py-8 bg-neutral-100 dark:bg-neutral-800/50 hover:bg-neutral-200 dark:hover:bg-neutral-800 border border-neutral-300 dark:border-white/5 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group">
                                 <RefreshCw className="w-6 h-6 text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-800 dark:group-hover:text-white transition-colors" />
                                 <span className="text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-800 dark:group-hover:text-white uppercase text-xs tracking-widest">{t('ws.reprintSmall')}</span>
                             </button>
-                            <button onClick={handleCloseBox} className="py-6 bg-neutral-100 dark:bg-neutral-800/50 hover:bg-neutral-200 dark:hover:bg-neutral-800 border border-neutral-300 dark:border-white/5 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group">
+                            <button onClick={handleCloseBox} disabled={unitsInBox === 0} className="py-8 bg-neutral-100 dark:bg-neutral-800/50 hover:bg-neutral-200 dark:hover:bg-neutral-800 border border-neutral-300 dark:border-white/5 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group disabled:opacity-40 disabled:pointer-events-none">
                                 <Box className="w-6 h-6 text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-800 dark:group-hover:text-white transition-colors" />
                                 <span className="text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-800 dark:group-hover:text-white uppercase text-xs tracking-widest">{t('ws.closeBox')}</span>
                             </button>
-                            <button onClick={() => setIsDeleteModalOpen(true)} className="py-6 bg-neutral-100 dark:bg-neutral-800/50 hover:bg-red-100 dark:hover:bg-red-900/30 border border-neutral-300 dark:border-white/5 hover:border-red-400 dark:hover:border-red-500/30 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group col-span-2">
-                                <Layers className="w-6 h-6 text-neutral-500 dark:text-neutral-400 group-hover:text-red-600 dark:group-hover:text-red-400 transition-colors" />
-                                <span className="text-neutral-500 dark:text-neutral-400 group-hover:text-red-600 dark:group-hover:text-red-400 uppercase text-xs tracking-widest">{t('ws.delete')}</span>
+                            <button onClick={() => setIsDeleteModalOpen(true)} className="py-8 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/40 border border-red-300 dark:border-red-500/30 hover:border-red-400 dark:hover:border-red-500/50 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group col-span-2">
+                                <Trash2 className="w-6 h-6 text-red-500 dark:text-red-400 transition-colors" />
+                                <span className="text-red-600 dark:text-red-400 uppercase text-xs tracking-widest">{t('ws.delete')}</span>
                             </button>
                         </div>
                     </>
@@ -802,34 +849,49 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                     </>
                 )}
 
+                <button
+                    onClick={() => printPalletSheet({ printerConfig, selectedProduct, t, setAlert: setAlertMessage, operatorName: stationNumber || '', busyRef: isPalletPrintingRef })}
+                    className="w-full py-5 bg-amber-600 hover:bg-amber-500 active:bg-amber-700 transition-all rounded-2xl font-bold text-lg text-white flex items-center justify-center gap-3 shadow-[0_10px_30px_-12px_rgba(217,119,6,0.6)] border-t border-white/10"
+                >
+                    <Layers className="w-6 h-6" />
+                    {t('pallet.printSheet')}
+                </button>
+
                 {/* Session Stats */}
                 <div className="mt-auto p-6 bg-white dark:bg-neutral-900/50 border border-neutral-200 dark:border-white/5 shadow-sm dark:shadow-none rounded-3xl backdrop-blur">
                     <h3 className="text-sm font-semibold mb-4 text-neutral-500 dark:text-white/60 uppercase tracking-widest">{t('ws.sessionStats')}</h3>
                     <div className="space-y-3">
                         <div className="flex justify-between items-center p-3 bg-neutral-100 dark:bg-white/5 border border-neutral-300 dark:border-white/10 rounded-xl group cursor-pointer hover:bg-emerald-50 dark:hover:bg-emerald-500/10 transition-all"
-                            onClick={() => { if (unitsInBox > 0) { setAlertMessage(t('ws.closeBoxBeforeChange')); return; } setIsKeypadOpen(true); }}>
-                            <span className="text-xs uppercase tracking-wider text-neutral-500 font-bold">Партия</span>
+                            onClick={() => { setIsKeypadOpen(true); }}>
+                            <span className="text-xs uppercase tracking-wider text-neutral-500 font-bold">{t('ws.batchLabel')}</span>
                             <div className="flex items-center gap-3">
                                 <span className="text-xl font-mono font-bold text-neutral-900 dark:text-white group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
-                                    {batchNumber || <span className="text-neutral-400 dark:text-neutral-700 italic text-sm">Ввести...</span>}
+                                    {batchNumber || <span className="text-neutral-400 dark:text-neutral-700 italic text-sm">{t('ws.enterPlaceholder')}</span>}
                                 </span>
                                 <div className="p-2 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-white/10 rounded-lg"><Hash className="w-4 h-4 text-emerald-600 dark:text-emerald-500" /></div>
                             </div>
                         </div>
                         <div className="flex justify-between items-center p-3 bg-neutral-100 dark:bg-white/5 border border-neutral-300 dark:border-white/10 rounded-xl group cursor-pointer hover:bg-emerald-50 dark:hover:bg-emerald-500/10 transition-all"
                             onClick={() => { if (unitsInBox > 0) { setAlertMessage(t('ws.closeBoxBeforeChange')); return; } setIsDatePickerOpen(true); }}>
-                            <span className="text-xs uppercase tracking-wider text-neutral-500 font-bold">Дата марк.</span>
+                            <span className="text-xs uppercase tracking-wider text-neutral-500 font-bold">{t('ws.dateLabel')}</span>
                             <div className="flex items-center gap-3">
                                 <span className="text-xl font-mono font-bold text-neutral-900 dark:text-white">{labelingDate.toLocaleDateString('ru-RU')}</span>
                                 <div className="p-2 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-white/10 rounded-lg"><Calendar className="w-4 h-4 text-emerald-600 dark:text-emerald-500" /></div>
                             </div>
                         </div>
-                        <div className="flex justify-between text-sm py-2 border-b border-neutral-200 dark:border-white/5">
-                            <span className="text-neutral-500">{t('ws.inBox')}</span>
-                            <div className="flex items-center gap-2">
-                                <span className="font-mono text-neutral-900 dark:text-white">{unitsInBox}</span>
-                                <span className="text-neutral-500 dark:text-neutral-600">/ {selectedProduct?.close_box_counter || '-'}</span>
+                        <div className="py-2 border-b border-neutral-200 dark:border-white/5">
+                            <div className="flex justify-between text-sm mb-1.5">
+                                <span className="text-neutral-500">{t('ws.inBox')}</span>
+                                <div className="flex items-center gap-2">
+                                    <span className="font-mono text-neutral-900 dark:text-white">{unitsInBox}</span>
+                                    <span className="text-neutral-500 dark:text-neutral-600">/ {selectedProduct?.close_box_counter || '-'}</span>
+                                </div>
                             </div>
+                            {boxFillLimit > 0 && (
+                                <div className="h-2 w-full rounded-full bg-neutral-200 dark:bg-white/10 overflow-hidden">
+                                    <div className={`h-full rounded-full transition-all duration-300 ${boxFillColor}`} style={{ width: `${boxFillPct}%` }}></div>
+                                </div>
+                            )}
                         </div>
                         <div className="flex justify-between text-sm py-2 border-b border-neutral-200 dark:border-white/5">
                             <span className="text-neutral-500">{t('ws.boxesOnPallet')}</span>
@@ -839,9 +901,23 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                             <span className="text-neutral-500">{t('ws.totalUnits')}</span>
                             <span className="font-mono text-neutral-900 dark:text-white">{totalUnits}</span>
                         </div>
+                        {lastPrintInfo && (
+                            <div className="flex justify-between text-xs pt-1 text-amber-600 dark:text-amber-400/80">
+                                <span className="uppercase tracking-wider">{t('ws.lastPrinted')}</span>
+                                <span className="font-mono">#{lastPrintInfo.label} · {lastPrintInfo.time}</span>
+                            </div>
+                        )}
                     </div>
                 </div>
             </div>
+
+            {/* Transient print-success toast (manual print) */}
+            {printToast && (
+                <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[250] px-6 py-3 rounded-2xl bg-emerald-600 text-white font-semibold shadow-[0_10px_30px_-8px_rgba(16,185,129,0.6)] flex items-center gap-2 animate-in fade-in slide-in-from-bottom-2 duration-200">
+                    <Printer className="w-5 h-5" />
+                    {printToast}
+                </div>
+            )}
 
             {/* MODALS */}
             {alertMessage && (
@@ -860,8 +936,8 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                 </div>
             )}
 
-            {isKeypadOpen && <NumericKeypad value={batchNumber} onUpdate={setBatchNumber} onClose={() => setIsKeypadOpen(false)} title="Номер партии" />}
-            {isDatePickerOpen && <DatePickerModal value={labelingDate} onUpdate={setLabelingDate} onClose={() => setIsDatePickerOpen(false)} title="Дата маркировки" />}
+            {isKeypadOpen && <NumericKeypad value={batchNumber} onUpdate={setBatchNumber} onClose={() => setIsKeypadOpen(false)} title={t('ws.batchModalTitle')} />}
+            {isDatePickerOpen && <DatePickerModal value={labelingDate} onUpdate={setLabelingDate} onClose={() => setIsDatePickerOpen(false)} title={t('ws.dateModalTitle')} />}
             {showPacksKeypad && <NumericKeypad value={String(packsPerBoxInput)} onUpdate={(v) => setPacksPerBoxInput(parseInt(v) || 0)} onClose={() => setShowPacksKeypad(false)} title={t('fw.packsPerBox')} />}
             {showBoxesKeypad && <NumericKeypad value={String(totalBoxesInput)} onUpdate={(v) => setTotalBoxesInput(parseInt(v) || 0)} onClose={() => setShowBoxesKeypad(false)} title={t('fw.totalBoxes')} />}
             <DeleteItemsModal isOpen={isDeleteModalOpen} onClose={() => setIsDeleteModalOpen(false)}

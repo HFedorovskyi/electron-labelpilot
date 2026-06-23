@@ -150,6 +150,21 @@ export const migrations: Migration[] = [
             console.log('[Migration v6 down] No-op for marking_date removal');
         }
     },
+    {
+        version: 7,
+        description: 'Add templates_pallet_label column to nomenclature',
+        up(db) {
+            try {
+                db.exec('ALTER TABLE nomenclature ADD COLUMN templates_pallet_label INTEGER;');
+                console.log('[Migration v7] Added templates_pallet_label column to nomenclature');
+            } catch (e: any) {
+                if (!e.message.includes('duplicate column')) throw e;
+            }
+        },
+        down(_db) {
+            // SQLite doesn't support DROP COLUMN easily; this is a no-op
+        }
+    },
 ];
 
 /**

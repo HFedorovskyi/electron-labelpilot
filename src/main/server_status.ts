@@ -3,9 +3,15 @@ import { testConnection } from './sync';
 import { loadPrinterConfig } from './config';
 
 export class ServerStatusManager {
-    private interval: NodeJS.Timeout | null = null;
+    private timer: NodeJS.Timeout | null = null;
     private lastStatus: 'connected' | 'disconnected' = 'disconnected';
     private mainWindow: BrowserWindow | null = null;
+
+    // Adaptive cadence: poll often while disconnected (so reconnection is detected quickly),
+    // but back off once connected — the steady state — to cut the constant 5s HTTP round-trip
+    // on an always-on weak POS. Also skip the network call entirely while the window is hidden.
+    private readonly POLL_CONNECTED_MS = 15000;
+    private readonly POLL_DISCONNECTED_MS = 5000;
 
     constructor() { }
 
@@ -16,21 +22,26 @@ export class ServerStatusManager {
     }
 
     startPolling() {
-        if (this.interval) clearInterval(this.interval);
-
-        // Initial check
-        this.checkConnection();
-
-        // Poll every 5 seconds
-        this.interval = setInterval(() => {
-            this.checkConnection();
-        }, 5000);
+        this.stopPolling();
+        const tick = async () => {
+            const hidden = !this.mainWindow || this.mainWindow.isDestroyed() || !this.mainWindow.isVisible();
+            if (!hidden) {
+                await this.checkConnection();
+            }
+            const delay = this.lastStatus === 'connected' ? this.POLL_CONNECTED_MS : this.POLL_DISCONNECTED_MS;
+            this.timer = setTimeout(tick, delay);
+        };
+        // Initial immediate check, then self-schedule with adaptive delay.
+        this.checkConnection().finally(() => {
+            const delay = this.lastStatus === 'connected' ? this.POLL_CONNECTED_MS : this.POLL_DISCONNECTED_MS;
+            this.timer = setTimeout(tick, delay);
+        });
     }
 
     stopPolling() {
-        if (this.interval) {
-            clearInterval(this.interval);
-            this.interval = null;
+        if (this.timer) {
+            clearTimeout(this.timer);
+            this.timer = null;
         }
     }
 

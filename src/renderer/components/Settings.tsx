@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Save, RefreshCw, Settings as SettingsIcon, Printer, Languages, Moon, Sun, Monitor } from 'lucide-react';
 import PrinterSettings from './PrinterSettings';
 import UpdateSettings from './UpdateSettings';
@@ -61,6 +61,16 @@ const Settings = () => {
             baudRate: 9600,
             dpi: 203
         },
+        palletPrinter: {
+            id: 'pallet_default',
+            active: false,
+            name: 'Pallet Printer',
+            connection: 'windows_driver',
+            protocol: 'image',
+            port: 9100,
+            baudRate: 9600,
+            dpi: 203
+        },
         autoPrintOnStable: true,
         serverIp: ''
     });
@@ -69,6 +79,9 @@ const Settings = () => {
     const [toastMessage, setToastMessage] = useState<string | null>(null);
     const [showResetModal, setShowResetModal] = useState(false);
     const [isResetting, setIsResetting] = useState(false);
+    const [resetConfirmText, setResetConfirmText] = useState('');
+    // Snapshot of the last saved scale+printer config; drives the "unsaved changes" sticky bar.
+    const savedSnapshotRef = useRef<string>('');
 
     useEffect(() => {
         loadData();
@@ -91,22 +104,57 @@ const Settings = () => {
             setPorts(portsList);
             setProtocols(protocolsList);
 
-            if (savedPrinterConfig) setPrinterConfig(savedPrinterConfig);
+            // Merge over the state defaults so EVERY printer role always exists in state,
+            // even if the backend response omits one (e.g. an older config without a
+            // palletPrinter). Otherwise the pallet block would lose its editable config.
+            let nextPrinter = printerConfig;
+            if (savedPrinterConfig) {
+                nextPrinter = {
+                    ...printerConfig,
+                    ...savedPrinterConfig,
+                    packPrinter: savedPrinterConfig.packPrinter || printerConfig.packPrinter,
+                    boxPrinter: savedPrinterConfig.boxPrinter || printerConfig.boxPrinter,
+                    palletPrinter: savedPrinterConfig.palletPrinter || printerConfig.palletPrinter,
+                };
+                setPrinterConfig(nextPrinter);
+            }
             if (printersList) setPrinters(printersList);
 
+            let nextConfig = config;
             if (savedConfig) {
+                nextConfig = savedConfig;
                 setConfig(savedConfig);
             } else if (portsList.length > 0 && !config.path) {
-                setConfig(prev => ({ ...prev, path: portsList[0].path }));
+                nextConfig = { ...config, path: portsList[0].path };
+                setConfig(nextConfig);
             }
+            // Baseline for unsaved-changes detection.
+            savedSnapshotRef.current = JSON.stringify({ config: nextConfig, printerConfig: nextPrinter });
         } catch (err) {
             console.error("Failed to load settings data", err);
         }
     };
 
+    const isValidIpStr = (ip: string) => /^(\d{1,3}\.){3}\d{1,3}$/.test(ip) && ip.split('.').every(o => Number(o) <= 255);
+
+    // Block saving an obviously-broken config (bad printer IP / out-of-range port).
+    const validateConfig = (): string | null => {
+        for (const role of ['packPrinter', 'boxPrinter', 'palletPrinter'] as const) {
+            const p = printerConfig[role];
+            if (p && p.connection === 'tcp') {
+                if (p.ip && !isValidIpStr(p.ip)) return t('settings.invalidConfig');
+                if (p.port != null && (p.port < 1 || p.port > 65535)) return t('settings.invalidConfig');
+            }
+        }
+        return null;
+    };
+
     const handleSave = () => {
+        const err = validateConfig();
+        if (err) { showToast(err); return; }
         window.electron.send('save-scale-config', config);
         window.electron.send('save-printer-config', printerConfig);
+        savedSnapshotRef.current = JSON.stringify({ config, printerConfig });
         showToast(t('settings.saved'));
     };
 
@@ -122,7 +170,7 @@ const Settings = () => {
             showToast(t('settings.connectionSuccess'));
         } catch (error) {
             console.error('Connection test failed:', error);
-            showToast(t('settings.connectionFailed'));
+            showToast(`${t('settings.connectionFailed')}: ${error instanceof Error ? error.message : String(error)}`);
         } finally {
             setIsSyncing(false);
         }
@@ -137,19 +185,21 @@ const Settings = () => {
                 // Reload data to reflect empty state
                 window.location.reload();
             } else {
-                showToast(res.message);
+                // Keep the modal open on failure so the admin sees the reason and can retry.
+                showToast(res.message || t('settings.resetFailed'));
+                setIsResetting(false);
             }
         } catch (error) {
             console.error('Reset failed:', error);
-            showToast('Reset failed');
-        } finally {
+            showToast(`${t('settings.resetFailed')}: ${error instanceof Error ? error.message : String(error)}`);
             setIsResetting(false);
-            setShowResetModal(false);
         }
     };
 
+    const isDirty = savedSnapshotRef.current !== '' && JSON.stringify({ config, printerConfig }) !== savedSnapshotRef.current;
+
     return (
-        <div className="bg-transparent min-h-screen text-neutral-900 dark:text-white p-8 relative">
+        <div className="bg-transparent min-h-screen text-neutral-900 dark:text-white p-8 relative pb-28">
             {/* Toast Notification */}
             {toastMessage && (
                 <div className="fixed bottom-8 right-8 bg-emerald-600 text-white px-6 py-3 rounded-xl shadow-2xl flex items-center gap-3 animate-bounce z-50">
@@ -163,9 +213,26 @@ const Settings = () => {
                 {t('settings.title')}
             </h1>
 
-            <div className="space-y-8 max-w-4xl">
+            {/* Sticky unsaved-changes save bar (printer + scale configs) */}
+            {isDirty && (
+                <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-4 px-6 py-3 rounded-2xl bg-neutral-900 dark:bg-neutral-800 text-white shadow-2xl border border-white/10 animate-in fade-in slide-in-from-bottom-2 duration-200">
+                    <span className="flex items-center gap-2 text-sm font-medium">
+                        <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+                        {t('settings.unsavedChanges')}
+                    </span>
+                    <button
+                        onClick={handleSave}
+                        className="flex items-center gap-2 px-5 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-xl font-semibold text-white transition-all active:scale-95"
+                    >
+                        <Save size={16} />
+                        {t('settings.saveAll')}
+                    </button>
+                </div>
+            )}
+
+            <div className="space-y-8 max-w-7xl">
                 {/* ── Theme Configuration ── */}
-                <div className="p-6 bg-white dark:bg-white/5 border border-neutral-200 dark:border-white/10 rounded-2xl shadow-sm dark:shadow-none">
+                <div className="p-6 bg-white dark:bg-white/5 border border-neutral-200 dark:border-white/20 rounded-2xl shadow-sm dark:shadow-none">
                     <h2 className="text-xl font-semibold mb-6 flex items-center gap-3 text-neutral-800 dark:text-emerald-400">
                         <Moon className="w-6 h-6" />
                         {t('settings.theme') || 'Appearance'}
@@ -175,7 +242,7 @@ const Settings = () => {
                             onClick={() => setTheme('light')}
                             className={`px-6 py-3 rounded-xl border transition-all font-medium flex items-center gap-2 ${theme === 'light'
                                 ? 'bg-emerald-600 border-emerald-600 text-white shadow-lg shadow-emerald-500/20'
-                                : 'bg-neutral-50 dark:bg-black/20 border-neutral-200 dark:border-white/10 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/5'
+                                : 'bg-neutral-50 dark:bg-black/20 border-neutral-200 dark:border-white/20 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/5'
                                 }`}
                         >
                             <Sun size={18} /> Light
@@ -184,7 +251,7 @@ const Settings = () => {
                             onClick={() => setTheme('dark')}
                             className={`px-6 py-3 rounded-xl border transition-all font-medium flex items-center gap-2 ${theme === 'dark'
                                 ? 'bg-emerald-600 border-emerald-600 text-white shadow-lg shadow-emerald-500/20'
-                                : 'bg-neutral-50 dark:bg-black/20 border-neutral-200 dark:border-white/10 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/5'
+                                : 'bg-neutral-50 dark:bg-black/20 border-neutral-200 dark:border-white/20 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/5'
                                 }`}
                         >
                             <Moon size={18} /> Dark
@@ -193,7 +260,7 @@ const Settings = () => {
                             onClick={() => setTheme('system')}
                             className={`px-6 py-3 rounded-xl border transition-all font-medium flex items-center gap-2 ${theme === 'system'
                                 ? 'bg-emerald-600 border-emerald-600 text-white shadow-lg shadow-emerald-500/20'
-                                : 'bg-neutral-50 dark:bg-black/20 border-neutral-200 dark:border-white/10 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/5'
+                                : 'bg-neutral-50 dark:bg-black/20 border-neutral-200 dark:border-white/20 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/5'
                                 }`}
                         >
                             <Monitor size={18} /> System
@@ -202,7 +269,7 @@ const Settings = () => {
                 </div>
 
                 {/* ── Language Configuration ── */}
-                <div className="p-6 bg-white dark:bg-white/5 border border-neutral-200 dark:border-white/10 rounded-2xl shadow-sm dark:shadow-none">
+                <div className="p-6 bg-white dark:bg-white/5 border border-neutral-200 dark:border-white/20 rounded-2xl shadow-sm dark:shadow-none">
                     <h2 className="text-xl font-semibold mb-6 flex items-center gap-3 text-emerald-400">
                         <Languages className="w-6 h-6" />
                         {t('settings.language')}
@@ -214,17 +281,17 @@ const Settings = () => {
                                 onClick={() => setLang(l)}
                                 className={`px-6 py-3 rounded-xl border transition-all font-medium ${lang === l
                                     ? 'bg-emerald-600 border-emerald-600 text-white shadow-lg shadow-emerald-500/20'
-                                    : 'bg-neutral-50 dark:bg-black/20 border-neutral-200 dark:border-white/10 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/5'
+                                    : 'bg-neutral-50 dark:bg-black/20 border-neutral-200 dark:border-white/20 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/5'
                                     }`}
                             >
-                                {l.toUpperCase()}
+                                {({ ru: '🇷🇺 Русский', en: '🇬🇧 English', de: '🇩🇪 Deutsch' } as Record<string, string>)[l] || l.toUpperCase()}
                             </button>
                         ))}
                     </div>
                 </div>
 
                 {/* ── Server Configuration ── */}
-                <div className="p-6 bg-white dark:bg-white/5 border border-neutral-200 dark:border-white/10 rounded-2xl shadow-sm dark:shadow-none">
+                <div className="p-6 bg-white dark:bg-white/5 border border-neutral-200 dark:border-white/20 rounded-2xl shadow-sm dark:shadow-none">
                     <h2 className="text-xl font-semibold mb-6 flex items-center gap-3 text-blue-600 dark:text-blue-400">
                         <SettingsIcon className="w-6 h-6" />
                         {t('sidebar.serverStatus')}
@@ -237,7 +304,7 @@ const Settings = () => {
                                 value={printerConfig.serverIp || ''}
                                 onChange={(e) => setPrinterConfig({ ...printerConfig, serverIp: e.target.value })}
                                 placeholder={t('settings.serverIpPlaceholder')}
-                                className="w-full bg-white dark:bg-black/30 border border-neutral-200 dark:border-white/10 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-all hover:bg-neutral-50 dark:hover:bg-black/40 font-mono"
+                                className="w-full bg-white dark:bg-black/30 border border-neutral-200 dark:border-white/20 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-all hover:bg-neutral-50 dark:hover:bg-black/40 font-mono"
                             />
                             <button
                                 onClick={handleSync}
@@ -302,29 +369,47 @@ const Settings = () => {
                 </div>
 
                 {/* ── Printer Configuration ── */}
-                <div className="p-6 bg-white dark:bg-white/5 border border-neutral-200 dark:border-white/10 rounded-2xl shadow-sm dark:shadow-none">
+                <div className="p-6 bg-white dark:bg-white/5 border border-neutral-200 dark:border-white/20 rounded-2xl shadow-sm dark:shadow-none">
                     <h2 className="text-xl font-semibold mb-6 flex items-center gap-3 text-amber-600 dark:text-amber-400">
                         <Printer className="w-6 h-6" />
                         {t('settings.printer')}
                     </h2>
 
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
                         {/* Pack Label Printer */}
                         <PrinterSettings
                             title={t('settings.packPrinter')}
+                            description={t('settings.packPrinterDesc')}
+                            accentClass="border-l-emerald-500"
                             config={printerConfig.packPrinter as any}
                             onChange={(newConfig) => setPrinterConfig({ ...printerConfig, packPrinter: newConfig as any })}
                             systemPrinters={printers}
                             serialPorts={ports}
+                            onToast={showToast}
                         />
 
                         {/* Box Label Printer */}
                         <PrinterSettings
                             title={t('settings.boxPrinter')}
+                            description={t('settings.boxPrinterDesc')}
+                            accentClass="border-l-blue-500"
                             config={printerConfig.boxPrinter as any}
                             onChange={(newConfig) => setPrinterConfig({ ...printerConfig, boxPrinter: newConfig as any })}
                             systemPrinters={printers}
                             serialPorts={ports}
+                            onToast={showToast}
+                        />
+
+                        {/* Pallet Sheet Printer */}
+                        <PrinterSettings
+                            title={t('settings.palletPrinter')}
+                            description={t('settings.palletPrinterDesc')}
+                            accentClass="border-l-amber-500"
+                            config={printerConfig.palletPrinter as any}
+                            onChange={(newConfig) => setPrinterConfig({ ...printerConfig, palletPrinter: newConfig as any })}
+                            systemPrinters={printers}
+                            serialPorts={ports}
+                            onToast={showToast}
                         />
                     </div>
 
@@ -357,15 +442,16 @@ const Settings = () => {
                 </div>
 
                 {/* ── Scale Configuration ── */}
-                <div className="p-6 bg-white dark:bg-white/5 border border-neutral-200 dark:border-white/10 rounded-2xl shadow-sm dark:shadow-none">
-                    <h2 className="text-xl font-semibold mb-6 text-neutral-900 dark:text-white">{t('settings.scales')}</h2>
+                <div className="p-6 bg-white dark:bg-white/5 border border-neutral-200 dark:border-white/20 rounded-2xl shadow-sm dark:shadow-none">
+                    <h2 className="text-xl font-semibold mb-1 text-neutral-900 dark:text-white">{t('settings.scales')}</h2>
+                    <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-6">{t('settings.scalesDesc')}</p>
 
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                         {/* Left Column: Connection */}
                         <div className="space-y-6">
                             <h3 className="text-lg font-medium text-neutral-800 dark:text-white/80 border-b border-neutral-200 dark:border-white/5 pb-2">{t('settings.connectionInterface')}</h3>
 
-                            <div className="flex bg-neutral-100 dark:bg-black/20 p-1.5 rounded-xl border border-neutral-200 dark:border-white/10 w-full mb-2">
+                            <div className="flex bg-neutral-100 dark:bg-black/20 p-1.5 rounded-xl border border-neutral-200 dark:border-white/20 w-full mb-2">
                                 <button
                                     onClick={() => {
                                         setConfig({ ...config, type: 'serial' });
@@ -413,7 +499,7 @@ const Settings = () => {
                                         <select
                                             value={config.path}
                                             onChange={(e) => setConfig({ ...config, path: e.target.value })}
-                                            className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-white/10 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                                            className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-white/20 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
                                         >
                                             {ports.map(p => (
                                                 <option key={p.path} value={p.path}>{p.path} {p.manufacturer ? `(${p.manufacturer})` : ''}</option>
@@ -426,7 +512,7 @@ const Settings = () => {
                                         <select
                                             value={config.baudRate}
                                             onChange={(e) => setConfig({ ...config, baudRate: Number(e.target.value) })}
-                                            className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-white/10 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                                            className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-white/20 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
                                         >
                                             {[1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200].map(rate => (
                                                 <option key={rate} value={rate}>{rate}</option>
@@ -444,7 +530,7 @@ const Settings = () => {
                                             type="text"
                                             value={config.host}
                                             onChange={(e) => setConfig({ ...config, host: e.target.value })}
-                                            className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-white/10 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                                            className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-white/20 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
                                         />
                                     </div>
                                     <div>
@@ -453,7 +539,7 @@ const Settings = () => {
                                             type="number"
                                             value={config.port}
                                             onChange={(e) => setConfig({ ...config, port: Number(e.target.value) })}
-                                            className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-white/10 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                                            className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-white/20 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
                                         />
                                     </div>
                                 </div>
@@ -469,14 +555,14 @@ const Settings = () => {
                                 <select
                                     value={config.protocolId}
                                     onChange={(e) => setConfig({ ...config, protocolId: e.target.value })}
-                                    className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-white/10 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                                    className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-white/20 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
                                     disabled={config.type === 'simulator'}
                                 >
                                     {protocols.map(p => (
                                         <option key={p.id} value={p.id}>{p.name}</option>
                                     ))}
                                 </select>
-                                <p className="mt-2 text-xs text-neutral-500 dark:text-white/40">
+                                <p className="mt-2 text-xs text-neutral-500 dark:text-white/60">
                                     {protocols.find(p => p.id === config.protocolId)?.description}
                                 </p>
                             </div>
@@ -498,7 +584,7 @@ const Settings = () => {
                                                 className={`px-3 py-3 rounded-xl border text-sm transition-all ${
                                                     active
                                                         ? 'border-emerald-500 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
-                                                        : 'border-neutral-200 dark:border-white/10 bg-neutral-50 dark:bg-black/20 text-neutral-700 dark:text-neutral-300 hover:border-emerald-400/50'
+                                                        : 'border-neutral-200 dark:border-white/20 bg-neutral-50 dark:bg-black/20 text-neutral-700 dark:text-neutral-300 hover:border-emerald-400/50'
                                                 }`}
                                             >
                                                 <div className="font-semibold">{p.label}</div>
@@ -516,7 +602,7 @@ const Settings = () => {
                                         type="number"
                                         value={config.pollingInterval}
                                         onChange={(e) => setConfig({ ...config, pollingInterval: Number(e.target.value) })}
-                                        className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-white/10 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                                        className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-white/20 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
                                     />
                                 </div>
                                 <div>
@@ -525,22 +611,13 @@ const Settings = () => {
                                         type="number"
                                         value={config.stabilityCount}
                                         onChange={(e) => setConfig({ ...config, stabilityCount: Number(e.target.value) })}
-                                        className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-white/10 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                                        className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-white/20 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
                                     />
                                 </div>
                             </div>
                         </div>
                     </div>
 
-                    <div className="mt-8 flex justify-end pt-6 border-t border-white/5">
-                        <button
-                            onClick={handleSave}
-                            className="flex items-center gap-2 px-8 py-3 bg-emerald-600 hover:bg-emerald-500 hover:shadow-lg hover:shadow-emerald-500/20 rounded-xl font-semibold text-white transition-all transform active:scale-95"
-                        >
-                            <Save size={18} />
-                            {t('settings.save')}
-                        </button>
-                    </div>
                 </div>
 
                 {/* ── Updates ── */}
@@ -583,9 +660,9 @@ const Settings = () => {
                 <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
                     <div
                         className="absolute inset-0 bg-neutral-900/40 dark:bg-black/80 backdrop-blur-sm"
-                        onClick={() => !isResetting && setShowResetModal(false)}
+                        onClick={() => { if (!isResetting) { setShowResetModal(false); setResetConfirmText(''); } }}
                     />
-                    <div className="relative bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-white/10 rounded-3xl p-8 max-w-md w-full shadow-2xl animate-in fade-in zoom-in duration-200">
+                    <div className="relative bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-white/20 rounded-3xl p-8 max-w-md w-full shadow-2xl animate-in fade-in zoom-in duration-200">
                         <div className="w-16 h-16 bg-red-100 dark:bg-red-500/10 rounded-full flex items-center justify-center mb-6 mx-auto">
                             <RefreshCw className="w-8 h-8 text-red-600 dark:text-red-500" />
                         </div>
@@ -593,22 +670,33 @@ const Settings = () => {
                         <h3 className="text-2xl font-bold text-center mb-2 text-neutral-900 dark:text-white">
                             {t('settings.resetConfirmTitle') || 'Are you absolutely sure?'}
                         </h3>
-                        <p className="text-neutral-600 dark:text-neutral-400 text-center mb-8">
+                        <p className="text-neutral-600 dark:text-neutral-400 text-center mb-4">
                             {t('settings.resetConfirmDesc') || 'This will wipe all local data and reset the station identity. You will need to re-import the identity file to use the application.'}
                         </p>
+
+                        {/* Type-to-confirm guard — prevents accidental touchscreen reset */}
+                        <input
+                            type="text"
+                            value={resetConfirmText}
+                            onChange={(e) => setResetConfirmText(e.target.value)}
+                            placeholder="RESET"
+                            autoFocus
+                            className="w-full text-center font-mono tracking-widest uppercase bg-neutral-50 dark:bg-black/30 border border-neutral-300 dark:border-white/20 rounded-xl px-4 py-3 text-neutral-900 dark:text-white mb-2 focus:outline-none focus:ring-2 focus:ring-red-500/50"
+                        />
+                        <p className="text-xs text-center text-neutral-500 dark:text-neutral-400 mb-6">{t('settings.resetTypeHint')}</p>
 
                         <div className="flex gap-4">
                             <button
                                 disabled={isResetting}
-                                onClick={() => setShowResetModal(false)}
+                                onClick={() => { setShowResetModal(false); setResetConfirmText(''); }}
                                 className="flex-1 px-6 py-3 bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-900 dark:text-white font-medium rounded-xl transition-all"
                             >
                                 {t('common.cancel') || 'Cancel'}
                             </button>
                             <button
-                                disabled={isResetting}
+                                disabled={isResetting || resetConfirmText.trim().toUpperCase() !== 'RESET'}
                                 onClick={handleReset}
-                                className={`flex-1 px-6 py-3 bg-red-600 hover:bg-red-500 text-white font-medium rounded-xl transition-all flex items-center justify-center gap-2 ${isResetting ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                className="flex-1 px-6 py-3 bg-red-600 hover:bg-red-500 text-white font-medium rounded-xl transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-red-600"
                             >
                                 {isResetting ? (
                                     <RefreshCw className="w-5 h-5 animate-spin" />

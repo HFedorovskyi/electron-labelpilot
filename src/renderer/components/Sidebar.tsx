@@ -1,5 +1,5 @@
 import React from 'react';
-import { Scale, Settings, Package, Database, LogOut, ChevronLeft, Menu, Weight, ClipboardList } from 'lucide-react';
+import { Scale, Settings, Package, LogOut, ChevronLeft, Menu, Weight, ClipboardList } from 'lucide-react';
 import clsx from 'clsx';
 import { useTranslation } from '../i18n';
 import packageJson from '../../../package.json';
@@ -21,7 +21,6 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, serverStatus
         { id: 'fixedWeight', labelKey: 'sidebar.fixedWeight', icon: Weight },
         { id: 'printJob', labelKey: 'sidebar.printJob', icon: ClipboardList },
         { id: 'products', labelKey: 'sidebar.products', icon: Package },
-        { id: 'database', labelKey: 'sidebar.database', icon: Database },
         { id: 'settings', labelKey: 'sidebar.settings', icon: Settings },
     ];
 
@@ -43,7 +42,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, serverStatus
                     <>
                         <div className="flex items-center gap-1.5 overflow-hidden">
                             <div className="flex items-center justify-center shrink-0">
-                                <img src="./sidebar-logo.svg" alt="LabelPilot Logo" className="w-10 h-10 dark:filter dark:grayscale dark:brightness-200" style={{ filter: 'var(--logo-filter, invert(100%))' }} />
+                                <img src="./sidebar-logo.svg" alt="LabelPilot Logo" className="w-10 h-10 dark:filter dark:grayscale dark:brightness-200" />
                             </div>
                             <h1 className="text-2xl font-black tracking-tighter whitespace-nowrap text-neutral-800 dark:text-neutral-300" style={{ fontFamily: "'Outfit', sans-serif", textShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>LabelPilot</h1>
                         </div>

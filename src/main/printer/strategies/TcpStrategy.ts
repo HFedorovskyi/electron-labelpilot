@@ -5,10 +5,28 @@ import * as net from 'net';
 export class TcpStrategy implements IConnectionStrategy {
     private socket: net.Socket | null = null;
     private connected: boolean = false;
-    // private config: PrinterDeviceConfig | null = null;
+    private idleTimer: NodeJS.Timeout | null = null;
+    // Close the socket shortly after the last write. Many ZPL-over-TCP receivers finalize a
+    // print job on connection close (e.g. Virtual ZPL Printer / Labelary-based tools) rather
+    // than on ^XZ — a persistent socket would buffer forever and never render. Real printers
+    // render on ^XZ and are unaffected. During a burst (pipelined batch) consecutive writes
+    // reset the timer, so the socket is reused; it closes only once printing goes idle.
+    private static readonly IDLE_CLOSE_MS = 400;
+
+    private clearIdleClose() {
+        if (this.idleTimer) { clearTimeout(this.idleTimer); this.idleTimer = null; }
+    }
+
+    private scheduleIdleClose() {
+        this.clearIdleClose();
+        this.idleTimer = setTimeout(() => {
+            this.idleTimer = null;
+            this.disconnect().catch(() => { /* best-effort */ });
+        }, TcpStrategy.IDLE_CLOSE_MS);
+    }
 
     async connect(config: PrinterDeviceConfig): Promise<void> {
-        // this.config = config;
+        this.clearIdleClose();
         return new Promise((resolve, reject) => {
             if (this.socket) {
                 this.disconnect();
@@ -45,6 +63,7 @@ export class TcpStrategy implements IConnectionStrategy {
     }
 
     async disconnect(): Promise<void> {
+        this.clearIdleClose();
         if (this.socket) {
             this.socket.destroy();
             this.socket = null;
@@ -53,6 +72,7 @@ export class TcpStrategy implements IConnectionStrategy {
     }
 
     async send(data: Buffer): Promise<void> {
+        this.clearIdleClose();
         return new Promise((resolve, reject) => {
             if (!this.socket || !this.connected) {
                 // Auto-reconnect attempt could go here, but let's fail fast for now
@@ -61,7 +81,7 @@ export class TcpStrategy implements IConnectionStrategy {
 
             this.socket.write(data, (err) => {
                 if (err) reject(err);
-                else resolve();
+                else { this.scheduleIdleClose(); resolve(); }
             });
         });
     }
@@ -74,6 +94,7 @@ export class TcpStrategy implements IConnectionStrategy {
     async query(data: Buffer, timeoutMs: number): Promise<Buffer | null> {
         if (!this.socket || !this.connected) return null;
         const socket = this.socket;
+        this.clearIdleClose(); // keep the socket open to read the reply
 
         return new Promise<Buffer | null>((resolve) => {
             const chunks: Buffer[] = [];
@@ -85,6 +106,7 @@ export class TcpStrategy implements IConnectionStrategy {
                 socket.removeListener('data', onData);
                 socket.removeListener('error', onError);
                 clearTimeout(timer);
+                this.scheduleIdleClose();
                 resolve(result);
             };
 

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Download, RefreshCw, RotateCcw, HardDrive, CheckCircle, AlertTriangle, XCircle } from 'lucide-react';
+import { useTranslation } from '../i18n';
 
 interface BackupInfo {
     id: string;
@@ -36,6 +37,7 @@ const formatDate = (iso: string) => {
 };
 
 const UpdateSettings = () => {
+    const { t } = useTranslation();
     const [currentVersion, setCurrentVersion] = useState<string>('...');
     const [phase, setPhase] = useState<UpdatePhase>('idle');
     const [updateInfo, setUpdateInfo] = useState<UpdateCheckResult | null>(null);
@@ -97,7 +99,7 @@ const UpdateSettings = () => {
             }
         } catch (err: any) {
             setPhase('error');
-            setErrorMsg(err.message || 'Ошибка проверки обновлений');
+            setErrorMsg(err.message || t('updates.checkError'));
         }
     };
 
@@ -108,7 +110,7 @@ const UpdateSettings = () => {
             await window.electron.invoke('updater:download');
         } catch (err: any) {
             setPhase('error');
-            setErrorMsg(err.message || 'Ошибка загрузки');
+            setErrorMsg(err.message || t('updates.downloadError'));
         }
     };
 
@@ -152,14 +154,14 @@ const UpdateSettings = () => {
 
     const phaseText = () => {
         switch (phase) {
-            case 'idle': return 'Нажмите «Проверить» для поиска обновлений';
-            case 'checking': return 'Проверка обновлений...';
-            case 'up-to-date': return 'Установлена последняя версия';
-            case 'available': return `Доступна версия ${updateInfo?.version}`;
-            case 'incompatible': return `Версия ${updateInfo?.version} несовместима с текущим сервером`;
-            case 'downloading': return `Загрузка... ${progress}%`;
-            case 'ready': return `Версия ${updateInfo?.version} загружена. Готова к установке.`;
-            case 'error': return `Ошибка: ${errorMsg}`;
+            case 'idle': return t('updates.idlePrompt');
+            case 'checking': return t('updates.checking');
+            case 'up-to-date': return t('updates.upToDate');
+            case 'available': return `${t('updates.available')} ${updateInfo?.version || ''}`;
+            case 'incompatible': return t('updates.incompatible');
+            case 'downloading': return `${t('updates.downloading')} ${progress}%`;
+            case 'ready': return t('updates.ready');
+            case 'error': return `${t('updates.errorPrefix')}: ${errorMsg}`;
         }
     };
 
@@ -167,13 +169,13 @@ const UpdateSettings = () => {
         <div className="p-6 bg-white dark:bg-white/5 border border-neutral-200 dark:border-white/10 rounded-2xl space-y-6 shadow-sm dark:shadow-none">
             <h2 className="text-xl font-semibold flex items-center gap-3 text-sky-600 dark:text-sky-400">
                 <Download className="w-6 h-6" />
-                Обновления приложения
+                {t('updates.title')}
             </h2>
 
             {/* Version & Status */}
             <div className="flex items-center justify-between p-4 bg-neutral-50 dark:bg-black/20 rounded-xl border border-neutral-300 dark:border-white/5">
                 <div>
-                    <div className="text-sm text-neutral-600 dark:text-neutral-400">Текущая версия</div>
+                    <div className="text-sm text-neutral-600 dark:text-neutral-400">{t('updates.currentVersion')}</div>
                     <div className="text-2xl font-mono font-bold text-neutral-900 dark:text-white">v{currentVersion}</div>
                 </div>
                 <div className="flex items-center gap-2 text-sm">
@@ -209,7 +211,7 @@ const UpdateSettings = () => {
                     className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                     <RefreshCw className={`w-4 h-4 ${phase === 'checking' ? 'animate-spin' : ''}`} />
-                    Проверить обновления
+                    {t('updates.checkNow')}
                 </button>
 
                 {phase === 'available' && (
@@ -218,7 +220,7 @@ const UpdateSettings = () => {
                         className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-medium transition-all"
                     >
                         <Download className="w-4 h-4" />
-                        Скачать v{updateInfo?.version}
+                        {t('updates.download')} v{updateInfo?.version}
                     </button>
                 )}
 
@@ -228,7 +230,7 @@ const UpdateSettings = () => {
                         className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-medium transition-all animate-pulse"
                     >
                         <CheckCircle className="w-4 h-4" />
-                        Установить и перезапустить
+                        {t('updates.install')}
                     </button>
                 )}
 
@@ -237,7 +239,7 @@ const UpdateSettings = () => {
                     className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-neutral-100 dark:bg-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-600 border border-neutral-300 dark:border-white/10 text-neutral-800 dark:text-white font-medium transition-all"
                 >
                     <HardDrive className="w-4 h-4" />
-                    Установить с USB (.exe)
+                    {t('updates.installOffline')}
                 </button>
             </div>
 
@@ -246,19 +248,19 @@ const UpdateSettings = () => {
                 <div className="flex items-center justify-between mb-3">
                     <h3 className="text-base font-semibold text-neutral-800 dark:text-neutral-300 flex items-center gap-2">
                         <RotateCcw className="w-4 h-4 text-neutral-500 dark:text-neutral-400" />
-                        Резервные копии (откат)
+                        {t('updates.backups')}
                     </h3>
                     <button
                         onClick={loadBackups}
                         className="text-xs text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white flex items-center gap-1 transition-colors"
                     >
                         <RefreshCw className={`w-3 h-3 ${loadingBackups ? 'animate-spin' : ''}`} />
-                        Обновить
+                        {t('updates.refresh')}
                     </button>
                 </div>
 
                 {backups.length === 0 ? (
-                    <p className="text-sm text-neutral-500">Резервных копий нет</p>
+                    <p className="text-sm text-neutral-500">{t('updates.noBackups')}</p>
                 ) : (
                     <div className="space-y-2 mb-4">
                         {backups.map(b => (
@@ -295,7 +297,7 @@ const UpdateSettings = () => {
                             className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-amber-50 dark:bg-amber-600/20 hover:bg-amber-100 dark:hover:bg-amber-600 border border-amber-200 dark:border-amber-600/30 hover:border-amber-400 dark:hover:border-amber-600 text-amber-700 dark:text-amber-400 hover:text-amber-800 dark:hover:text-white font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             <RotateCcw className={`w-4 h-4 ${rollingBack ? 'animate-spin' : ''}`} />
-                            Откатить на выбранную копию
+                            {t('updates.rollback')}
                         </button>
                         {rollbackMsg && (
                             <span className="text-sm text-neutral-600 dark:text-neutral-300">{rollbackMsg}</span>

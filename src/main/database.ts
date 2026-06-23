@@ -6,6 +6,16 @@ import log from './logger';
 
 let db: Database.Database | null = null;
 
+// Lazily-prepared statements reused by SQL text. Avoids recompiling identical SQL on hot
+// paths (per-print recordPack, product search). Cleared when the db is recreated (reset).
+const stmtCache = new Map<string, Database.Statement>();
+function prep(sql: string): Database.Statement {
+    const database = initDatabase();
+    let s = stmtCache.get(sql);
+    if (!s) { s = database.prepare(sql); stmtCache.set(sql, s); }
+    return s;
+}
+
 export function initDatabase() {
   if (db) return db;
 
@@ -39,6 +49,7 @@ export function initDatabase() {
         box_container_id INTEGER,
         templates_pack_label INTEGER,
         templates_box_label INTEGER,
+        templates_pallet_label INTEGER,
         close_box_counter INTEGER,
         extra_data TEXT
       );
@@ -123,6 +134,7 @@ export function initDatabase() {
       CREATE INDEX IF NOT EXISTS idx_pack_box_status ON pack(box_id, status);
       CREATE INDEX IF NOT EXISTS idx_boxes_nom_status ON boxes(nomenclature_id, status);
       CREATE INDEX IF NOT EXISTS idx_boxes_pallet_status ON boxes(pallete_id, status);
+      CREATE INDEX IF NOT EXISTS idx_nomenclature_name ON nomenclature(name);
     `);
     });
 
@@ -207,11 +219,11 @@ export function getProducts(search: string = '') {
       ORDER BY n.name ASC
       LIMIT 50
     `;
-    const results = db.prepare(query).all({ search: `%${search}%` });
+    const results = prep(query).all({ search: `%${search}%` });
     console.log(`getProducts(search: "${search}") results:`, results.length);
     return results;
   } else {
-    const results = db.prepare(`${baseQuery} ORDER BY n.name ASC LIMIT 50`).all();
+    const results = prep(`${baseQuery} ORDER BY n.name ASC LIMIT 50`).all();
     console.log('getProducts(all) results:', results.length);
     return results;
   }
@@ -235,9 +247,9 @@ export function getFixedWeightProducts(search: string = '') {
       ORDER BY n.name ASC
       LIMIT 50
     `;
-    return db.prepare(query).all({ search: `%${search}%` });
+    return prep(query).all({ search: `%${search}%` });
   } else {
-    return db.prepare(`${baseQuery} ORDER BY n.name ASC LIMIT 50`).all();
+    return prep(`${baseQuery} ORDER BY n.name ASC LIMIT 50`).all();
   }
 }
 
@@ -257,27 +269,6 @@ export function getBarcodeTemplateById(id: number) {
   const db = initDatabase();
   if (!db) return null;
   return db.prepare('SELECT * FROM barcodes WHERE id = ?').get(id);
-}
-
-export function getTables() {
-  const db = initDatabase();
-  if (!db) return [];
-  // Exclude sqlite internal tables
-  return db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all();
-}
-
-export function getTableData(tableName: string) {
-  const db = initDatabase();
-  if (!db) return [];
-
-  // Security check: ensure tableName is a valid table name from our list
-  const tables = getTables() as { name: string }[];
-  if (!tables.some(t => t.name === tableName)) {
-    throw new Error(`Invalid table name: ${tableName}`);
-  }
-
-  // Optimize: Limit rows for large tables to prevent memory explosion
-  return db.prepare(`SELECT * FROM ${tableName} ORDER BY id DESC LIMIT 100`).all();
 }
 
 
@@ -326,14 +317,14 @@ export function recordPack(data: {
   let newBoxCreated = false;
   return db.transaction(() => {
     // 1. Find or create an open box for this nomenclature
-    let box = db!.prepare("SELECT id, number FROM boxes WHERE status = 'Open' AND nomenclature_id = ? ORDER BY id DESC LIMIT 1").get(data.nomenclature_id) as { id: number, number: string } | undefined;
+    let box = prep("SELECT id, number FROM boxes WHERE status = 'Open' AND nomenclature_id = ? ORDER BY id DESC LIMIT 1").get(data.nomenclature_id) as { id: number, number: string } | undefined;
 
     if (!box) {
       // Need a default pallet if none exists
-      let pallet = db!.prepare("SELECT id FROM pallet WHERE status = 'Open' ORDER BY id DESC LIMIT 1").get() as { id: number } | undefined;
+      let pallet = prep("SELECT id FROM pallet WHERE status = 'Open' ORDER BY id DESC LIMIT 1").get() as { id: number } | undefined;
       if (!pallet) {
         const palletInfo = { number: `P${Date.now()}`, status: 'Open' };
-        const result = db!.prepare('INSERT INTO pallet (number, status) VALUES (?, ?)').run(palletInfo.number, palletInfo.status);
+        const result = prep('INSERT INTO pallet (number, status) VALUES (?, ?)').run(palletInfo.number, palletInfo.status);
         pallet = { id: result.lastInsertRowid as number };
       }
 
@@ -343,7 +334,7 @@ export function recordPack(data: {
 
       while (attempts < 50) {
         try {
-          boxResult = db!.prepare("INSERT INTO boxes (pallete_id, number, status, nomenclature_id) VALUES (?, ?, 'Open', ?)").run(
+          boxResult = prep("INSERT INTO boxes (pallete_id, number, status, nomenclature_id) VALUES (?, ?, 'Open', ?)").run(
             pallet.id,
             actualNumber,
             data.nomenclature_id
@@ -355,7 +346,7 @@ export function recordPack(data: {
           if (err.code === 'SQLITE_CONSTRAINT_UNIQUE' || err.message.includes('UNIQUE')) {
             attempts++;
             // If the number is taken, try to find a new one by incrementing the total count
-            const nextCount = (db!.prepare('SELECT COUNT(*) as total FROM boxes').get() as { total: number }).total + 1;
+            const nextCount = (prep('SELECT COUNT(*) as total FROM boxes').get() as { total: number }).total + 1;
             // Best effort to preserve formatting if it was just a number
             if (/^\d+$/.test(actualNumber)) {
               actualNumber = String(nextCount);
@@ -371,7 +362,7 @@ export function recordPack(data: {
     }
 
     // 2. Insert the pack
-    db!.prepare(`
+    prep(`
       INSERT INTO pack (number, box_id, nomenclature_id, weight_netto, weight_brutto, barcode_value, station_number, status, production_date, expiration_date, batch)
       VALUES (?, ?, ?, ?, ?, ?, ?, 'Printed', ?, ?, ?)
     `).run(
@@ -484,11 +475,11 @@ export function importFullDump(payload: any) {
       if (payload.nomenclature && Array.isArray(payload.nomenclature)) {
         const stmt = db!.prepare(`
           INSERT INTO nomenclature (
-            id, name, article, exp_date, portion_container_id, 
-            box_container_id, templates_pack_label, templates_box_label, 
+            id, name, article, exp_date, portion_container_id,
+            box_container_id, templates_pack_label, templates_box_label, templates_pallet_label,
             close_box_counter, extra_data,
             is_fixed_weight, fixed_weight_grams, min_weight_grams, max_weight_grams
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
 
         for (const item of payload.nomenclature) {
@@ -502,6 +493,7 @@ export function importFullDump(payload: any) {
               toPrim(item.box_container_id) ?? toPrim(item.box_container) ?? null,
               toPrim(item.templates_pack_label) ?? null,
               toPrim(item.templates_box_label) ?? null,
+              toPrim(item.templates_pallet_label) ?? null,
               toPrim(item.close_box_counter) || 0,
               typeof item.extra_data === 'string' ? item.extra_data : JSON.stringify(item.extra_data || {}),
               item.is_fixed_weight ? 1 : 0,
@@ -637,6 +629,7 @@ export function resetDatabase() {
   // Close and clear the singleton to force a fresh start on next access
   sqliteDb.close();
   db = null;
+  stmtCache.clear(); // cached statements are bound to the now-closed db
 
   console.log('Database: All tables dropped and connection closed. Re-initializing schema...');
   // Force re-initialization
@@ -689,6 +682,146 @@ export function getOpenPalletContent() {
     boxesInPallet: boxes,
     packsInCurrentBox: currentBoxPacks
   };
+}
+
+// ── Pallet sheet render data ──────────────────────────────────────────────
+// Format an ISO date string to dd.mm.yyyy (matches the pallet-sheet contract samples).
+function fmtPalletDate(iso: any): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return String(iso);
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  return `${dd}.${mm}.${d.getFullYear()}`;
+}
+
+/**
+ * Pure aggregator: turn joined pack+nomenclature rows of one pallet into the pallet-sheet
+ * render contract (scalar header keys + items[] table rows). Each pack counts as 1 unit;
+ * rows are grouped by (nomenclature, batch) into table positions. Exported for testability.
+ */
+export function buildPalletRenderData(rows: any[], pallet: any, ctx: { operator_name?: string } = {}) {
+  const groups = new Map<string, any>();
+  const order: string[] = [];
+  const nomTotals = new Map<number, { net: number; brut: number }>();
+  const batchTotals = new Map<string, { net: number; brut: number }>();
+  const boxIds = new Set<number>();
+  let totalNet = 0, totalBrut = 0, totalPacks = 0;
+
+  for (const r of rows) {
+    const batch = r.batch ?? '';
+    const key = `${r.nomenclature_id}::${batch}`;
+    let g = groups.get(key);
+    if (!g) {
+      g = {
+        nomenclature_id: r.nomenclature_id, name: r.name ?? '', article: r.article ?? '',
+        batch, production_date: r.production_date ?? '', expiration_date: r.expiration_date ?? '',
+        exp_date_days: r.exp_date, qty: 0, net: 0, brut: 0,
+      };
+      groups.set(key, g); order.push(key);
+    }
+    g.qty += 1;
+    g.net += (r.weight_netto || 0);
+    g.brut += (r.weight_brutto || 0);
+    if (!g.production_date && r.production_date) g.production_date = r.production_date;
+    if (!g.expiration_date && r.expiration_date) g.expiration_date = r.expiration_date;
+
+    boxIds.add(r.box_id);
+    totalNet += (r.weight_netto || 0); totalBrut += (r.weight_brutto || 0); totalPacks += 1;
+
+    const nt = nomTotals.get(r.nomenclature_id) || { net: 0, brut: 0 };
+    nt.net += (r.weight_netto || 0); nt.brut += (r.weight_brutto || 0); nomTotals.set(r.nomenclature_id, nt);
+    const bt = batchTotals.get(batch) || { net: 0, brut: 0 };
+    bt.net += (r.weight_netto || 0); bt.brut += (r.weight_brutto || 0); batchTotals.set(batch, bt);
+  }
+
+  const items = order.map((key) => {
+    const g = groups.get(key);
+    const nt = nomTotals.get(g.nomenclature_id) || { net: 0, brut: 0 };
+    const bt = batchTotals.get(g.batch) || { net: 0, brut: 0 };
+    const prod = fmtPalletDate(g.production_date);
+    let exp = fmtPalletDate(g.expiration_date);
+    if (!exp && g.production_date && g.exp_date_days) {
+      const d = new Date(g.production_date);
+      if (!isNaN(d.getTime())) { d.setDate(d.getDate() + Number(g.exp_date_days)); exp = fmtPalletDate(d.toISOString()); }
+    }
+    return {
+      name: g.name, article: g.article, quantity: String(g.qty), batch_number: g.batch,
+      production_date_batch: prod, exp_date_full: exp,
+      weight_netto_pack: g.net.toFixed(3), weight_brutto_pack: g.brut.toFixed(3),
+      weight_netto_batch: bt.net.toFixed(3), weight_brutto_batch: bt.brut.toFixed(3),
+      weight_netto_nomenclature: nt.net.toFixed(3), weight_brutto_nomenclature: nt.brut.toFixed(3),
+    };
+  });
+
+  return {
+    pallet_number: pallet?.number ?? '',
+    shipping_date: '',                                  // not tracked locally (v1)
+    production_date: items[0]?.production_date_batch ?? '',
+    operator_name: ctx?.operator_name ?? '',
+    total_count: String(totalPacks),
+    total_places: String(order.length),
+    total_boxes: String(boxIds.size),
+    weight_total: totalBrut.toFixed(3),
+    weight_netto_pallet: totalNet.toFixed(3),
+    weight_brutto_pallet: totalBrut.toFixed(3),
+    items,
+  };
+}
+
+/**
+ * Build pallet-sheet render data for the current OPEN pallet from local data.
+ * Returns null if there is no open pallet. Joins nomenclature for name/article
+ * (pack/boxes rows don't carry them). Includes packs from ALL boxes of the pallet.
+ */
+export function getPalletRenderData(ctx: { operator_name?: string } = {}) {
+  const db = initDatabase();
+  const pallet = db.prepare("SELECT * FROM pallet WHERE status = 'Open' ORDER BY id DESC LIMIT 1").get() as any;
+  if (!pallet) return null;
+  // A pallet sheet finalizes ("closes") the pallet, so a box that still has CONTENT must be
+  // closed first. An open box with zero non-deleted packs is effectively empty (e.g. its packs
+  // were deleted) — it does not represent work in progress and must NOT block the pallet,
+  // otherwise the user gets stuck: handleCloseBox refuses to close an empty box.
+  const openBox = db.prepare(`
+    SELECT b.id FROM boxes b
+    WHERE b.pallete_id = ? AND b.status = 'Open'
+      AND EXISTS (SELECT 1 FROM pack p WHERE p.box_id = b.id AND p.status != 'Deleted')
+    LIMIT 1
+  `).get(pallet.id) as any;
+  const rows = prep(`
+    SELECT p.id AS pack_id, p.box_id, p.nomenclature_id, p.weight_netto, p.weight_brutto,
+           p.production_date, p.expiration_date, p.batch, n.name, n.article, n.exp_date
+    FROM pack p
+    JOIN boxes b ON b.id = p.box_id
+    LEFT JOIN nomenclature n ON n.id = p.nomenclature_id
+    WHERE b.pallete_id = ? AND p.status != 'Deleted' AND b.status != 'Deleted'
+    ORDER BY n.name COLLATE NOCASE, p.batch, p.id
+  `).all(pallet.id) as any[];
+  return { ...buildPalletRenderData(rows, pallet, ctx), hasOpenBox: !!openBox };
+}
+
+/**
+ * Close the current open pallet (status → 'Closed'). Called after a pallet sheet prints, so
+ * the next recorded pack starts a fresh pallet. Returns success:false if no open pallet.
+ */
+export function closeCurrentPallet() {
+  const db = initDatabase();
+  return db.transaction(() => {
+    const pallet = db.prepare("SELECT id FROM pallet WHERE status = 'Open' ORDER BY id DESC LIMIT 1").get() as any;
+    if (!pallet) return { success: false as const };
+    // Close any leftover EMPTY open boxes on this pallet (boxes with no non-deleted packs).
+    // If they stayed 'Open', recordPack would reuse them (it matches by status+nomenclature,
+    // not by pallet) and new packs would land on this now-closed pallet, orphaning them.
+    // Boxes that still hold content are left untouched (the print guard prevents reaching here
+    // with a non-empty open box), so no packed box is ever silently closed.
+    db.prepare(`
+      UPDATE boxes SET status = 'Closed', updated_at = CURRENT_TIMESTAMP
+      WHERE pallete_id = ? AND status = 'Open'
+        AND NOT EXISTS (SELECT 1 FROM pack p WHERE p.box_id = boxes.id AND p.status != 'Deleted')
+    `).run(pallet.id);
+    db.prepare("UPDATE pallet SET status = 'Closed', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(pallet.id);
+    return { success: true as const, palletId: pallet.id };
+  })();
 }
 
 export function deletePack(packId: number) {

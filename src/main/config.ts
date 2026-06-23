@@ -30,23 +30,33 @@ export function getConfigPath(): string {
     return path.join(app.getPath('userData'), CONFIG_FILE);
 }
 
+// In-memory cache (write-through). All writers go through save*Config in-process, so the
+// cache stays in sync; this removes the existsSync+readFileSync+JSON.parse that previously
+// ran on EVERY call (e.g. the 5s status poller and i18n.t()). Reads return a clone so
+// callers can't mutate the cached object.
+let scaleCache: ScaleConfig | null = null;
+
 export function loadScaleConfig(): ScaleConfig {
+    if (scaleCache) return structuredClone(scaleCache);
     const configPath = getConfigPath();
+    let result: ScaleConfig = DEFAULT_CONFIG;
     try {
         if (fs.existsSync(configPath)) {
             const data = fs.readFileSync(configPath, 'utf-8');
-            return { ...DEFAULT_CONFIG, ...JSON.parse(data) };
+            result = { ...DEFAULT_CONFIG, ...JSON.parse(data) };
         }
     } catch (error) {
         console.error('Failed to load scale config:', error);
     }
-    return DEFAULT_CONFIG;
+    scaleCache = result;
+    return structuredClone(result);
 }
 
 export function saveScaleConfig(config: ScaleConfig): void {
     const configPath = getConfigPath();
     try {
         fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+        scaleCache = structuredClone(config);
     } catch (error) {
         console.error('Failed to save scale config:', error);
     }
@@ -69,23 +79,29 @@ export function getNumberingConfigPath(): string {
     return path.join(app.getPath('userData'), NUMBERING_CONFIG_FILE);
 }
 
+let numberingCache: NumberingConfig | null = null;
+
 export function loadNumberingConfig(): NumberingConfig {
+    if (numberingCache) return structuredClone(numberingCache);
     const configPath = getNumberingConfigPath();
+    let result: NumberingConfig = DEFAULT_NUMBERING_CONFIG;
     try {
         if (fs.existsSync(configPath)) {
             const data = fs.readFileSync(configPath, 'utf-8');
-            return { ...DEFAULT_NUMBERING_CONFIG, ...JSON.parse(data) };
+            result = { ...DEFAULT_NUMBERING_CONFIG, ...JSON.parse(data) };
         }
     } catch (error) {
         console.error('Failed to load numbering config:', error);
     }
-    return DEFAULT_NUMBERING_CONFIG;
+    numberingCache = result;
+    return structuredClone(result);
 }
 
 export function saveNumberingConfig(config: NumberingConfig): void {
     const configPath = getNumberingConfigPath();
     try {
         fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+        numberingCache = structuredClone(config);
     } catch (error) {
         console.error('Failed to save numbering config:', error);
     }
@@ -136,6 +152,7 @@ export interface PrinterConfig {
     // Specialized Printer Roles
     packPrinter: PrinterDeviceConfig;
     boxPrinter: PrinterDeviceConfig;
+    palletPrinter: PrinterDeviceConfig;
 
     // Global Settings
     autoPrintOnStable: boolean;
@@ -157,6 +174,7 @@ const DEFAULT_DEVICE_CONFIG: PrinterDeviceConfig = {
 const DEFAULT_PRINTER_CONFIG: PrinterConfig = {
     packPrinter: { ...DEFAULT_DEVICE_CONFIG, id: 'pack_default', name: 'Pack Printer' },
     boxPrinter: { ...DEFAULT_DEVICE_CONFIG, id: 'box_default', name: 'Box Printer' },
+    palletPrinter: { ...DEFAULT_DEVICE_CONFIG, id: 'pallet_default', name: 'Pallet Printer' },
     autoPrintOnStable: true,
     serverIp: '',
     language: 'ru'
@@ -166,7 +184,10 @@ export function getPrinterConfigPath(): string {
     return path.join(app.getPath('userData'), PRINTER_CONFIG_FILE);
 }
 
+let printerCache: PrinterConfig | null = null;
+
 export function loadPrinterConfig(): PrinterConfig {
+    if (printerCache) return structuredClone(printerCache);
     const configPath = getPrinterConfigPath();
     try {
         if (fs.existsSync(configPath)) {
@@ -187,19 +208,30 @@ export function loadPrinterConfig(): PrinterConfig {
                     delete parsed.boxPrinter.heightMm;
                 }
             }
+            if (parsed.palletPrinter) {
+                if (parsed.palletPrinter.widthMm === 58 && parsed.palletPrinter.heightMm === 40) {
+                    delete parsed.palletPrinter.widthMm;
+                    delete parsed.palletPrinter.heightMm;
+                }
+            }
 
-            return { ...DEFAULT_PRINTER_CONFIG, ...parsed };
+            const result: PrinterConfig = { ...DEFAULT_PRINTER_CONFIG, ...parsed };
+            printerCache = result;
+            return structuredClone(result);
         }
     } catch (error) {
         console.error('Failed to load printer config:', error);
     }
-    return DEFAULT_PRINTER_CONFIG;
+    const fallback: PrinterConfig = { ...DEFAULT_PRINTER_CONFIG };
+    printerCache = fallback;
+    return structuredClone(fallback);
 }
 
 export function savePrinterConfig(config: PrinterConfig): void {
     const configPath = getPrinterConfigPath();
     try {
         fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+        printerCache = structuredClone(config);
     } catch (error) {
         console.error('Failed to save printer config:', error);
     }
