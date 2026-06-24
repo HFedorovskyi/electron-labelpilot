@@ -6,9 +6,15 @@ interface NumericKeypadProps {
     onUpdate: (val: string) => void;
     onClose: () => void;
     title?: string;
+    /** When true, the entered value is shown masked (e.g. PIN entry). The real value is unchanged. */
+    mask?: boolean;
+    /** Optional label for the confirm button (defaults to "OK"). */
+    confirmLabel?: string;
+    /** Optional callback for the confirm button; defaults to onClose. */
+    onConfirm?: () => void;
 }
 
-const NumericKeypad: React.FC<NumericKeypadProps> = ({ value, onUpdate, onClose, title = 'Введите данные' }) => {
+const NumericKeypad: React.FC<NumericKeypadProps> = ({ value, onUpdate, onClose, title = 'Введите данные', mask = false, confirmLabel, onConfirm }) => {
 
     const handleNumber = (n: string) => {
         onUpdate(value + n);
@@ -42,8 +48,10 @@ const NumericKeypad: React.FC<NumericKeypadProps> = ({ value, onUpdate, onClose,
                 <h3 className="text-2xl font-bold text-neutral-900 dark:text-white mb-6 text-center">{title}</h3>
 
                 <div className="bg-neutral-50 dark:bg-black/40 border border-neutral-200 dark:border-white/10 rounded-2xl p-6 mb-8 text-center shadow-inner dark:shadow-none">
-                    <div className="text-4xl font-mono font-bold text-emerald-600 dark:text-emerald-400 min-h-[44px] break-all">
-                        {value || <span className="text-neutral-300 dark:text-neutral-700">_</span>}
+                    <div className="text-4xl font-mono font-bold text-emerald-600 dark:text-emerald-400 min-h-[44px] break-all tracking-widest">
+                        {value
+                            ? (mask ? '•'.repeat(value.length) : value)
+                            : <span className="text-neutral-300 dark:text-neutral-700">_</span>}
                     </div>
                 </div>
 
@@ -71,11 +79,11 @@ const NumericKeypad: React.FC<NumericKeypadProps> = ({ value, onUpdate, onClose,
                 </div>
 
                 <button
-                    onClick={onClose}
+                    onClick={onConfirm || onClose}
                     className="w-full mt-8 py-6 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl font-bold text-xl flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 transition-all active:scale-[0.98]"
                 >
                     <Check className="w-6 h-6" />
-                    OK
+                    {confirmLabel || 'OK'}
                 </button>
             </div>
         </div>

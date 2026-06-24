@@ -60,10 +60,16 @@ export function initDatabase() {
         weight REAL NOT NULL
       );
 
-      CREATE TABLE IF NOT EXISTS user (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        password TEXT NOT NULL
+      -- Operators are server-owned (synced via payload.operators) and back the operator
+      -- PIN-login layer. This replaces the dead legacy 'user' table. The migration mechanism
+      -- (migrations.ts v8) also creates this for already-provisioned DBs; declared here so a
+      -- fresh DB has it immediately.
+      CREATE TABLE IF NOT EXISTS operators (
+        uuid TEXT PRIMARY KEY NOT NULL,
+        full_name TEXT NOT NULL DEFAULT '',
+        short_code TEXT,
+        pin_hash TEXT,
+        is_active INTEGER NOT NULL DEFAULT 1
       );
 
       CREATE TABLE IF NOT EXISTS pallet (
@@ -362,9 +368,21 @@ export function recordPack(data: {
     }
 
     // 2. Insert the pack
+    // ADDITIVE attribution: stamp the current operator (PIN-login layer) onto the pack row.
+    // Reading the session must NEVER block a print — if anything throws or no operator is
+    // logged in, we store null/'' and continue. This does not alter any weighing/print logic.
+    let opUuid: string | null = null;
+    let opName: string | null = null;
+    try {
+      const { getCurrentOperator } = require('./session');
+      const op = getCurrentOperator();
+      if (op) { opUuid = op.uuid || null; opName = op.full_name || ''; }
+    } catch (e) {
+      // Fail-open: a session read failure never blocks recording a pack.
+    }
     prep(`
-      INSERT INTO pack (number, box_id, nomenclature_id, weight_netto, weight_brutto, barcode_value, station_number, status, production_date, expiration_date, batch)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'Printed', ?, ?, ?)
+      INSERT INTO pack (number, box_id, nomenclature_id, weight_netto, weight_brutto, barcode_value, station_number, status, production_date, expiration_date, batch, operator_uuid, operator_name)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'Printed', ?, ?, ?, ?, ?)
     `).run(
       data.number,
       box.id,
@@ -375,7 +393,9 @@ export function recordPack(data: {
       data.station_number || null,
       data.production_date || null,
       data.expiration_date || null,
-      data.batch || null
+      data.batch || null,
+      opUuid,
+      opName
     );
 
     const duration = Date.now() - startTime;
@@ -470,6 +490,11 @@ export function importFullDump(payload: any) {
       db!.prepare('DELETE FROM container').run();
       db!.prepare('DELETE FROM barcodes').run();
       db!.prepare('DELETE FROM labels').run();
+      // operators is server-owned too. Guard the DELETE: an older client DB synced before
+      // migration v8 (or a corrupt schema) may not have the table yet — never throw here.
+      try { db!.prepare('DELETE FROM operators').run(); } catch (e: any) {
+        console.warn('importFullDump: could not clear operators table:', e.message);
+      }
 
       // 2. Insert nomenclature
       if (payload.nomenclature && Array.isArray(payload.nomenclature)) {
@@ -566,6 +591,37 @@ export function importFullDump(payload: any) {
         console.log(`Database: Imported ${insertedCount}/${payload.labels.length} labels`);
       }
 
+      // 5b. Insert operators (server-owned). Tolerate payload.operators being undefined
+      // (older servers that don't ship this section) — treat as empty, do not throw.
+      if (payload.operators && Array.isArray(payload.operators)) {
+        const stmt = db!.prepare(`
+          INSERT OR REPLACE INTO operators (uuid, full_name, short_code, pin_hash, is_active)
+          VALUES (?, ?, ?, ?, ?)
+        `);
+        let insertedCount = 0;
+        for (const item of payload.operators) {
+          try {
+            const uuid = toPrim(item.uuid);
+            if (!uuid) {
+              console.warn('Skipping operator without uuid:', JSON.stringify(item).slice(0, 120));
+              continue;
+            }
+            stmt.run(
+              uuid,
+              toPrim(item.full_name) ?? '',
+              toPrim(item.short_code) ?? null,
+              toPrim(item.pin_hash) ?? null,
+              // Default to active when the flag is missing (fail-open for legitimate operators).
+              item.is_active === undefined || item.is_active === null ? 1 : (item.is_active ? 1 : 0)
+            );
+            insertedCount++;
+          } catch (err: any) {
+            console.warn(`Skipping operator ${item?.uuid} due to error:`, err.message);
+          }
+        }
+        console.log(`Database: Imported ${insertedCount}/${payload.operators.length} operators`);
+      }
+
       // 6. Update station number if provided
       if (payload.station_number) {
         db!.prepare('UPDATE station SET number = ?').run(payload.station_number);
@@ -642,15 +698,31 @@ export function getExportData() {
   // Gather data for export (e.g., packs, boxes, logs)
   // For now, we export packs and boxes that have been created locally.
   // In a real scenario, we might want to filter by date or status.
-  const packs = db.prepare('SELECT * FROM pack').all();
+  const packs = db.prepare('SELECT * FROM pack').all() as any[];
   const boxes = db.prepare('SELECT * FROM boxes').all();
   const pallets = db.prepare('SELECT * FROM pallet').all();
   // We can also add system logs if we had a table for them.
+
+  // ADDITIVE: emit a printed_labels[] array carrying operator attribution. The server's
+  // upload_report reads printed_labels[].user_name into PrintedLabel.station_user_name — this
+  // closes that previously-dormant pipeline. Each printed pack becomes one printed_labels row.
+  // operator_name may be null/'' (no operator logged in) — that is fine; the server stores ''.
+  const printed_labels = packs
+    .filter((p) => p.status !== 'Deleted')
+    .map((p) => ({
+      unique_id: p.barcode_value || `pack-${p.id}`,
+      pack_id: p.id,
+      product_id: p.nomenclature_id,
+      user_name: p.operator_name || '',
+      pack_name: p.number,
+      printed_at: p.created_at,
+    }));
 
   return {
     packs,
     boxes,
     pallets,
+    printed_labels,
     generated_at: new Date().toISOString()
   };
 }

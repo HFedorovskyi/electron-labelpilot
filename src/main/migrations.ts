@@ -165,6 +165,39 @@ export const migrations: Migration[] = [
             // SQLite doesn't support DROP COLUMN easily; this is a no-op
         }
     },
+    {
+        version: 8,
+        description: 'Add operators table (server-owned) and operator attribution columns to pack',
+        up(db) {
+            // Operators arrive from the server in the sync bundle (payload.operators) and are
+            // server-owned: importFullDump DELETE+INSERTs them. This table replaces the role of
+            // the dead legacy 'user' table. pin_hash is a Django pbkdf2_sha256 string.
+            db.exec(`
+                CREATE TABLE IF NOT EXISTS operators (
+                    uuid       TEXT PRIMARY KEY NOT NULL,
+                    full_name  TEXT NOT NULL DEFAULT '',
+                    short_code TEXT,
+                    pin_hash   TEXT,
+                    is_active  INTEGER NOT NULL DEFAULT 1
+                );
+            `);
+            // Additive operator attribution on each printed pack (audit/UX layer, nullable).
+            const addColumn = (col: string, type: string) => {
+                try {
+                    db.exec(`ALTER TABLE pack ADD COLUMN ${col} ${type};`);
+                } catch (e: any) {
+                    if (!e.message.includes('duplicate column')) throw e;
+                }
+            };
+            addColumn('operator_uuid', 'TEXT');
+            addColumn('operator_name', 'TEXT');
+            console.log('[Migration v8] Created operators table and added operator attribution columns to pack');
+        },
+        down(db) {
+            // SQLite < 3.35 doesn't support DROP COLUMN — leave pack columns in place (unused).
+            db.exec('DROP TABLE IF EXISTS operators;');
+        }
+    },
 ];
 
 /**

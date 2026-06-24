@@ -652,6 +652,49 @@ ipcMain.handle('get-identity', () => {
     return loadIdentity();
 });
 
+// --- Operator session (PIN-login) handlers ---
+// Layer C: workflow/audit/UX. The current operator is ephemeral (in main memory only),
+// never persisted as an auth fact. PIN is verified in setSession via verifyPin.
+
+ipcMain.handle('operators:list', () => {
+    const { listActiveOperators } = require('./operators');
+    const { getLastOperatorUuid } = require('./session');
+    const operators = listActiveOperators().map((o: any) => ({
+        uuid: o.uuid,
+        full_name: o.full_name,
+        short_code: o.short_code,
+        // Surface only WHETHER a pin is required — never ship the hash to the renderer.
+        has_pin: !!(o.pin_hash && String(o.pin_hash).trim() !== ''),
+    }));
+    return { operators, lastOperatorUuid: getLastOperatorUuid() };
+});
+
+ipcMain.handle('session:get', () => {
+    const { getCurrentOperator } = require('./session');
+    return getCurrentOperator();
+});
+
+ipcMain.handle('session:set', (_, { uuid, pin }: { uuid: string; pin?: string }) => {
+    const { setSession } = require('./session');
+    const res = setSession(uuid, pin ?? '');
+    if (res.ok) {
+        // Broadcast so every window's SessionContext refreshes.
+        BrowserWindow.getAllWindows().forEach((win) =>
+            win.webContents.send('session-changed', res.operator)
+        );
+    }
+    return res;
+});
+
+ipcMain.handle('session:logout', () => {
+    const { logoutSession } = require('./session');
+    logoutSession();
+    BrowserWindow.getAllWindows().forEach((win) =>
+        win.webContents.send('session-changed', null)
+    );
+    return { ok: true };
+});
+
 ipcMain.handle('import-identity-file', async () => {
     const { dialog } = require('electron');
     const { importIdentityFile } = require('./identity');
@@ -723,14 +766,26 @@ ipcMain.handle('get-next-sequence', (_, type) => {
 ipcMain.handle('reset-database', async () => {
     const { resetDatabase } = require('./database');
     const { deleteIdentity } = require('./identity');
+    const { clearDemoFlag } = require('./demo_flag');
     try {
         resetDatabase();
         deleteIdentity();
+        // A full reset drops the identity too — make sure the durable demo flag
+        // doesn't outlive it and falsely keep the next provisioning in demo mode.
+        clearDemoFlag();
         return { success: true, message: 'Database reset successfully' };
     } catch (error: any) {
         console.error('Failed to reset database:', error);
         return { success: false, message: error.message };
     }
+});
+
+// Durable demo-mode status for the renderer's login gate. Backed by the
+// demo.flag file (see demo_flag.ts), so it survives independently of the
+// synthetic 'demo-' station uuid. Generic preload passthrough — no preload edit.
+ipcMain.handle('demo:status', () => {
+    const { isDemoActive } = require('./demo_flag');
+    return { isDemo: isDemoActive() };
 });
 
 ipcMain.on('open-logs-folder', () => {

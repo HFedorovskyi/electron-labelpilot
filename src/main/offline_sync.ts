@@ -3,6 +3,7 @@ import { dialog } from 'electron';
 import { encrypt, decrypt } from './encryption';
 import { getExportData } from './database';
 import { loadIdentity } from './identity';
+import { clearDemoFlag } from './demo_flag';
 
 export async function importOfflineUpdate(): Promise<{ success: boolean; message: string }> {
     const { processSyncData } = require('./processor');
@@ -24,7 +25,13 @@ export async function importOfflineUpdate(): Promise<{ success: boolean; message
         const data = decrypt(content);
 
         // Unified Processing
-        return await processSyncData(data);
+        const syncResult = await processSyncData(data);
+        // A successful offline (.lps) import is a REAL provisioning — leave demo
+        // mode. (Not done inside processSyncData: demo seeding uses that path too.)
+        if (syncResult.success) {
+            clearDemoFlag();
+        }
+        return syncResult;
     } catch (error: any) {
         console.error('Offline Import Error:', error);
         return { success: false, message: error.message };

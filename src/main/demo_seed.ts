@@ -13,6 +13,7 @@
  */
 
 import { processSyncData } from './processor';
+import { setDemoFlag } from './demo_flag';
 import type { LabelDoc } from './printer/generator/types';
 
 const DPI = 300;
@@ -328,5 +329,11 @@ function buildDemoDataset() {
  */
 export async function seedDemoData(): Promise<{ success: boolean; message: string }> {
     const dataset = buildDemoDataset();
-    return processSyncData(dataset);
+    const result = await processSyncData(dataset);
+    // The station is now in demo: persist the DURABLE flag so demo mode survives
+    // independently of the synthetic 'demo-' station uuid (see demo_flag.ts).
+    if (result.success) {
+        setDemoFlag();
+    }
+    return result;
 }

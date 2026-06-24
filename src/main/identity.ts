@@ -2,6 +2,7 @@ import path from 'path';
 import fs from 'fs';
 import { app } from 'electron';
 import { decrypt } from './encryption';
+import { clearDemoFlag } from './demo_flag';
 
 const IDENTITY_FILE = 'identity.json';
 
@@ -68,6 +69,9 @@ export async function importIdentityFile(filePath: string): Promise<StationIdent
 
         const updated = loadIdentity();
         if (!updated) throw new Error('Failed to load identity after import');
+        // This is a REAL provisioning — leave demo mode for good. (Not done inside
+        // processSyncData because demo seeding routes through that shared path too.)
+        clearDemoFlag();
         return updated;
     } catch (error) {
         console.error('Failed to import identity file:', error);

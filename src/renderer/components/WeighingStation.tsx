@@ -7,9 +7,12 @@ import NumericKeypad from './NumericKeypad';
 import DeleteItemsModal from './DeleteItemsModal';
 import DatePickerModal from './DatePickerModal';
 import ProductSelectionModal from './ProductSelectionModal';
+import { useSession } from './SessionProvider';
 
 const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
     const { t } = useTranslation();
+    // Current operator (PIN-login layer) — used for the pallet-sheet operator_name.
+    const { operator } = useSession();
     // --- STATE DECLARATIONS ---
     const [weight, setWeight] = useState<string>('0.000');
     const [status, setStatus] = useState<string>('disconnected');
@@ -1122,7 +1125,7 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
                 </div>
 
                 <button
-                    onClick={() => printPalletSheet({ printerConfig, selectedProduct, t, setAlert: setAlertMessage, operatorName: stationNumber || '', busyRef: isPalletPrintingRef })}
+                    onClick={() => printPalletSheet({ printerConfig, selectedProduct, t, setAlert: setAlertMessage, operatorName: operator?.full_name || '', busyRef: isPalletPrintingRef })}
                     className="w-full py-5 bg-amber-600 hover:bg-amber-500 active:bg-amber-700 transition-all rounded-2xl font-bold text-lg text-white flex items-center justify-center gap-3 shadow-[0_10px_30px_-12px_rgba(217,119,6,0.6)] border-t border-white/10"
                 >
                     <Layers className="w-6 h-6" />

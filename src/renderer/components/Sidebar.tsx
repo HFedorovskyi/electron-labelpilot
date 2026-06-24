@@ -1,8 +1,9 @@
 import React from 'react';
-import { Scale, Settings, Package, LogOut, ChevronLeft, Menu, Weight, ClipboardList } from 'lucide-react';
+import { Scale, Settings, Package, LogOut, ChevronLeft, Menu, Weight, ClipboardList, User, UserCog } from 'lucide-react';
 import clsx from 'clsx';
 import { useTranslation } from '../i18n';
 import { useLicenseStatus } from '../hooks/useLicenseStatus';
+import { useSession } from './SessionProvider';
 import LicenseBadge from './LicenseBadge';
 import packageJson from '../../../package.json';
 
@@ -18,6 +19,7 @@ interface SidebarProps {
 const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, serverStatus, stationNumber, isCollapsed, toggleCollapse }) => {
     const { t } = useTranslation();
     const { license } = useLicenseStatus(serverStatus);
+    const { operator, isDemo, logout } = useSession();
 
     const menuItems = [
         { id: 'weighing', labelKey: 'sidebar.weighing', icon: Scale },
@@ -119,6 +121,44 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, serverStatus
                         {stationNumber !== null ? String(stationNumber).padStart(2, '0') : '--'}
                     </span>
                 </div>
+
+                {/* Current operator + Switch (PIN-login layer). Demo mode shows the synthetic
+                    operator with no "switch" action (demo bypasses login). */}
+                {operator && (
+                    isCollapsed ? (
+                        <button
+                            onClick={() => { if (!isDemo) logout(); }}
+                            title={`${operator.full_name}${isDemo ? '' : ' — ' + t('operator.switch')}`}
+                            className={clsx(
+                                "flex items-center justify-center rounded-full border w-9 h-9 transition-colors",
+                                isDemo
+                                    ? "bg-amber-100 dark:bg-amber-500/10 border-amber-300 dark:border-amber-500/30 text-amber-600 dark:text-amber-400 cursor-default"
+                                    : "bg-neutral-100 dark:bg-white/5 border-neutral-200 dark:border-white/10 text-neutral-500 dark:text-neutral-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:border-emerald-300 dark:hover:border-emerald-500/40"
+                            )}
+                        >
+                            <User className="w-4 h-4" />
+                        </button>
+                    ) : (
+                        <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                                <User className="w-4 h-4 shrink-0 text-neutral-500 dark:text-neutral-400" />
+                                <span className="font-medium text-neutral-700 dark:text-neutral-300 truncate" title={operator.full_name}>
+                                    {operator.full_name}
+                                </span>
+                            </div>
+                            {!isDemo && (
+                                <button
+                                    onClick={() => logout()}
+                                    title={t('operator.switch')}
+                                    className="flex items-center gap-1 shrink-0 px-2 py-1 rounded-lg bg-neutral-100 dark:bg-white/5 border border-neutral-200 dark:border-white/10 text-[10px] font-bold uppercase tracking-wider text-neutral-500 dark:text-neutral-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:border-emerald-300 dark:hover:border-emerald-500/40 transition-colors"
+                                >
+                                    <UserCog className="w-3.5 h-3.5" />
+                                    {t('operator.switch')}
+                                </button>
+                            )}
+                        </div>
+                    )
+                )}
 
                 {/* License / Demo status — non-blocking; renders nothing until known */}
                 {license && (

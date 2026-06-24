@@ -5,6 +5,7 @@ import { generateBarcode, type BarcodeData } from '../utils/barcodeGenerator';
 import { useTranslation } from '../i18n';
 import DatePickerModal from './DatePickerModal';
 import DeleteItemsModal from './DeleteItemsModal';
+import { useSession } from './SessionProvider';
 
 interface PrintJobData {
     id: number;
@@ -24,6 +25,8 @@ interface PrintJobData {
 
 const PrintJobStation = (_props: { activeTab?: string }) => {
     const { t } = useTranslation();
+    // Current operator (PIN-login layer) — used for the pallet-sheet operator_name.
+    const { operator } = useSession();
 
     // --- STATE ---
     const [jobs, setJobs] = useState<PrintJobData[]>([]);
@@ -942,7 +945,7 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
                 )}
 
                 <button
-                    onClick={() => printPalletSheet({ printerConfig, selectedProduct: product, t, setAlert: setAlertMessage, operatorName: stationNumber || '', busyRef: isPalletPrintingRef })}
+                    onClick={() => printPalletSheet({ printerConfig, selectedProduct: product, t, setAlert: setAlertMessage, operatorName: operator?.full_name || '', busyRef: isPalletPrintingRef })}
                     className="w-full py-5 bg-violet-600 hover:bg-violet-500 active:bg-violet-700 transition-all rounded-2xl font-bold text-lg text-white flex items-center justify-center gap-3 shadow-[0_10px_30px_-12px_rgba(124,58,237,0.6)] border-t border-white/10"
                 >
                     <Layers className="w-6 h-6" />

@@ -314,6 +314,18 @@ export const translations: Record<Lang, Record<string, string>> = {
         'pj.tab.completed': 'Выполненные',
         'pj.noCompleted': 'Нет выполненных заданий',
 
+        // Operator login (PIN)
+        'operator.selectOperator': 'Выберите оператора',
+        'operator.enterPin': 'Введите PIN',
+        'operator.login': 'Войти',
+        'operator.switch': 'Сменить оператора',
+        'operator.wrongPin': 'Неверный PIN',
+        'operator.loginFailed': 'Не удалось войти',
+        'operator.noOperators': 'Операторы ещё не загружены. Синхронизируйте данные или продолжите без оператора.',
+        'operator.sync': 'Синхронизировать',
+        'operator.continueWithout': 'Продолжить без оператора',
+        'operator.demoOperator': 'Демо оператор',
+
     },
 
     en: {
@@ -490,6 +502,8 @@ export const translations: Record<Lang, Record<string, string>> = {
         'ws.total': 'Total units',
         'ws.lastPrinted': 'Last printed',
         'ws.reprint': 'Reprint',
+        'ws.noLabel': 'Label template not found',
+        'ws.noBoxLabel': 'Box label template not found!',
         'ws.autoPrintActive': 'Auto-print',
         'ws.printed': 'Printed',
         'ws.closeBoxBeforeChange': 'Please close the current box before changing product.',
@@ -626,6 +640,18 @@ export const translations: Record<Lang, Record<string, string>> = {
         'pj.tab.active': 'Active',
         'pj.tab.completed': 'Completed',
         'pj.noCompleted': 'No completed jobs',
+
+        // Operator login (PIN)
+        'operator.selectOperator': 'Select operator',
+        'operator.enterPin': 'Enter PIN',
+        'operator.login': 'Log in',
+        'operator.switch': 'Switch operator',
+        'operator.wrongPin': 'Wrong PIN',
+        'operator.loginFailed': 'Login failed',
+        'operator.noOperators': 'No operators loaded yet. Sync data or continue without an operator.',
+        'operator.sync': 'Synchronize',
+        'operator.continueWithout': 'Continue without operator',
+        'operator.demoOperator': 'Demo operator',
 
     },
 
@@ -803,6 +829,8 @@ export const translations: Record<Lang, Record<string, string>> = {
         'ws.total': 'Gesamt Packungen',
         'ws.lastPrinted': 'Zuletzt gedruckt',
         'ws.reprint': 'Nachdruck',
+        'ws.noLabel': 'Etikettenvorlage nicht gefunden',
+        'ws.noBoxLabel': 'Karton-Etikettenvorlage nicht gefunden!',
         'ws.autoPrintActive': 'Auto-Druck',
         'ws.printed': 'Gedruckt',
         'ws.closeBoxBeforeChange': 'Bitte schließen Sie den aktuellen Karton, bevor Sie das Produkt wechseln.',
@@ -939,6 +967,18 @@ export const translations: Record<Lang, Record<string, string>> = {
         'pj.tab.active': 'Offen',
         'pj.tab.completed': 'Abgeschlossen',
         'pj.noCompleted': 'Keine abgeschlossenen Aufträge',
+
+        // Operator login (PIN)
+        'operator.selectOperator': 'Bediener auswählen',
+        'operator.enterPin': 'PIN eingeben',
+        'operator.login': 'Anmelden',
+        'operator.switch': 'Bediener wechseln',
+        'operator.wrongPin': 'Falsche PIN',
+        'operator.loginFailed': 'Anmeldung fehlgeschlagen',
+        'operator.noOperators': 'Noch keine Bediener geladen. Daten synchronisieren oder ohne Bediener fortfahren.',
+        'operator.sync': 'Synchronisieren',
+        'operator.continueWithout': 'Ohne Bediener fortfahren',
+        'operator.demoOperator': 'Demo-Bediener',
 
     },
 };
