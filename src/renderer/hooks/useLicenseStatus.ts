@@ -8,8 +8,8 @@ export interface LicenseStatus {
     customer: string | null;
     expires: string | null;
     expired: boolean;
-    max_stations: number;
-    demo_max_stations: number;
+    max_stations: number | null;       // null = unlimited (no station cap)
+    demo_max_stations: number | null;   // null in demo — there is no station cap
     license_id: string | null;
     features: string[];
     machine_id: string;

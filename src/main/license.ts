@@ -9,14 +9,14 @@ import log from './logger';
 export interface LicenseStatus {
     /** True only when the server reports a valid, active license. */
     licensed: boolean;
-    /** 'demo' => product is UNLICENSED (seat-capped). 'licensed' => activated. */
+    /** 'demo' => product is UNLICENSED (no station cap; real-data export gated). 'licensed' => activated. */
     mode: 'demo' | 'licensed';
     edition: string;
     customer: string | null;
     expires: string | null;       // YYYY-MM-DD
     expired: boolean;
-    max_stations: number;         // in demo this equals demo_max_stations
-    demo_max_stations: number;
+    max_stations: number | null;       // null = unlimited (also when unlicensed)
+    demo_max_stations: number | null;  // null in demo — there is no station cap
     license_id: string | null;
     features: string[];
     machine_id: string;

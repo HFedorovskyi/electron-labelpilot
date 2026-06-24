@@ -348,9 +348,6 @@ const Settings = () => {
                                     <p className="mt-2 text-sm text-amber-700/80 dark:text-amber-300/80">
                                         {t('license.demoHint')}
                                     </p>
-                                    <div className="mt-3 text-sm text-amber-800 dark:text-amber-200">
-                                        {t('license.maxStations')}: <span className="font-mono font-semibold">{license.stations_used} / {license.max_stations}</span>
-                                    </div>
                                 </div>
                             ) : (
                                 <div className="p-4 rounded-xl border bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/20">
@@ -375,7 +372,7 @@ const Settings = () => {
                                         )}
                                         <div className="flex justify-between gap-2">
                                             <span className="text-neutral-500 dark:text-neutral-400">{t('license.stations')}</span>
-                                            <span className="font-mono">{license.stations_used} / {license.max_stations}</span>
+                                            <span className="font-mono">{license.stations_used} / {license.max_stations ?? '∞'}</span>
                                         </div>
                                     </div>
                                 </div>
@@ -454,6 +451,10 @@ const Settings = () => {
                                 {t('settings.exportData') || 'Export Data (.lpr)'}
                             </button>
                         </div>
+                        <p className="mt-3 text-xs text-neutral-500 dark:text-neutral-400 flex items-center gap-1.5">
+                            <ShieldAlert className="w-3.5 h-3.5 shrink-0 text-amber-500" />
+                            {t('demo.seedInline')}
+                        </p>
                     </div>
                 </div>
 
