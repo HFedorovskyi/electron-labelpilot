@@ -287,7 +287,7 @@ const Settings = () => {
                         {t('settings.language')}
                     </h2>
                     <div className="flex gap-4">
-                        {(['ru', 'en', 'de'] as Lang[]).map((l) => (
+                        {(['ru', 'en', 'de', 'uk'] as Lang[]).map((l) => (
                             <button
                                 key={l}
                                 onClick={() => setLang(l)}
@@ -296,7 +296,7 @@ const Settings = () => {
                                     : 'bg-neutral-50 dark:bg-black/20 border-neutral-200 dark:border-white/20 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/5'
                                     }`}
                             >
-                                {({ ru: '🇷🇺 Русский', en: '🇬🇧 English', de: '🇩🇪 Deutsch' } as Record<string, string>)[l] || l.toUpperCase()}
+                                {({ ru: '🇷🇺 Русский', en: '🇬🇧 English', de: '🇩🇪 Deutsch', uk: '🇺🇦 Українська' } as Record<string, string>)[l] || l.toUpperCase()}
                             </button>
                         ))}
                     </div>
