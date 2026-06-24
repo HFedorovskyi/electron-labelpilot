@@ -10,6 +10,26 @@ export const translations: Record<Lang, Record<string, string>> = {
         'sidebar.connected': 'Подключено',
         'sidebar.exit': 'Выход',
 
+        // License / Demo
+        'license.title': 'Лицензия',
+        'license.demo': 'Демо-режим',
+        'license.demoBadge': 'Демо',
+        'license.licensed': 'Лицензия',
+        'license.editionLabel': 'Редакция',
+        'license.customer': 'Клиент',
+        'license.expires': 'Действует до',
+        'license.expired': 'Срок действия истёк',
+        'license.stations': 'Станции',
+        'license.maxStations': 'Лимит станций',
+        'license.demoHint': 'Продукт работает в демо-режиме (не лицензирован). Активируйте лицензию, чтобы снять ограничение на количество станций.',
+        'license.activate': 'Активировать',
+        'license.unknown': 'Статус лицензии недоступен',
+        'demo.seedButton': 'Демо режим',
+        'demo.seedHint': 'Загружает образцы шаблонов и товаров для теста без сервера и лицензии.',
+        'demo.seedWipe': 'Включить демо-режим? Это ЗАМЕНИТ все локальные данные (товары, шаблоны, ШК) образцами.',
+        'demo.seedWipeProvisioned': 'Внимание: станция уже настроена. Включение демо-режима УДАЛИТ все текущие локальные данные и заменит их образцами.',
+        'demo.seedFailed': 'Не удалось загрузить демо-данные',
+
         // App
         'app.syncComplete': 'Синхронизация завершена',
 
@@ -305,6 +325,26 @@ export const translations: Record<Lang, Record<string, string>> = {
         'sidebar.connected': 'Connected',
         'sidebar.exit': 'Exit',
 
+        // License / Demo
+        'license.title': 'License',
+        'license.demo': 'Demo mode',
+        'license.demoBadge': 'Demo',
+        'license.licensed': 'License',
+        'license.editionLabel': 'Edition',
+        'license.customer': 'Customer',
+        'license.expires': 'Valid until',
+        'license.expired': 'License expired',
+        'license.stations': 'Stations',
+        'license.maxStations': 'Station limit',
+        'license.demoHint': 'The product is running in demo mode (unlicensed). Activate a license to remove the station limit.',
+        'license.activate': 'Activate',
+        'license.unknown': 'License status unavailable',
+        'demo.seedButton': 'Demo mode',
+        'demo.seedHint': 'Loads sample templates and products so you can test without a server or license.',
+        'demo.seedWipe': 'Enable demo mode? This REPLACES all local data (products, templates, barcodes) with samples.',
+        'demo.seedWipeProvisioned': 'Warning: this station is already provisioned. Enabling demo mode will DELETE all current local data and replace it with samples.',
+        'demo.seedFailed': 'Failed to load demo data',
+
         // App
         'app.syncComplete': 'Sync complete',
 
@@ -597,6 +637,26 @@ export const translations: Record<Lang, Record<string, string>> = {
         'sidebar.serverStatus': 'Serverstatus',
         'sidebar.connected': 'Verbunden',
         'sidebar.exit': 'Beenden',
+
+        // License / Demo
+        'license.title': 'Lizenz',
+        'license.demo': 'Demo-Modus',
+        'license.demoBadge': 'Demo',
+        'license.licensed': 'Lizenz',
+        'license.editionLabel': 'Edition',
+        'license.customer': 'Kunde',
+        'license.expires': 'Gültig bis',
+        'license.expired': 'Lizenz abgelaufen',
+        'license.stations': 'Stationen',
+        'license.maxStations': 'Stationslimit',
+        'license.demoHint': 'Das Produkt läuft im Demo-Modus (nicht lizenziert). Aktivieren Sie eine Lizenz, um das Stationslimit aufzuheben.',
+        'license.activate': 'Aktivieren',
+        'license.unknown': 'Lizenzstatus nicht verfügbar',
+        'demo.seedButton': 'Demo-Modus',
+        'demo.seedHint': 'Lädt Beispielvorlagen und -produkte, um ohne Server oder Lizenz zu testen.',
+        'demo.seedWipe': 'Demo-Modus aktivieren? Dies ERSETZT alle lokalen Daten (Produkte, Vorlagen, Barcodes) durch Beispiele.',
+        'demo.seedWipeProvisioned': 'Achtung: Diese Station ist bereits eingerichtet. Das Aktivieren des Demo-Modus LÖSCHT alle aktuellen lokalen Daten und ersetzt sie durch Beispiele.',
+        'demo.seedFailed': 'Demo-Daten konnten nicht geladen werden',
 
         // App
         'app.syncComplete': 'Synchronisierung abgeschlossen',

@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
-import { Save, RefreshCw, Settings as SettingsIcon, Printer, Languages, Moon, Sun, Monitor } from 'lucide-react';
+import { Save, RefreshCw, Settings as SettingsIcon, Printer, Languages, Moon, Sun, Monitor, ShieldCheck, ShieldAlert } from 'lucide-react';
 import PrinterSettings from './PrinterSettings';
 import UpdateSettings from './UpdateSettings';
 import { useTranslation, type Lang } from '../i18n';
 import { useTheme } from './ThemeProvider';
+import { useLicenseStatus } from '../hooks/useLicenseStatus';
 
 interface SerialPortInfo {
     path: string;
@@ -26,6 +27,7 @@ interface PrinterInfo {
 const Settings = () => {
     const { t, lang, setLang } = useTranslation();
     const { theme, setTheme } = useTheme();
+    const { license } = useLicenseStatus();
     const [ports, setPorts] = useState<SerialPortInfo[]>([]);
     const [protocols, setProtocols] = useState<ProtocolInfo[]>([]);
     const [config, setConfig] = useState({
@@ -80,6 +82,10 @@ const Settings = () => {
     const [showResetModal, setShowResetModal] = useState(false);
     const [isResetting, setIsResetting] = useState(false);
     const [resetConfirmText, setResetConfirmText] = useState('');
+    // Station identity (null when the station is UNPROVISIONED). Drives the
+    // "Демо режим" button's wipe-confirmation: a provisioned station gets an
+    // extra warning before its real data is replaced by the demo dataset.
+    const [identity, setIdentity] = useState<any>(null);
     // Snapshot of the last saved scale+printer config; drives the "unsaved changes" sticky bar.
     const savedSnapshotRef = useRef<string>('');
 
@@ -100,6 +106,12 @@ const Settings = () => {
 
             const printersList = await window.electron.invoke('get-printers');
             const savedPrinterConfig = await window.electron.invoke('get-printer-config');
+
+            try {
+                setIdentity(await window.electron.invoke('get-identity'));
+            } catch {
+                setIdentity(null);
+            }
 
             setPorts(portsList);
             setProtocols(protocolsList);
@@ -324,6 +336,58 @@ const Settings = () => {
                         </p>
                     </div>
 
+                    {/* License / Demo status of the connected server */}
+                    <div className="mt-6 pt-6 border-t border-neutral-200 dark:border-white/5">
+                        {license ? (
+                            license.mode === 'demo' ? (
+                                <div className="p-4 rounded-xl border bg-amber-50 dark:bg-amber-500/10 border-amber-200 dark:border-amber-500/20">
+                                    <div className="flex items-center gap-2 text-amber-700 dark:text-amber-300 font-semibold">
+                                        <ShieldAlert className="w-5 h-5 shrink-0" />
+                                        <span>{t('license.demo')}</span>
+                                    </div>
+                                    <p className="mt-2 text-sm text-amber-700/80 dark:text-amber-300/80">
+                                        {t('license.demoHint')}
+                                    </p>
+                                    <div className="mt-3 text-sm text-amber-800 dark:text-amber-200">
+                                        {t('license.maxStations')}: <span className="font-mono font-semibold">{license.stations_used} / {license.max_stations}</span>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="p-4 rounded-xl border bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/20">
+                                    <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-300 font-semibold">
+                                        <ShieldCheck className="w-5 h-5 shrink-0" />
+                                        <span>{t('license.licensed')}: {license.edition}</span>
+                                    </div>
+                                    <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5 text-sm text-neutral-700 dark:text-neutral-300">
+                                        {license.customer && (
+                                            <div className="flex justify-between gap-2">
+                                                <span className="text-neutral-500 dark:text-neutral-400">{t('license.customer')}</span>
+                                                <span className="font-medium truncate">{license.customer}</span>
+                                            </div>
+                                        )}
+                                        {license.expires && (
+                                            <div className="flex justify-between gap-2">
+                                                <span className="text-neutral-500 dark:text-neutral-400">{t('license.expires')}</span>
+                                                <span className={`font-mono ${license.expired ? 'text-amber-600 dark:text-amber-400' : ''}`}>
+                                                    {license.expires}{license.expired ? ` (${t('license.expired')})` : ''}
+                                                </span>
+                                            </div>
+                                        )}
+                                        <div className="flex justify-between gap-2">
+                                            <span className="text-neutral-500 dark:text-neutral-400">{t('license.stations')}</span>
+                                            <span className="font-mono">{license.stations_used} / {license.max_stations}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            )
+                        ) : (
+                            <p className="text-sm text-neutral-500 dark:text-neutral-400 flex items-center gap-2">
+                                <ShieldCheck className="w-4 h-4 opacity-50" />
+                                {t('license.unknown')}
+                            </p>
+                        )}
+                    </div>
+
                     {/* Offline Sync Controls */}
                     <div className="mt-6 pt-6 border-t border-neutral-200 dark:border-white/5">
                         <label className="block text-sm text-neutral-600 dark:text-neutral-400 mb-3">{t('settings.offlineSync') || 'Offline Synchronization'}</label>
@@ -343,6 +407,31 @@ const Settings = () => {
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V8a2 2 0 00-2-2h-5m-4 0V5a2 2 0 114 0v1m-4 0a2 2 0 104 0m-5 8a2 2 0 100-4 2 2 0 000 4zm0 0c1.306 0 2.417.835 2.83 2M9 14a3.001 3.001 0 00-2.83 2M15 11h3m-3 4h2" />
                                 </svg>
                                 {t('settings.importIdentity') || 'Import Identity (.lpi)'}
+                            </button>
+                            <button
+                                onClick={async () => {
+                                    // Station is "provisioned" once it has an identity with a
+                                    // station number. Seeding the demo routes through
+                                    // importFullDump (DELETE + INSERT), so warn extra hard
+                                    // before wiping a real provisioned station's data.
+                                    const provisioned = !!(identity && identity.station_number != null);
+                                    const warning = provisioned
+                                        ? `${t('demo.seedWipeProvisioned')}\n\n${t('demo.seedHint')}`
+                                        : `${t('demo.seedWipe')}\n\n${t('demo.seedHint')}`;
+                                    if (!window.confirm(warning)) return;
+                                    const res = await window.electron.invoke('seed-demo-data');
+                                    if (res.success) {
+                                        // Mirror handleReset: reload so the UI reflects the
+                                        // freshly seeded local data.
+                                        window.location.reload();
+                                    } else {
+                                        showToast(res.message || t('demo.seedFailed'));
+                                    }
+                                }}
+                                className="px-5 py-3 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-medium shadow-lg hover:shadow-amber-500/20 flex items-center gap-2 transition-all"
+                            >
+                                <ShieldAlert className="w-5 h-5" />
+                                {t('demo.seedButton') || 'Демо режим'}
                             </button>
                             <button
                                 onClick={async () => {

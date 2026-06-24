@@ -2,6 +2,8 @@ import React from 'react';
 import { Scale, Settings, Package, LogOut, ChevronLeft, Menu, Weight, ClipboardList } from 'lucide-react';
 import clsx from 'clsx';
 import { useTranslation } from '../i18n';
+import { useLicenseStatus } from '../hooks/useLicenseStatus';
+import LicenseBadge from './LicenseBadge';
 import packageJson from '../../../package.json';
 
 interface SidebarProps {
@@ -15,6 +17,7 @@ interface SidebarProps {
 
 const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, serverStatus, stationNumber, isCollapsed, toggleCollapse }) => {
     const { t } = useTranslation();
+    const { license } = useLicenseStatus(serverStatus);
 
     const menuItems = [
         { id: 'weighing', labelKey: 'sidebar.weighing', icon: Scale },
@@ -116,6 +119,14 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, serverStatus
                         {stationNumber !== null ? String(stationNumber).padStart(2, '0') : '--'}
                     </span>
                 </div>
+
+                {/* License / Demo status — non-blocking; renders nothing until known */}
+                {license && (
+                    <div className={clsx("flex items-center", isCollapsed ? "justify-center" : "justify-between")}>
+                        {!isCollapsed && <span className="uppercase tracking-wider text-[10px] font-bold">{t('license.title')}</span>}
+                        <LicenseBadge license={license} collapsed={isCollapsed} />
+                    </div>
+                )}
 
                 {/* Software Version */}
                 {!isCollapsed && (

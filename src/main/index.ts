@@ -386,6 +386,15 @@ ipcMain.handle('get-server-status', () => {
     return serverStatusManager.getStatus();
 });
 
+// License / demo status of the connected server. Non-blocking: returns { online:false }
+// if no serverIp is configured or the server is unreachable, so the UI can stay neutral.
+ipcMain.handle('get-license-status', async (_, serverIpArg?: string) => {
+    const { fetchLicenseStatus } = await import('./license');
+    const { loadPrinterConfig } = await import('./config');
+    const serverIp = serverIpArg || loadPrinterConfig().serverIp;
+    return fetchLicenseStatus(serverIp);
+});
+
 // Eager TCP/Serial warmup — call when the user enters a printing station so
 // the first print doesn't pay the connect handshake (~10-50ms LAN, ~100ms serial).
 // Idempotent: a no-op if the socket is already open.
@@ -667,6 +676,21 @@ ipcMain.handle('import-identity-file', async () => {
     } catch (error: any) {
         console.error('Identity Import Error:', error);
         return { success: false, message: error.message };
+    }
+});
+
+// Built-in "Демо режим": seed the local DB with bundled sample templates +
+// products via the existing import path so an unlicensed user can test the full
+// flow with no server and no license. Routes through importFullDump (DELETE +
+// INSERT) — the renderer confirms with the user before calling this.
+ipcMain.handle('seed-demo-data', async () => {
+    const { seedDemoData } = require('./demo_seed');
+    try {
+        const r = await seedDemoData();
+        BrowserWindow.getAllWindows().forEach(w => w.webContents.send('data-updated'));
+        return { success: true, ...r };
+    } catch (e: any) {
+        return { success: false, message: e.message };
     }
 });
 
