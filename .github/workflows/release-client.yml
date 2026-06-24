@@ -12,7 +12,7 @@ on:
 
 jobs:
   build:
-    runs-on: windows-latest    # обязательно Windows для EXE
+    runs-on: windows-2022    # pinned: windows-latest moved to VS18/Python3.14 which node-gyp can't use to build better-sqlite3
     permissions:
       contents: write
 
@@ -28,6 +28,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+
+      - name: Setup Python (node-gyp native builds, e.g. better-sqlite3)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
       - name: Get version
         id: get_version

@@ -18,6 +18,7 @@ import { verifyPin } from './pin';
 export interface CurrentOperator {
     uuid: string;
     full_name: string;
+    short_code: string;
 }
 
 // Module-level ephemeral session. null = no operator logged in.
@@ -71,7 +72,7 @@ export function setSession(uuid: string, pin: string): { ok: boolean; reason?: s
         return { ok: false, reason: 'bad_pin' };
     }
 
-    currentOperator = { uuid: row.uuid, full_name: row.full_name || '' };
+    currentOperator = { uuid: row.uuid, full_name: row.full_name || '', short_code: row.short_code || '' };
     saveLastOperatorUuid(currentOperator.uuid);
     return { ok: true, operator: currentOperator };
 }

@@ -302,6 +302,10 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
             _raw_weight_netto_box: effectiveBoxNet,
             _raw_weight_brutto_box: weightBruttoBox,
 
+            // Current station operator (from PIN-login session)
+            operator: operator?.short_code || '',
+            operator_name: operator?.full_name || '',
+
             ...extra
         };
 

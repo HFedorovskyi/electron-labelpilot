@@ -42,7 +42,7 @@ const App = () => {
     // station uuid when present, but fall back to a stable id so the synthetic
     // operator is never null when demo is sourced from the durable flag alone.
     const demoOperator: CurrentOperator | null = isDemo
-        ? { uuid: stationUuid || 'demo-operator', full_name: t('operator.demoOperator') }
+        ? { uuid: stationUuid || 'demo-operator', full_name: t('operator.demoOperator'), short_code: '00' }
         : null;
 
     // Global Sync Listener

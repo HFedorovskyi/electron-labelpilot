@@ -218,6 +218,9 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
             box_limit: selectedProduct?.close_box_counter?.toString() || '',
             _raw_weight_netto_pack: weightNettoPack, _raw_weight_brutto_pack: weightBruttoPack,
             _raw_weight_netto_box: effectiveBoxNet, _raw_weight_brutto_box: weightBruttoBox,
+            // Current station operator (from PIN-login session)
+            operator: operator?.short_code || '',
+            operator_name: operator?.full_name || '',
             ...extra
         };
 

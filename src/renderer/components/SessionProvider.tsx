@@ -3,6 +3,7 @@ import React, { createContext, useContext, useEffect, useState, useCallback } fr
 export interface CurrentOperator {
     uuid: string;
     full_name: string;
+    short_code?: string;
 }
 
 interface SessionState {
