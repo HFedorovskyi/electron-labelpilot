@@ -1,9 +1,37 @@
 import fs from 'fs';
+import { randomUUID } from 'crypto';
 import { dialog } from 'electron';
 import { encrypt, decrypt } from './encryption';
 import { getExportData } from './database';
 import { loadIdentity } from './identity';
 import { clearDemoFlag } from './demo_flag';
+
+/**
+ * Build ONE encrypted .lpr report — the identical payload for both transports (online POST
+ * to upload_report, or USB export). Lean on purpose: only station_uuid + printed_labels +
+ * logs (the server ignores packs/boxes/pallets), so 10-20 stations stay cheap on the LAN.
+ * Pass a since-watermark for a delta (auto reports); omit it for a full snapshot (USB).
+ */
+export function buildReportPayload(opts: { sincePackId?: number; sinceErrorId?: number } = {}) {
+    const identity = loadIdentity();
+    const data = getExportData(opts);
+    const payload = {
+        station_uuid: identity?.station_uuid,
+        station_identity: identity,
+        printed_labels: data.printed_labels,
+        logs: data.logs,
+        report_id: randomUUID(),
+        generated_at: data.generated_at,
+    };
+    return {
+        blob: encrypt(payload),
+        maxPackId: data.maxPackId,
+        maxErrorId: data.maxErrorId,
+        labelCount: data.printed_labels.length,
+        logCount: data.logs.length,
+        hasData: data.printed_labels.length > 0 || data.logs.length > 0,
+    };
+}
 
 export async function importOfflineUpdate(): Promise<{ success: boolean; message: string }> {
     const { processSyncData } = require('./processor');
@@ -55,20 +83,11 @@ export async function exportOfflineData(): Promise<{ success: boolean; message: 
             return { success: false, message: 'Cancelled' };
         }
 
-        // Get Data
-        const data = getExportData();
-
-        // Add Identity Info
-        const payload = {
-            ...data,
-            station_identity: identity
-        };
-
-        // Encrypt
-        const encrypted = encrypt(payload);
-
-        // Save
-        fs.writeFileSync(result.filePath, encrypted);
+        // Manual USB export = a FULL snapshot (no watermark) — the escape hatch when the
+        // server has been unreachable. The server dedupes on unique_id, so re-exporting
+        // labels that were already auto-sent online can never double-count.
+        const { blob } = buildReportPayload();
+        fs.writeFileSync(result.filePath, blob);
 
         return { success: true, message: 'Data exported successfully' };
     } catch (error: any) {

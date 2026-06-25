@@ -6,6 +6,12 @@ export class ServerStatusManager {
     private timer: NodeJS.Timeout | null = null;
     private lastStatus: 'connected' | 'disconnected' = 'disconnected';
     private mainWindow: BrowserWindow | null = null;
+    private reconnectCbs: Array<() => void> = [];
+
+    /** Subscribe to the disconnected -> connected transition (e.g. flush the report outbox). */
+    onReconnect(cb: () => void) {
+        this.reconnectCbs.push(cb);
+    }
 
     // Adaptive cadence: poll often while disconnected (so reconnection is detected quickly),
     // but back off once connected — the steady state — to cut the constant 5s HTTP round-trip
@@ -64,8 +70,12 @@ export class ServerStatusManager {
 
     private updateStatus(newStatus: 'connected' | 'disconnected') {
         if (this.lastStatus !== newStatus) {
+            const reconnected = this.lastStatus === 'disconnected' && newStatus === 'connected';
             this.lastStatus = newStatus;
             this.sendStatusUpdate();
+            if (reconnected) {
+                this.reconnectCbs.forEach((cb) => { try { cb(); } catch (e) { console.error('[server_status] reconnect cb failed:', e); } });
+            }
         }
     }
 

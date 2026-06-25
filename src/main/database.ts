@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3';
 import path from 'path';
+import { randomUUID } from 'crypto';
 import { app } from 'electron';
 import { runMigrations } from './migrations';
 import log from './logger';
@@ -133,6 +134,16 @@ export function initDatabase() {
         structure TEXT NOT NULL UNIQUE,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME
+      );
+
+      -- Local marking/print errors queued for the next station->server report (deduped
+      -- server-side by event_uid). event_uid is a client-generated UUID.
+      CREATE TABLE IF NOT EXISTS print_errors (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_uid TEXT NOT NULL,
+        level TEXT NOT NULL DEFAULT 'ERROR',
+        message TEXT NOT NULL,
+        created_at TEXT NOT NULL
       );
 
       -- Indexes for the per-print hot queries (recordPack / counters / closeBox).
@@ -693,15 +704,15 @@ export function resetDatabase() {
   console.log('Database: RESET COMPLETE.');
 }
 
-export function getExportData() {
+export function getExportData(opts: { sincePackId?: number; sinceErrorId?: number } = {}) {
   const db = initDatabase();
-  // Gather data for export (e.g., packs, boxes, logs)
-  // For now, we export packs and boxes that have been created locally.
-  // In a real scenario, we might want to filter by date or status.
-  const packs = db.prepare('SELECT * FROM pack').all() as any[];
+  const sincePack = opts.sincePackId ?? 0;
+  const sinceErr = opts.sinceErrorId ?? 0;
+  // Delta by default (sincePackId=0 -> everything, since ids start at 1): with 10-20 stations
+  // reporting every 5 min, each report carries only NEW rows, not the whole table.
+  const packs = db.prepare('SELECT * FROM pack WHERE id > ? ORDER BY id').all(sincePack) as any[];
   const boxes = db.prepare('SELECT * FROM boxes').all();
   const pallets = db.prepare('SELECT * FROM pallet').all();
-  // We can also add system logs if we had a table for them.
 
   // ADDITIVE: emit a printed_labels[] array carrying operator attribution. The server's
   // upload_report reads printed_labels[].user_name into PrintedLabel.station_user_name — this
@@ -718,13 +729,37 @@ export function getExportData() {
       printed_at: p.created_at,
     }));
 
+  // Marking/print errors -> server StationLog (deduped there by event_uid).
+  const errorRows = db.prepare('SELECT * FROM print_errors WHERE id > ? ORDER BY id').all(sinceErr) as any[];
+  const logs = errorRows.map((e) => ({
+    event_uid: e.event_uid,
+    level: e.level,
+    message: e.message,
+    timestamp: e.created_at,
+  }));
+
   return {
     packs,
     boxes,
     pallets,
     printed_labels,
-    generated_at: new Date().toISOString()
+    logs,
+    generated_at: new Date().toISOString(),
+    // Watermarks the caller advances ONLY after a confirmed send/spool.
+    maxPackId: packs.reduce((m, p) => Math.max(m, p.id), sincePack),
+    maxErrorId: errorRows.reduce((m, e) => Math.max(m, e.id), sinceErr),
   };
+}
+
+/** Record a marking/print error locally; it ships to the server in the next report. */
+export function recordPrintError(message: string, level: 'ERROR' | 'WARNING' | 'INFO' = 'ERROR'): void {
+  try {
+    const db = initDatabase();
+    db.prepare('INSERT INTO print_errors (event_uid, level, message, created_at) VALUES (?, ?, ?, ?)')
+      .run(randomUUID(), level, String(message).slice(0, 2000), new Date().toISOString());
+  } catch (e) {
+    console.error('[database] recordPrintError failed:', e);
+  }
 }
 
 // --- Deletion Logic ---
@@ -1050,6 +1085,13 @@ export function completePrintJob(jobId: number) {
 export function deletePrintJob(jobId: number) {
   const db = initDatabase();
   db.prepare('DELETE FROM print_jobs WHERE job_id = ?').run(jobId);
+  return { success: true };
+}
+
+// Wipe all print jobs (used by the demo seed to give a deterministic task list).
+export function clearAllPrintJobs() {
+  const db = initDatabase();
+  db.prepare('DELETE FROM print_jobs').run();
   return { success: true };
 }
 

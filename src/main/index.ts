@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, shell, dialog } from 'electron';
 import path from 'path';
-import { initDatabase } from './database';
+import { initDatabase, recordPrintError } from './database';
+import { enqueueReport, startReportScheduler } from './outbox';
 import { scaleManager } from './scales';
 
 // Import usb_sync
@@ -168,6 +169,10 @@ app.whenReady().then(() => {
     discoveryManager.setMode('station');
     serverStatusManager.startPolling();
 
+    // Station -> server marking/error reporting: periodic delta flush + retry of the
+    // offline outbox (also flushed immediately on reconnect via server_status onReconnect).
+    startReportScheduler();
+
     // IPC Handlers
     ipcMain.on('set-app-mode', (_, mode) => {
         discoveryManager.setMode(mode);
@@ -262,6 +267,7 @@ app.whenReady().then(() => {
                 return true;
             } catch (e) {
                 log.error('PrinterService failed:', e);
+                recordPrintError(`Печать не удалась (${printerConfig.protocol}, ${printerConfig.name || ''}): ${(e as any)?.message || e}`);
                 return false;
             }
         }
@@ -297,6 +303,7 @@ app.whenReady().then(() => {
                             log.info(`Print result: SUCCESS (Duration: ${duration}ms)`);
                         } else {
                             log.error(`Print result: FAILURE (Duration: ${duration}ms) Reason: ${failureReason}`);
+                            recordPrintError(`Печать не удалась (browser/${targetPrinter || 'default'}): ${failureReason || 'unknown'}`);
                         }
                         scheduleWorkerIdleDestroy();
                         resolve(success);
@@ -588,7 +595,11 @@ ipcMain.handle('record-pack', async (_, data) => {
 
 ipcMain.handle('close-box', async (_, { boxId, weightNetto, weightBrutto }) => {
     const { closeBox } = await import('./database');
-    return closeBox(boxId, weightNetto, weightBrutto);
+    const res = closeBox(boxId, weightNetto, weightBrutto);
+    // A closed box is a natural reporting unit — push its packs/errors to the server
+    // (or spool to the outbox if offline). Fire-and-forget so it never delays the line.
+    void enqueueReport('box-close');
+    return res;
 });
 
 ipcMain.handle('get-open-pallet-content', async () => {
@@ -611,6 +622,7 @@ ipcMain.handle('close-pallet', async () => {
         const res = closeCurrentPallet();
         if (res.success) {
             BrowserWindow.getAllWindows().forEach(win => win.webContents.send('data-updated'));
+            void enqueueReport('pallet-close');
         }
         return res;
     } catch (err) {
