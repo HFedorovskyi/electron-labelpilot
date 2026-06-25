@@ -12,9 +12,14 @@ import { app } from 'electron';
 export interface ReportState {
     lastPackId: number;
     lastErrorId: number;
+    // Compound cursor (deleted_at ms string, pack id) of the latest deleted weighing already
+    // reported. Separate from lastPackId because a pack can be deleted AFTER its id was reported;
+    // the id tiebreaker makes two same-millisecond deletions safe (no skip, no perpetual re-send).
+    lastDeletedAt: string;
+    lastDeletedId: number;
 }
 
-const DEFAULT: ReportState = { lastPackId: 0, lastErrorId: 0 };
+const DEFAULT: ReportState = { lastPackId: 0, lastErrorId: 0, lastDeletedAt: '', lastDeletedId: 0 };
 
 function statePath(): string {
     return path.join(app.getPath('userData'), 'report_state.json');

@@ -72,7 +72,7 @@ export function enqueueReport(reason: string): Promise<void> {
         const st = getReportState();
         let built;
         try {
-            built = buildReportPayload({ sincePackId: st.lastPackId, sinceErrorId: st.lastErrorId });
+            built = buildReportPayload({ sincePackId: st.lastPackId, sinceErrorId: st.lastErrorId, sinceDeletedAt: st.lastDeletedAt, sinceDeletedId: st.lastDeletedId });
         } catch (e) {
             // The usual cause is encrypt() throwing because no license token is stored yet
             // (station not activated). Surface that distinctly instead of dropping silently.
@@ -91,8 +91,8 @@ export function enqueueReport(reason: string): Promise<void> {
             try { spool(built.blob); } catch (e) { console.error('[outbox] spool failed (keeping watermark):', e); return; }
         }
         // Only advance the watermark once the data is durably sent OR spooled.
-        setReportState({ lastPackId: built.maxPackId, lastErrorId: built.maxErrorId });
-        console.log(`[outbox] report(${reason}): ${built.labelCount} labels, ${built.logCount} logs -> ${sent ? 'sent' : 'spooled'}`);
+        setReportState({ lastPackId: built.maxPackId, lastErrorId: built.maxErrorId, lastDeletedAt: built.maxDeletedAt, lastDeletedId: built.maxDeletedId });
+        console.log(`[outbox] report(${reason}): ${built.labelCount} labels, ${built.deletedCount} deleted, ${built.logCount} logs -> ${sent ? 'sent' : 'spooled'}`);
     });
 }
 
@@ -107,12 +107,12 @@ export function spoolPendingSync(reason: string): void {
     try {
         if (!autoReportEnabled()) return;
         const st = getReportState();
-        const built = buildReportPayload({ sincePackId: st.lastPackId, sinceErrorId: st.lastErrorId });
+        const built = buildReportPayload({ sincePackId: st.lastPackId, sinceErrorId: st.lastErrorId, sinceDeletedAt: st.lastDeletedAt, sinceDeletedId: st.lastDeletedId });
         if (!built.hasData) return;
         spool(built.blob);
         // Advance the watermark only after the durable spool write succeeded.
-        setReportState({ lastPackId: built.maxPackId, lastErrorId: built.maxErrorId });
-        console.log(`[outbox] ${reason}: spooled ${built.labelCount} labels, ${built.logCount} logs on shutdown`);
+        setReportState({ lastPackId: built.maxPackId, lastErrorId: built.maxErrorId, lastDeletedAt: built.maxDeletedAt, lastDeletedId: built.maxDeletedId });
+        console.log(`[outbox] ${reason}: spooled ${built.labelCount} labels, ${built.deletedCount} deleted, ${built.logCount} logs on shutdown`);
     } catch (e) {
         // Best-effort: the marking data is still in the local DB and the watermark is NOT advanced,
         // so the next launch re-reports it from the watermark. (A no-license station throws on the

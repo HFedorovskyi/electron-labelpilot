@@ -40,6 +40,10 @@ export const COMPAT_MATRIX: Record<string, { minServerVersion: string }> = {
     '1.3.8': { minServerVersion: '1.1.13' },
     // 1.3.9 fixes the printed-label unique_id (per-pack, not barcode); same server requirement.
     '1.3.9': { minServerVersion: '1.1.13' },
+    // 1.3.10 reports actual net weight + deleted weighings. Backward-compatible with the report
+    // ingest (an older server just ignores the extra fields), so no new HARD requirement — the
+    // weight/deleted dashboard stats only populate once the server is on 1.1.14.
+    '1.3.10': { minServerVersion: '1.1.13' },
     // Add new entries when a new client version requires a newer server:
     // '2.0.0': { minServerVersion: '2.0.0' },
 };

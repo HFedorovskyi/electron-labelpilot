@@ -12,13 +12,14 @@ import { clearDemoFlag } from './demo_flag';
  * logs (the server ignores packs/boxes/pallets), so 10-20 stations stay cheap on the LAN.
  * Pass a since-watermark for a delta (auto reports); omit it for a full snapshot (USB).
  */
-export function buildReportPayload(opts: { sincePackId?: number; sinceErrorId?: number } = {}) {
+export function buildReportPayload(opts: { sincePackId?: number; sinceErrorId?: number; sinceDeletedAt?: string; sinceDeletedId?: number } = {}) {
     const identity = loadIdentity();
     const data = getExportData(opts);
     const payload = {
         station_uuid: identity?.station_uuid,
         station_identity: identity,
         printed_labels: data.printed_labels,
+        deleted_labels: data.deleted_labels,
         logs: data.logs,
         report_id: randomUUID(),
         generated_at: data.generated_at,
@@ -27,9 +28,12 @@ export function buildReportPayload(opts: { sincePackId?: number; sinceErrorId?: 
         blob: encrypt(payload),
         maxPackId: data.maxPackId,
         maxErrorId: data.maxErrorId,
+        maxDeletedAt: data.maxDeletedAt,
+        maxDeletedId: data.maxDeletedId,
         labelCount: data.printed_labels.length,
+        deletedCount: data.deleted_labels.length,
         logCount: data.logs.length,
-        hasData: data.printed_labels.length > 0 || data.logs.length > 0,
+        hasData: data.printed_labels.length > 0 || data.deleted_labels.length > 0 || data.logs.length > 0,
     };
 }
 

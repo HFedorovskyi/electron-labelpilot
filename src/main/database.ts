@@ -704,10 +704,12 @@ export function resetDatabase() {
   console.log('Database: RESET COMPLETE.');
 }
 
-export function getExportData(opts: { sincePackId?: number; sinceErrorId?: number } = {}) {
+export function getExportData(opts: { sincePackId?: number; sinceErrorId?: number; sinceDeletedAt?: string; sinceDeletedId?: number } = {}) {
   const db = initDatabase();
   const sincePack = opts.sincePackId ?? 0;
   const sinceErr = opts.sinceErrorId ?? 0;
+  const sinceDeletedAt = opts.sinceDeletedAt ?? '';
+  const sinceDeletedId = opts.sinceDeletedId ?? 0;
   // Delta by default (sincePackId=0 -> everything, since ids start at 1): with 10-20 stations
   // reporting every 5 min, each report carries only NEW rows, not the whole table.
   const packs = db.prepare('SELECT * FROM pack WHERE id > ? ORDER BY id').all(sincePack) as any[];
@@ -722,20 +724,33 @@ export function getExportData(opts: { sincePackId?: number; sinceErrorId?: numbe
   const stationRow = db.prepare('SELECT uuid FROM station LIMIT 1').get() as { uuid?: string } | undefined;
   const stationUuid = stationRow?.uuid || 'nostation';
 
-  // ADDITIVE: emit a printed_labels[] array carrying operator attribution. The server's
-  // upload_report reads printed_labels[].user_name into PrintedLabel.station_user_name — this
-  // closes that previously-dormant pipeline. Each printed pack becomes one printed_labels row.
-  // operator_name may be null/'' (no operator logged in) — that is fine; the server stores ''.
-  const printed_labels = packs
-    .filter((p) => p.status !== 'Deleted')
-    .map((p) => ({
-      unique_id: `${stationUuid}-pack-${p.id}`,
-      pack_id: p.id,
-      product_id: p.nomenclature_id,
-      user_name: p.operator_name || '',
-      pack_name: p.number,
-      printed_at: p.created_at,
-    }));
+  // ADDITIVE: emit a printed_labels[] array carrying operator attribution + the actual weighed
+  // net weight (grams). The server uses weight_netto_grams for VARIABLE products and the product's
+  // nominal fixed_weight_grams for fixed ones. pack.weight_netto is stored in KG, hence *1000.
+  const toLabel = (p: any) => ({
+    unique_id: `${stationUuid}-pack-${p.id}`,
+    pack_id: p.id,
+    product_id: p.nomenclature_id,
+    user_name: p.operator_name || '',
+    pack_name: p.number,
+    printed_at: p.created_at,
+    weight_netto_grams: p.weight_netto == null ? null : Math.round(p.weight_netto * 1000),
+    deleted_at: p.deleted_at ?? null,
+  });
+  const printed_labels = packs.filter((p) => p.status !== 'Deleted').map(toLabel);
+
+  // Deleted weighings ("отвесы") since the watermark — reported so the server can show deletion
+  // stats and exclude them from good production. A pack can be deleted AFTER its id was already
+  // reported as good; the server reconciles by unique_id. The cursor is the COMPOUND (deleted_at, id)
+  // so two deletions in the same millisecond can never be skipped (a strict > on a ms-only key could),
+  // and the boundary row is not re-sent on every tick.
+  const deletedPacks = db.prepare(
+    "SELECT * FROM pack WHERE deleted_at IS NOT NULL AND (deleted_at > ? OR (deleted_at = ? AND id > ?)) ORDER BY deleted_at, id"
+  ).all(sinceDeletedAt, sinceDeletedAt, sinceDeletedId) as any[];
+  const deleted_labels = deletedPacks.map(toLabel);
+  const lastDeleted = deletedPacks[deletedPacks.length - 1];
+  const maxDeletedAt = lastDeleted ? lastDeleted.deleted_at : sinceDeletedAt;
+  const maxDeletedId = lastDeleted ? lastDeleted.id : sinceDeletedId;
 
   // Marking/print errors -> server StationLog (deduped there by event_uid).
   const errorRows = db.prepare('SELECT * FROM print_errors WHERE id > ? ORDER BY id').all(sinceErr) as any[];
@@ -751,11 +766,14 @@ export function getExportData(opts: { sincePackId?: number; sinceErrorId?: numbe
     boxes,
     pallets,
     printed_labels,
+    deleted_labels,
     logs,
     generated_at: new Date().toISOString(),
     // Watermarks the caller advances ONLY after a confirmed send/spool.
     maxPackId: packs.reduce((m, p) => Math.max(m, p.id), sincePack),
     maxErrorId: errorRows.reduce((m, e) => Math.max(m, e.id), sinceErr),
+    maxDeletedAt,
+    maxDeletedId,
   };
 }
 
@@ -952,8 +970,8 @@ export function deletePack(packId: number) {
     if (!box) throw new Error("Box not found"); // Should not happen
     if (box.status !== 'Open') throw new Error("Cannot delete pack from a closed box");
 
-    // 2. Mark Pack as Deleted
-    db!.prepare("UPDATE pack SET status = 'Deleted' WHERE id = ?").run(packId);
+    // 2. Mark Pack as Deleted (stamp deleted_at, ms precision, so it can be reported to the server)
+    db!.prepare("UPDATE pack SET status = 'Deleted', deleted_at = strftime('%Y-%m-%d %H:%M:%f','now') WHERE id = ?").run(packId);
 
     // 3. Update Box Weights (Subtract)
     const newBoxNet = Math.max(0, (box.weight_netto || 0) - pack.weight_netto);
@@ -1007,8 +1025,8 @@ export function deleteBox(boxId: number) {
     // 2. Mark Box as Deleted
     db!.prepare("UPDATE boxes SET status = 'Deleted', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(boxId);
 
-    // 3. Mark all Packs in Box as Deleted
-    db!.prepare("UPDATE pack SET status = 'Deleted' WHERE box_id = ?").run(boxId);
+    // 3. Mark all Packs in Box as Deleted (stamp deleted_at so they can be reported to the server)
+    db!.prepare("UPDATE pack SET status = 'Deleted', deleted_at = strftime('%Y-%m-%d %H:%M:%f','now') WHERE box_id = ? AND status != 'Deleted'").run(boxId);
 
     // 4. Update Pallet Weights (Subtract Box Weight)
     // Note: A box has its own weight (contents + box tare).

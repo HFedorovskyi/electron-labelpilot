@@ -198,6 +198,20 @@ export const migrations: Migration[] = [
             db.exec('DROP TABLE IF EXISTS operators;');
         }
     },
+    {
+        version: 9,
+        description: 'Add deleted_at to pack (soft-delete timestamp) so deleted weighings can be reported',
+        up(db) {
+            try {
+                db.exec('ALTER TABLE pack ADD COLUMN deleted_at TEXT;');
+            } catch (e: any) {
+                if (!e.message.includes('duplicate column')) throw e;
+            }
+        },
+        down(_db) {
+            // SQLite < 3.35 doesn't support DROP COLUMN — leave the column (unused).
+        }
+    },
 ];
 
 /**
