@@ -166,14 +166,14 @@ const UpdateSettings = () => {
     };
 
     return (
-        <div className="p-6 bg-white dark:bg-white/5 border border-neutral-200 dark:border-white/10 rounded-2xl space-y-6 shadow-sm dark:shadow-none">
+        <div className="p-6 bg-white dark:bg-white/5 border border-neutral-200 dark:border-neutral-600 rounded-2xl space-y-6 shadow-sm dark:shadow-none">
             <h2 className="text-xl font-semibold flex items-center gap-3 text-sky-600 dark:text-sky-400">
                 <Download className="w-6 h-6" />
                 {t('updates.title')}
             </h2>
 
             {/* Version & Status */}
-            <div className="flex items-center justify-between p-4 bg-neutral-50 dark:bg-black/20 rounded-xl border border-neutral-300 dark:border-white/5">
+            <div className="flex items-center justify-between p-4 bg-neutral-50 dark:bg-black/20 rounded-xl border border-neutral-300 dark:border-neutral-600">
                 <div>
                     <div className="text-sm text-neutral-600 dark:text-neutral-400">{t('updates.currentVersion')}</div>
                     <div className="text-2xl font-mono font-bold text-neutral-900 dark:text-white">v{currentVersion}</div>
@@ -195,7 +195,7 @@ const UpdateSettings = () => {
 
             {/* Progress bar */}
             {phase === 'downloading' && (
-                <div className="w-full bg-neutral-200 dark:bg-neutral-800 rounded-full h-2 overflow-hidden">
+                <div className="w-full bg-neutral-200 dark:bg-neutral-700 rounded-full h-2 overflow-hidden">
                     <div
                         className="h-2 bg-sky-500 rounded-full transition-all duration-300"
                         style={{ width: `${progress}%` }}
@@ -236,7 +236,7 @@ const UpdateSettings = () => {
 
                 <button
                     onClick={handleOfflineInstall}
-                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-neutral-100 dark:bg-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-600 border border-neutral-300 dark:border-white/10 text-neutral-800 dark:text-white font-medium transition-all"
+                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-neutral-100 dark:bg-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-600 border border-neutral-300 dark:border-neutral-600 text-neutral-800 dark:text-white font-medium transition-all"
                 >
                     <HardDrive className="w-4 h-4" />
                     {t('updates.installOffline')}
@@ -244,7 +244,7 @@ const UpdateSettings = () => {
             </div>
 
             {/* Backups & Rollback */}
-            <div className="pt-4 border-t border-neutral-200 dark:border-white/5">
+            <div className="pt-4 border-t border-neutral-200 dark:border-neutral-600">
                 <div className="flex items-center justify-between mb-3">
                     <h3 className="text-base font-semibold text-neutral-800 dark:text-neutral-300 flex items-center gap-2">
                         <RotateCcw className="w-4 h-4 text-neutral-500 dark:text-neutral-400" />
@@ -268,7 +268,7 @@ const UpdateSettings = () => {
                                 key={b.id}
                                 className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all ${rollbackId === b.id
                                     ? 'bg-sky-50 dark:bg-sky-500/10 border-sky-300 dark:border-sky-500/30'
-                                    : 'bg-white dark:bg-black/20 border-neutral-200 dark:border-white/5 hover:border-neutral-300 dark:hover:border-white/10'
+                                    : 'bg-white dark:bg-black/20 border-neutral-200 dark:border-neutral-600 hover:border-neutral-300 dark:hover:border-white/10'
                                     }`}
                             >
                                 <input

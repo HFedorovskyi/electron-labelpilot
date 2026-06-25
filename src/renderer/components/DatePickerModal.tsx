@@ -53,7 +53,7 @@ const DatePickerModal: React.FC<DatePickerModalProps> = ({ value, onUpdate, onCl
 
     return (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
-            <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-white/10 rounded-[2.5rem] p-8 w-[450px] shadow-sm dark:shadow-2xl relative animate-in zoom-in-95 duration-200">
+            <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-600 rounded-[2.5rem] p-8 w-[450px] shadow-sm dark:shadow-2xl relative animate-in zoom-in-95 duration-200">
                 <button
                     onClick={onClose}
                     className="absolute top-6 right-6 p-2 bg-neutral-100 dark:bg-white/5 hover:bg-neutral-200 dark:hover:bg-white/10 rounded-full transition-colors"

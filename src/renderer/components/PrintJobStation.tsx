@@ -708,7 +708,7 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
     return (
         <div className="grid grid-cols-12 gap-6 h-full p-4 relative">
             {/* Main Panel — Job List */}
-            <div className="col-span-8 bg-white dark:bg-neutral-900/50 border border-neutral-200 dark:border-white/5 rounded-3xl p-8 backdrop-blur shadow-sm dark:shadow-2xl flex flex-col overflow-hidden">
+            <div className="col-span-8 bg-white dark:bg-neutral-900/50 border border-neutral-200 dark:border-neutral-600 rounded-3xl p-8 backdrop-blur shadow-sm dark:shadow-2xl flex flex-col overflow-hidden">
                 {/* Header */}
                 <div className="flex justify-between items-center mb-6">
                     <h2 className="text-2xl font-semibold text-neutral-900 dark:text-white flex items-center gap-3">
@@ -744,7 +744,7 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
                                     )}
                                 </div>
                             </div>
-                            <button onClick={handleBackToJobs} className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-white/10 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-white/10 text-sm font-semibold transition-colors">
+                            <button onClick={handleBackToJobs} className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white dark:bg-neutral-700 border border-neutral-200 dark:border-neutral-600 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-white/10 text-sm font-semibold transition-colors">
                                 <ArrowLeft className="w-4 h-4" /> {t('pj.backToJobs')}
                             </button>
                         </div>
@@ -754,7 +754,7 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
                 {/* Weight Display (for all modes when a job is active) */}
                 {activeJob && (
                     <div className="mb-6 grid grid-cols-2 gap-4">
-                        <div className="bg-neutral-50 dark:bg-black/30 border border-neutral-200 dark:border-white/10 rounded-3xl p-8 text-center relative overflow-hidden group">
+                        <div className="bg-neutral-50 dark:bg-black/30 border border-neutral-200 dark:border-neutral-600 rounded-3xl p-8 text-center relative overflow-hidden group">
                             <div className="absolute inset-0 bg-gradient-to-br from-emerald-100/50 dark:from-emerald-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
                             <div className="flex justify-between items-center mb-2 gap-1.5">
                                 <label className="text-xs uppercase tracking-widest text-neutral-500 font-bold">{t('ws.gross')}</label>
@@ -777,7 +777,7 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
                                 </div>
                             )}
                         </div>
-                        <div className="bg-neutral-50 dark:bg-black/30 border border-neutral-200 dark:border-white/10 rounded-3xl p-8 text-center">
+                        <div className="bg-neutral-50 dark:bg-black/30 border border-neutral-200 dark:border-neutral-600 rounded-3xl p-8 text-center">
                             <label className="text-xs uppercase tracking-widest text-neutral-500 font-bold">{t('ws.net')}</label>
                             <div className="text-7xl font-mono text-neutral-700 dark:text-neutral-300 mt-2 font-light tracking-tighter">
                                 {getNetWeight()} <span className="text-2xl text-neutral-500 dark:text-neutral-600">{t('ws.kg')}</span>
@@ -787,7 +787,7 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
                 )}
 
                 {/* Tabs */}
-                <div className="flex border-b border-neutral-200 dark:border-white/5 mb-4">
+                <div className="flex border-b border-neutral-200 dark:border-neutral-600 mb-4">
                     <button
                         onClick={() => setJobsTab('active')}
                         className={`flex-1 py-3 text-sm font-semibold flex items-center justify-center gap-2 transition-colors relative ${jobsTab === 'active'
@@ -834,7 +834,7 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
                                     onClick={() => selectJob(job)}
                                     className={`p-5 rounded-2xl border cursor-pointer transition-all group ${activeJob?.job_id === job.job_id
                                             ? 'bg-violet-50 dark:bg-violet-500/10 border-violet-300 dark:border-violet-500/30 shadow-lg shadow-violet-500/5'
-                                            : 'bg-neutral-50 dark:bg-black/20 border-neutral-200 dark:border-white/5 hover:bg-neutral-100 dark:hover:bg-black/30 hover:border-neutral-300 dark:hover:border-white/10'
+                                            : 'bg-neutral-50 dark:bg-black/20 border-neutral-200 dark:border-neutral-600 hover:bg-neutral-100 dark:hover:bg-black/30 hover:border-neutral-300 dark:hover:border-white/10'
                                         }`}
                                 >
                                     <div className="flex justify-between items-start mb-3">
@@ -882,7 +882,7 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
 
                             {completedJobs.map(job => (
                                 <div key={job.job_id}
-                                    className="p-4 rounded-2xl border border-neutral-200 dark:border-white/5 bg-neutral-50 dark:bg-black/10 mb-2 flex justify-between items-center">
+                                    className="p-4 rounded-2xl border border-neutral-200 dark:border-neutral-600 bg-neutral-50 dark:bg-black/10 mb-2 flex justify-between items-center">
                                     <div className="flex-1 min-w-0">
                                         <div className="flex items-center gap-2">
                                             <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
@@ -922,11 +922,11 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
 
                         {/* Action buttons */}
                         <div className="grid grid-cols-2 gap-4">
-                            <button onClick={handleRepeat} className="py-8 bg-neutral-100 dark:bg-neutral-800/50 hover:bg-neutral-200 dark:hover:bg-neutral-800 border border-neutral-300 dark:border-white/5 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group">
+                            <button onClick={handleRepeat} className="py-8 bg-neutral-100 dark:bg-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-600 border border-neutral-300 dark:border-neutral-600 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group">
                                 <RefreshCw className="w-6 h-6 text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-800 dark:group-hover:text-white transition-colors" />
                                 <span className="text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-800 dark:group-hover:text-white uppercase text-xs tracking-widest">{t('ws.reprintSmall')}</span>
                             </button>
-                            <button onClick={handleCloseBox} disabled={unitsInBox === 0} className="py-8 bg-neutral-100 dark:bg-neutral-800/50 hover:bg-neutral-200 dark:hover:bg-neutral-800 border border-neutral-300 dark:border-white/5 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group disabled:opacity-40 disabled:pointer-events-none">
+                            <button onClick={handleCloseBox} disabled={unitsInBox === 0} className="py-8 bg-neutral-100 dark:bg-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-600 border border-neutral-300 dark:border-neutral-600 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group disabled:opacity-40 disabled:pointer-events-none">
                                 <Box className="w-6 h-6 text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-800 dark:group-hover:text-white transition-colors" />
                                 <span className="text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-800 dark:group-hover:text-white uppercase text-xs tracking-widest">{t('ws.closeBox')}</span>
                             </button>
@@ -956,23 +956,23 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
                 </button>
 
                 {/* Session Stats */}
-                <div className="mt-auto p-6 bg-white dark:bg-neutral-900/50 border border-neutral-200 dark:border-white/5 shadow-sm dark:shadow-none rounded-3xl backdrop-blur">
+                <div className="mt-auto p-6 bg-white dark:bg-neutral-900/50 border border-neutral-200 dark:border-neutral-600 shadow-sm dark:shadow-none rounded-3xl backdrop-blur">
                     <h3 className="text-sm font-semibold mb-4 text-neutral-500 dark:text-white/60 uppercase tracking-widest">{t('ws.sessionStats')}</h3>
                     <div className="space-y-3">
-                        <div className="flex justify-between items-center p-3 bg-neutral-100 dark:bg-white/5 border border-neutral-300 dark:border-white/10 rounded-xl cursor-pointer hover:bg-emerald-50 dark:hover:bg-emerald-500/10 transition-all"
+                        <div className="flex justify-between items-center p-3 bg-neutral-100 dark:bg-white/5 border border-neutral-300 dark:border-neutral-600 rounded-xl cursor-pointer hover:bg-emerald-50 dark:hover:bg-emerald-500/10 transition-all"
                             onClick={() => setIsDatePickerOpen(true)}>
                             <span className="text-xs uppercase tracking-wider text-neutral-500 font-bold">{t('pj.labelingDate')}</span>
                             <div className="flex items-center gap-3">
                                 <span className="text-sm font-mono font-bold text-neutral-900 dark:text-white">
                                     {labelingDate.toLocaleDateString('ru-RU')}
                                 </span>
-                                <div className="p-2 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-white/10 rounded-lg">
+                                <div className="p-2 bg-white dark:bg-neutral-700 border border-neutral-300 dark:border-neutral-600 rounded-lg">
                                     <Calendar className="w-4 h-4 text-violet-600 dark:text-violet-500" />
                                 </div>
                             </div>
                         </div>
 
-                        <div className="p-3 bg-neutral-100 dark:bg-white/5 border border-neutral-300 dark:border-white/10 rounded-xl">
+                        <div className="p-3 bg-neutral-100 dark:bg-white/5 border border-neutral-300 dark:border-neutral-600 rounded-xl">
                             <div className="flex justify-between items-center mb-1.5">
                                 <span className="text-xs uppercase tracking-wider text-neutral-500 font-bold">{t('ws.inBox')}</span>
                                 <span className="text-lg font-mono font-bold text-neutral-900 dark:text-white">{unitsInBox}{boxFillLimit > 0 ? ` / ${boxFillLimit}` : ''}</span>
@@ -987,7 +987,7 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
                             { label: t('ws.boxesOnPallet'), value: boxesInPallet },
                             { label: t('ws.totalUnits'), value: totalUnits },
                         ].map((stat, i) => (
-                            <div key={i} className="flex justify-between items-center p-3 bg-neutral-100 dark:bg-white/5 border border-neutral-300 dark:border-white/10 rounded-xl">
+                            <div key={i} className="flex justify-between items-center p-3 bg-neutral-100 dark:bg-white/5 border border-neutral-300 dark:border-neutral-600 rounded-xl">
                                 <span className="text-xs uppercase tracking-wider text-neutral-500 font-bold">{stat.label}</span>
                                 <span className="text-lg font-mono font-bold text-neutral-900 dark:text-white">{stat.value}</span>
                             </div>
@@ -1013,7 +1013,7 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
             {/* Complete-job confirmation (prevents accidental taps on a touchscreen) */}
             {confirmCompleteJobId !== null && (
                 <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/30 backdrop-blur-sm" onClick={() => setConfirmCompleteJobId(null)}>
-                    <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-white/10 p-8 rounded-3xl shadow-2xl text-center max-w-md mx-4" onClick={e => e.stopPropagation()}>
+                    <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-600 p-8 rounded-3xl shadow-2xl text-center max-w-md mx-4" onClick={e => e.stopPropagation()}>
                         <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto mb-4" />
                         <p className="text-neutral-900 dark:text-white text-lg mb-6">{t('pj.completeConfirm')}</p>
                         <div className="flex gap-3">
@@ -1033,7 +1033,7 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
             {/* Alert Modal */}
             {alertMessage && (
                 <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm" onClick={() => setAlertMessage(null)}>
-                    <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-white/10 p-8 rounded-3xl shadow-2xl text-center max-w-md mx-4" onClick={e => e.stopPropagation()}>
+                    <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-600 p-8 rounded-3xl shadow-2xl text-center max-w-md mx-4" onClick={e => e.stopPropagation()}>
                         <AlertCircle className="w-12 h-12 text-amber-500 mx-auto mb-4" />
                         <p className="text-neutral-900 dark:text-white text-lg mb-6">{alertMessage}</p>
                         <button onClick={() => setAlertMessage(null)}

@@ -714,6 +714,11 @@ export function getExportData(opts: { sincePackId?: number; sinceErrorId?: numbe
   const boxes = db.prepare('SELECT * FROM boxes').all();
   const pallets = db.prepare('SELECT * FROM pallet').all();
 
+  // Prefix the no-barcode fallback id with the station uuid so two different stations can't both
+  // emit `pack-1` and have the server's unique_id dedup silently drop one as a duplicate.
+  const stationRow = db.prepare('SELECT uuid FROM station LIMIT 1').get() as { uuid?: string } | undefined;
+  const stationUuid = stationRow?.uuid || 'nostation';
+
   // ADDITIVE: emit a printed_labels[] array carrying operator attribution. The server's
   // upload_report reads printed_labels[].user_name into PrintedLabel.station_user_name — this
   // closes that previously-dormant pipeline. Each printed pack becomes one printed_labels row.
@@ -721,7 +726,7 @@ export function getExportData(opts: { sincePackId?: number; sinceErrorId?: numbe
   const printed_labels = packs
     .filter((p) => p.status !== 'Deleted')
     .map((p) => ({
-      unique_id: p.barcode_value || `pack-${p.id}`,
+      unique_id: p.barcode_value || `${stationUuid}-pack-${p.id}`,
       pack_id: p.id,
       product_id: p.nomenclature_id,
       user_name: p.operator_name || '',

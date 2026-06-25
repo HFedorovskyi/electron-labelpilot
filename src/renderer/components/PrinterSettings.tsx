@@ -76,7 +76,7 @@ const PrinterSettings = ({ title, config, onChange, systemPrinters, serialPorts,
     };
 
     return (
-        <div className={`bg-neutral-50 dark:bg-black/20 p-5 rounded-xl border border-l-4 border-neutral-200 dark:border-white/10 ${accentClass || 'border-l-amber-500'}`}>
+        <div className={`bg-neutral-50 dark:bg-black/20 p-5 rounded-xl border border-l-4 border-neutral-200 dark:border-neutral-600 ${accentClass || 'border-l-amber-500'}`}>
             <div className="mb-4">
                 <h3 className="text-lg font-medium text-neutral-800 dark:text-white flex items-center gap-2">
                     <Printer size={20} className="text-amber-600 dark:text-amber-400" />
@@ -100,7 +100,7 @@ const PrinterSettings = ({ title, config, onChange, systemPrinters, serialPorts,
                                 onClick={() => update('connection', type.id)}
                                 className={`flex flex-col items-center justify-center p-3 rounded-xl border transition-all duration-200 ${config.connection === type.id
                                     ? 'bg-emerald-600 dark:bg-emerald-600 border-emerald-500 dark:border-emerald-400 text-white shadow-[0_0_15px_rgba(16,185,129,0.4)] scale-105 z-10'
-                                    : 'bg-white dark:bg-neutral-800/50 border-neutral-200 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-700 hover:text-neutral-900 dark:hover:text-white'
+                                    : 'bg-white dark:bg-neutral-700 border-neutral-200 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-700 hover:text-neutral-900 dark:hover:text-white'
                                     }`}
                             >
                                 <type.icon size={20} className="mb-1" />
@@ -124,7 +124,7 @@ const PrinterSettings = ({ title, config, onChange, systemPrinters, serialPorts,
                                 onClick={() => update('protocol', proto.id)}
                                 className={`flex flex-col items-center justify-start gap-1 p-3 rounded-xl border transition-all duration-200 min-w-0 ${config.protocol === proto.id
                                     ? 'bg-emerald-600 dark:bg-emerald-600 border-emerald-500 dark:border-emerald-400 text-white shadow-[0_0_15px_rgba(16,185,129,0.4)] scale-105 z-10'
-                                    : 'bg-white dark:bg-neutral-800/50 border-neutral-200 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-700 hover:text-neutral-900 dark:hover:text-white'
+                                    : 'bg-white dark:bg-neutral-700 border-neutral-200 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-700 hover:text-neutral-900 dark:hover:text-white'
                                     }`}
                             >
                                 <proto.icon size={16} className="shrink-0" />
@@ -148,7 +148,7 @@ const PrinterSettings = ({ title, config, onChange, systemPrinters, serialPorts,
                                 onClick={() => update('dpi', d.id)}
                                 className={`p-3 rounded-xl border transition-all duration-200 ${(config.dpi === d.id) || (!config.dpi && d.id === 203)
                                     ? 'bg-emerald-600 dark:bg-emerald-600 border-emerald-500 dark:border-emerald-400 text-white shadow-[0_0_15px_rgba(16,185,129,0.4)] scale-105 z-10'
-                                    : 'bg-white dark:bg-neutral-800/50 border-neutral-200 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-700 hover:text-neutral-900 dark:hover:text-white'
+                                    : 'bg-white dark:bg-neutral-700 border-neutral-200 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-700 hover:text-neutral-900 dark:hover:text-white'
                                     }`}
                             >
                                 <div className="font-bold text-xs text-center">{d.label}</div>
@@ -166,7 +166,7 @@ const PrinterSettings = ({ title, config, onChange, systemPrinters, serialPorts,
                         <select
                             value={config.driverName || ''}
                             onChange={(e) => update('driverName', e.target.value)}
-                            className="w-full bg-white dark:bg-black/30 border border-neutral-200 dark:border-white/10 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+                            className="w-full bg-white dark:bg-black/30 border border-neutral-200 dark:border-neutral-600 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"
                         >
                             <option value="">{t('settings.systemDefault')}</option>
                             {systemPrinters.map(p => (
@@ -189,7 +189,7 @@ const PrinterSettings = ({ title, config, onChange, systemPrinters, serialPorts,
                                 type="text"
                                 value={config.ip || '192.168.1.100'}
                                 onChange={(e) => update('ip', e.target.value)}
-                                className={`w-full bg-white dark:bg-black/30 border rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50 ${config.ip && !isValidIp(config.ip) ? 'border-red-400 dark:border-red-500/60' : 'border-neutral-200 dark:border-white/10'}`}
+                                className={`w-full bg-white dark:bg-black/30 border rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50 ${config.ip && !isValidIp(config.ip) ? 'border-red-400 dark:border-red-500/60' : 'border-neutral-200 dark:border-neutral-600'}`}
                             />
                         </div>
                         <div>
@@ -200,7 +200,7 @@ const PrinterSettings = ({ title, config, onChange, systemPrinters, serialPorts,
                                 max={65535}
                                 value={config.port || 9100}
                                 onChange={(e) => update('port', Number(e.target.value))}
-                                className="w-full bg-white dark:bg-black/30 border border-neutral-200 dark:border-white/10 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+                                className="w-full bg-white dark:bg-black/30 border border-neutral-200 dark:border-neutral-600 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"
                             />
                         </div>
                     </div>
@@ -214,7 +214,7 @@ const PrinterSettings = ({ title, config, onChange, systemPrinters, serialPorts,
                             <select
                                 value={config.serialPort || ''}
                                 onChange={(e) => update('serialPort', e.target.value)}
-                                className="w-full bg-white dark:bg-black/30 border border-neutral-200 dark:border-white/10 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+                                className="w-full bg-white dark:bg-black/30 border border-neutral-200 dark:border-neutral-600 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"
                             >
                                 <option value="">{t('settings.selectPort')}</option>
                                 {serialPorts.map(p => (
@@ -227,7 +227,7 @@ const PrinterSettings = ({ title, config, onChange, systemPrinters, serialPorts,
                             <select
                                 value={config.baudRate || 9600}
                                 onChange={(e) => update('baudRate', Number(e.target.value))}
-                                className="w-full bg-white dark:bg-black/30 border border-neutral-200 dark:border-white/10 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+                                className="w-full bg-white dark:bg-black/30 border border-neutral-200 dark:border-neutral-600 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"
                             >
                                 {[9600, 19200, 38400, 57600, 115200].map(r => (
                                     <option key={r} value={r}>{r}</option>

@@ -671,7 +671,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
     return (
         <div className="grid grid-cols-12 gap-6 h-full p-4 relative">
             {/* Main Card */}
-            <div className="col-span-8 bg-white dark:bg-neutral-900/50 border border-neutral-200 dark:border-white/5 rounded-3xl p-8 backdrop-blur shadow-sm dark:shadow-2xl flex flex-col">
+            <div className="col-span-8 bg-white dark:bg-neutral-900/50 border border-neutral-200 dark:border-neutral-600 rounded-3xl p-8 backdrop-blur shadow-sm dark:shadow-2xl flex flex-col">
                 {/* Header */}
                 <div className="flex justify-between items-start mb-6 gap-4">
                     <h2 className="text-2xl font-semibold text-neutral-900 dark:text-white">{t('fw.title')}</h2>
@@ -705,13 +705,13 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                     <button onClick={() => setSubMode('scale')}
                         className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-2xl text-sm font-semibold transition-all border ${subMode === 'scale'
                             ? 'bg-emerald-100/50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 shadow-sm'
-                            : 'bg-neutral-100 dark:bg-white/5 text-neutral-500 dark:text-neutral-400 border-neutral-200 dark:border-white/10 hover:bg-neutral-200 dark:hover:bg-white/10'}`}>
+                            : 'bg-neutral-100 dark:bg-white/5 text-neutral-500 dark:text-neutral-400 border-neutral-200 dark:border-neutral-600 hover:bg-neutral-200 dark:hover:bg-white/10'}`}>
                         <Scale className="w-4 h-4" /> {t('fw.modeScale')}
                     </button>
                     <button onClick={() => setSubMode('count')}
                         className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-2xl text-sm font-semibold transition-all border ${subMode === 'count'
                             ? 'bg-blue-100/50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20 shadow-sm'
-                            : 'bg-neutral-100 dark:bg-white/5 text-neutral-500 dark:text-neutral-400 border-neutral-200 dark:border-white/10 hover:bg-neutral-200 dark:hover:bg-white/10'}`}>
+                            : 'bg-neutral-100 dark:bg-white/5 text-neutral-500 dark:text-neutral-400 border-neutral-200 dark:border-neutral-600 hover:bg-neutral-200 dark:hover:bg-white/10'}`}>
                         <Package className="w-4 h-4" /> {t('fw.modeCount')}
                     </button>
                 </div>
@@ -719,7 +719,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                 {/* Product selector */}
                 <div onClick={() => setIsProductModalOpen(true)} className="cursor-pointer group mb-6">
                     <label className="block text-sm font-medium text-neutral-400 mb-2">{t('ws.search')}</label>
-                    <div className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-300 dark:border-white/10 rounded-2xl px-5 py-4 text-lg text-neutral-500 dark:text-neutral-400 flex items-center justify-between group-hover:bg-neutral-100 dark:group-hover:bg-black/40 transition-all">
+                    <div className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-300 dark:border-neutral-600 rounded-2xl px-5 py-4 text-lg text-neutral-500 dark:text-neutral-400 flex items-center justify-between group-hover:bg-neutral-100 dark:group-hover:bg-black/40 transition-all">
                         <span className={selectedProduct ? "text-neutral-900 dark:text-white" : ""}>{selectedProduct ? selectedProduct.name : "..."}</span>
                         <Search className="w-6 h-6 text-neutral-400" />
                     </div>
@@ -746,7 +746,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                 {subMode === 'scale' && (
                     <div className="flex-1 flex flex-col">
                         <div className="grid grid-cols-2 gap-4 flex-1">
-                            <div className="bg-neutral-50 dark:bg-black/30 border border-neutral-200 dark:border-white/10 rounded-3xl p-8 text-center relative overflow-hidden">
+                            <div className="bg-neutral-50 dark:bg-black/30 border border-neutral-200 dark:border-neutral-600 rounded-3xl p-8 text-center relative overflow-hidden">
                                 <label className="text-xs uppercase tracking-widest text-neutral-500 font-bold">{t('ws.gross')}</label>
                                 <div className="text-6xl font-mono text-emerald-600 dark:text-emerald-400 mt-2 font-light tracking-tighter">
                                     {weight} <span className="text-2xl text-emerald-500/50">{t('ws.kg')}</span>
@@ -757,7 +757,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                                     </div>
                                 )}
                             </div>
-                            <div className="bg-neutral-50 dark:bg-black/30 border border-neutral-200 dark:border-white/10 rounded-3xl p-8 text-center">
+                            <div className="bg-neutral-50 dark:bg-black/30 border border-neutral-200 dark:border-neutral-600 rounded-3xl p-8 text-center">
                                 <label className="text-xs uppercase tracking-widest text-neutral-500 font-bold">{t('ws.net')}</label>
                                 <div className="text-6xl font-mono text-neutral-700 dark:text-neutral-300 mt-2 font-light tracking-tighter">
                                     {getNetWeight()} <span className="text-2xl text-neutral-500 dark:text-neutral-600">{t('ws.kg')}</span>
@@ -798,7 +798,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
 
                         {/* Progress */}
                         {isCountPrinting && (
-                            <div className="p-6 bg-neutral-50 dark:bg-black/30 border border-neutral-200 dark:border-white/10 rounded-2xl">
+                            <div className="p-6 bg-neutral-50 dark:bg-black/30 border border-neutral-200 dark:border-neutral-600 rounded-2xl">
                                 <div className="flex justify-between mb-3">
                                     <span className="text-sm font-bold text-neutral-500 uppercase tracking-widest">{t('fw.progress')}</span>
                                     <span className="text-sm font-mono text-neutral-700 dark:text-neutral-300">
@@ -825,11 +825,11 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                             <Printer className="w-8 h-8" /> {t('ws.print')}
                         </button>
                         <div className="grid grid-cols-2 gap-4">
-                            <button onClick={handleRepeat} className="py-8 bg-neutral-100 dark:bg-neutral-800/50 hover:bg-neutral-200 dark:hover:bg-neutral-800 border border-neutral-300 dark:border-white/5 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group">
+                            <button onClick={handleRepeat} className="py-8 bg-neutral-100 dark:bg-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-600 border border-neutral-300 dark:border-neutral-600 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group">
                                 <RefreshCw className="w-6 h-6 text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-800 dark:group-hover:text-white transition-colors" />
                                 <span className="text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-800 dark:group-hover:text-white uppercase text-xs tracking-widest">{t('ws.reprintSmall')}</span>
                             </button>
-                            <button onClick={handleCloseBox} disabled={unitsInBox === 0} className="py-8 bg-neutral-100 dark:bg-neutral-800/50 hover:bg-neutral-200 dark:hover:bg-neutral-800 border border-neutral-300 dark:border-white/5 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group disabled:opacity-40 disabled:pointer-events-none">
+                            <button onClick={handleCloseBox} disabled={unitsInBox === 0} className="py-8 bg-neutral-100 dark:bg-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-600 border border-neutral-300 dark:border-neutral-600 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group disabled:opacity-40 disabled:pointer-events-none">
                                 <Box className="w-6 h-6 text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-800 dark:group-hover:text-white transition-colors" />
                                 <span className="text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-800 dark:group-hover:text-white uppercase text-xs tracking-widest">{t('ws.closeBox')}</span>
                             </button>
@@ -864,28 +864,28 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                 </button>
 
                 {/* Session Stats */}
-                <div className="mt-auto p-6 bg-white dark:bg-neutral-900/50 border border-neutral-200 dark:border-white/5 shadow-sm dark:shadow-none rounded-3xl backdrop-blur">
+                <div className="mt-auto p-6 bg-white dark:bg-neutral-900/50 border border-neutral-200 dark:border-neutral-600 shadow-sm dark:shadow-none rounded-3xl backdrop-blur">
                     <h3 className="text-sm font-semibold mb-4 text-neutral-500 dark:text-white/60 uppercase tracking-widest">{t('ws.sessionStats')}</h3>
                     <div className="space-y-3">
-                        <div className="flex justify-between items-center p-3 bg-neutral-100 dark:bg-white/5 border border-neutral-300 dark:border-white/10 rounded-xl group cursor-pointer hover:bg-emerald-50 dark:hover:bg-emerald-500/10 transition-all"
+                        <div className="flex justify-between items-center p-3 bg-neutral-100 dark:bg-white/5 border border-neutral-300 dark:border-neutral-600 rounded-xl group cursor-pointer hover:bg-emerald-50 dark:hover:bg-emerald-500/10 transition-all"
                             onClick={() => { setIsKeypadOpen(true); }}>
                             <span className="text-xs uppercase tracking-wider text-neutral-500 font-bold">{t('ws.batchLabel')}</span>
                             <div className="flex items-center gap-3">
                                 <span className="text-xl font-mono font-bold text-neutral-900 dark:text-white group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
                                     {batchNumber || <span className="text-neutral-400 dark:text-neutral-700 italic text-sm">{t('ws.enterPlaceholder')}</span>}
                                 </span>
-                                <div className="p-2 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-white/10 rounded-lg"><Hash className="w-4 h-4 text-emerald-600 dark:text-emerald-500" /></div>
+                                <div className="p-2 bg-white dark:bg-neutral-700 border border-neutral-300 dark:border-neutral-600 rounded-lg"><Hash className="w-4 h-4 text-emerald-600 dark:text-emerald-500" /></div>
                             </div>
                         </div>
-                        <div className="flex justify-between items-center p-3 bg-neutral-100 dark:bg-white/5 border border-neutral-300 dark:border-white/10 rounded-xl group cursor-pointer hover:bg-emerald-50 dark:hover:bg-emerald-500/10 transition-all"
+                        <div className="flex justify-between items-center p-3 bg-neutral-100 dark:bg-white/5 border border-neutral-300 dark:border-neutral-600 rounded-xl group cursor-pointer hover:bg-emerald-50 dark:hover:bg-emerald-500/10 transition-all"
                             onClick={() => { if (unitsInBox > 0) { setAlertMessage(t('ws.closeBoxBeforeChange')); return; } setIsDatePickerOpen(true); }}>
                             <span className="text-xs uppercase tracking-wider text-neutral-500 font-bold">{t('ws.dateLabel')}</span>
                             <div className="flex items-center gap-3">
                                 <span className="text-xl font-mono font-bold text-neutral-900 dark:text-white">{labelingDate.toLocaleDateString('ru-RU')}</span>
-                                <div className="p-2 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-white/10 rounded-lg"><Calendar className="w-4 h-4 text-emerald-600 dark:text-emerald-500" /></div>
+                                <div className="p-2 bg-white dark:bg-neutral-700 border border-neutral-300 dark:border-neutral-600 rounded-lg"><Calendar className="w-4 h-4 text-emerald-600 dark:text-emerald-500" /></div>
                             </div>
                         </div>
-                        <div className="py-2 border-b border-neutral-200 dark:border-white/5">
+                        <div className="py-2 border-b border-neutral-200 dark:border-neutral-600">
                             <div className="flex justify-between text-sm mb-1.5">
                                 <span className="text-neutral-500">{t('ws.inBox')}</span>
                                 <div className="flex items-center gap-2">
@@ -899,7 +899,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                                 </div>
                             )}
                         </div>
-                        <div className="flex justify-between text-sm py-2 border-b border-neutral-200 dark:border-white/5">
+                        <div className="flex justify-between text-sm py-2 border-b border-neutral-200 dark:border-neutral-600">
                             <span className="text-neutral-500">{t('ws.boxesOnPallet')}</span>
                             <span className="font-mono text-amber-600 dark:text-amber-400">{boxesInPallet}</span>
                         </div>
@@ -928,7 +928,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
             {/* MODALS */}
             {alertMessage && (
                 <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[300] flex items-center justify-center p-4 animate-in fade-in duration-200">
-                    <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-white/10 rounded-[2rem] p-10 max-w-2xl w-full text-center shadow-2xl relative">
+                    <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-600 rounded-[2rem] p-10 max-w-2xl w-full text-center shadow-2xl relative">
                         <button onClick={() => setAlertMessage(null)} className="absolute top-6 right-6 p-2 bg-neutral-100 dark:bg-white/5 hover:bg-neutral-200 dark:hover:bg-white/10 rounded-full transition-colors">
                             <X className="w-8 h-8 text-neutral-500 dark:text-neutral-400" />
                         </button>

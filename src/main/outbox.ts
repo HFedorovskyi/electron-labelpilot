@@ -1,12 +1,13 @@
 import fs from 'fs';
 import path from 'path';
-import { app } from 'electron';
+import { app, BrowserWindow } from 'electron';
 
 import { buildReportPayload } from './offline_sync';
 import { uploadReport } from './report_upload';
 import { getReportState, setReportState } from './report_state';
 import { loadPrinterConfig } from './config';
 import { serverStatusManager } from './server_status';
+import { hasLicenseToken } from './encryption';
 
 // Marking-report exchange (station -> server). On each trigger we build a DELTA report
 // (only packs/errors newer than the watermark); if the server is reachable we POST it,
@@ -47,6 +48,23 @@ function spool(blob: Buffer): void {
     fs.writeFileSync(f, blob);
 }
 
+// A station with no license token cannot encrypt its reports, so they can be neither sent nor
+// spooled. The marking data is NOT lost (the watermark is never advanced, so the rows stay in
+// the local DB and upload once a valid .lpi is imported) — but this must be VISIBLE, not a
+// silent drop. Rate-limited so a recurring trigger warns at most ~once per 30 min.
+let lastLicenseWarnAt = 0;
+function warnNotLicensed(): void {
+    const now = Date.now();
+    if (now - lastLicenseWarnAt < 30 * 60 * 1000) return;
+    lastLicenseWarnAt = now;
+    console.warn('[outbox] marking data is pending but this station has NO license — reports are not being recorded for upload until a station identity (.lpi) is imported.');
+    try {
+        for (const w of BrowserWindow.getAllWindows()) {
+            if (!w.isDestroyed()) w.webContents.send('report-warning', { reason: 'no-license' });
+        }
+    } catch { /* ignore */ }
+}
+
 /** Build a delta report for everything new since the watermark; send if online, else spool. */
 export function enqueueReport(reason: string): Promise<void> {
     return serialize(async () => {
@@ -56,7 +74,10 @@ export function enqueueReport(reason: string): Promise<void> {
         try {
             built = buildReportPayload({ sincePackId: st.lastPackId, sinceErrorId: st.lastErrorId });
         } catch (e) {
-            console.error('[outbox] build failed:', e);
+            // The usual cause is encrypt() throwing because no license token is stored yet
+            // (station not activated). Surface that distinctly instead of dropping silently.
+            if (!hasLicenseToken()) warnNotLicensed();
+            else console.error('[outbox] build failed:', e);
             return;
         }
         if (!built.hasData) return;

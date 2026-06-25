@@ -26,7 +26,7 @@ const ProductSelectionModal: React.FC<ProductSelectionModalProps> = ({ products,
     return (
         <div className="fixed inset-0 bg-neutral-100 dark:bg-neutral-900 z-[150] flex flex-col animate-in fade-in duration-200">
             {/* Header */}
-            <div className="flex-none p-6 bg-white dark:bg-neutral-800 border-b border-neutral-200 dark:border-white/10 shadow-sm flex items-center gap-6">
+            <div className="flex-none p-6 bg-white dark:bg-neutral-700 border-b border-neutral-200 dark:border-neutral-600 shadow-sm flex items-center gap-6">
                 <div className="relative flex-1">
                     <Search className="absolute left-6 top-1/2 -translate-y-1/2 w-8 h-8 text-neutral-400" />
                     <input
@@ -34,7 +34,7 @@ const ProductSelectionModal: React.FC<ProductSelectionModalProps> = ({ products,
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                         onFocus={() => setShowKeyboard(true)}
-                        className="w-full pl-20 pr-24 py-6 text-3xl rounded-3xl bg-neutral-100 dark:bg-black/20 border border-neutral-300 dark:border-white/10 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all text-neutral-900 dark:text-white placeholder-neutral-400 font-medium"
+                        className="w-full pl-20 pr-24 py-6 text-3xl rounded-3xl bg-neutral-100 dark:bg-black/20 border border-neutral-300 dark:border-neutral-600 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all text-neutral-900 dark:text-white placeholder-neutral-400 font-medium"
                         placeholder="Поиск номенклатуры или артикула..."
                     />
                     <button
@@ -55,7 +55,7 @@ const ProductSelectionModal: React.FC<ProductSelectionModalProps> = ({ products,
                     <div
                         key={p.id}
                         onClick={() => onSelect(p)}
-                        className="p-8 bg-white dark:bg-neutral-800 rounded-3xl border border-neutral-200 dark:border-white/5 active:bg-emerald-50 dark:active:bg-emerald-500/10 shadow-sm flex flex-col gap-3 cursor-pointer transition-colors"
+                        className="p-8 bg-white dark:bg-neutral-700 rounded-3xl border border-neutral-200 dark:border-neutral-600 active:bg-emerald-50 dark:active:bg-emerald-500/10 shadow-sm flex flex-col gap-3 cursor-pointer transition-colors"
                     >
                         <div className="text-3xl font-bold text-neutral-900 dark:text-white">{p.name}</div>
                         <div className="text-xl text-neutral-500 dark:text-neutral-400 font-mono">
@@ -72,7 +72,7 @@ const ProductSelectionModal: React.FC<ProductSelectionModalProps> = ({ products,
 
             {/* Keyboard */}
             {showKeyboard && (
-                <div className="flex-none bg-neutral-200 dark:bg-neutral-800 border-t border-neutral-300 dark:border-white/10 p-4 shadow-[0_-10px_40px_rgba(0,0,0,0.1)] slide-in-from-bottom-full duration-300 animate-in pt-6 pb-8">
+                <div className="flex-none bg-neutral-200 dark:bg-neutral-700 border-t border-neutral-300 dark:border-neutral-600 p-4 shadow-[0_-10px_40px_rgba(0,0,0,0.1)] slide-in-from-bottom-full duration-300 animate-in pt-6 pb-8">
                     <VirtualKeyboard value={searchQuery} onChange={setSearchQuery} />
                 </div>
             )}

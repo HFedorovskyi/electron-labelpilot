@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Save, RefreshCw, Settings as SettingsIcon, Printer, Languages, Moon, Sun, Monitor, ShieldCheck, ShieldAlert, LogOut } from 'lucide-react';
+import { Save, RefreshCw, Settings as SettingsIcon, Printer, Languages, Moon, Sun, Monitor, ShieldCheck, ShieldAlert, LogOut, KeyRound } from 'lucide-react';
 import PrinterSettings from './PrinterSettings';
 import UpdateSettings from './UpdateSettings';
 import { useTranslation, type Lang } from '../i18n';
@@ -24,7 +24,12 @@ interface PrinterInfo {
     status: number;
 }
 
-const Settings = () => {
+interface SettingsProps {
+    /** Switch the active app tab (provided by App). Used to open the dedicated License panel. */
+    onNavigate?: (tab: string) => void;
+}
+
+const Settings = ({ onNavigate }: SettingsProps) => {
     const { t, lang, setLang } = useTranslation();
     const { theme, setTheme } = useTheme();
     const { license } = useLicenseStatus();
@@ -232,7 +237,7 @@ const Settings = () => {
 
             {/* Sticky unsaved-changes save bar (printer + scale configs) */}
             {isDirty && (
-                <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-4 px-6 py-3 rounded-2xl bg-neutral-900 dark:bg-neutral-800 text-white shadow-2xl border border-white/10 animate-in fade-in slide-in-from-bottom-2 duration-200">
+                <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-4 px-6 py-3 rounded-2xl bg-neutral-900 dark:bg-neutral-700 text-white shadow-2xl border border-white/10 animate-in fade-in slide-in-from-bottom-2 duration-200">
                     <span className="flex items-center gap-2 text-sm font-medium">
                         <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
                         {t('settings.unsavedChanges')}
@@ -249,7 +254,7 @@ const Settings = () => {
 
             <div className="space-y-8 max-w-7xl">
                 {/* ── Theme Configuration ── */}
-                <div className="p-6 bg-white dark:bg-white/5 border border-neutral-200 dark:border-white/20 rounded-2xl shadow-sm dark:shadow-none">
+                <div className="p-6 bg-white dark:bg-white/5 border border-neutral-200 dark:border-neutral-600 rounded-2xl shadow-sm dark:shadow-none">
                     <h2 className="text-xl font-semibold mb-6 flex items-center gap-3 text-neutral-800 dark:text-emerald-400">
                         <Moon className="w-6 h-6" />
                         {t('settings.theme') || 'Appearance'}
@@ -259,7 +264,7 @@ const Settings = () => {
                             onClick={() => setTheme('light')}
                             className={`px-6 py-3 rounded-xl border transition-all font-medium flex items-center gap-2 ${theme === 'light'
                                 ? 'bg-emerald-600 border-emerald-600 text-white shadow-lg shadow-emerald-500/20'
-                                : 'bg-neutral-50 dark:bg-black/20 border-neutral-200 dark:border-white/20 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/5'
+                                : 'bg-neutral-50 dark:bg-black/20 border-neutral-200 dark:border-neutral-600 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/5'
                                 }`}
                         >
                             <Sun size={18} /> Light
@@ -268,7 +273,7 @@ const Settings = () => {
                             onClick={() => setTheme('dark')}
                             className={`px-6 py-3 rounded-xl border transition-all font-medium flex items-center gap-2 ${theme === 'dark'
                                 ? 'bg-emerald-600 border-emerald-600 text-white shadow-lg shadow-emerald-500/20'
-                                : 'bg-neutral-50 dark:bg-black/20 border-neutral-200 dark:border-white/20 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/5'
+                                : 'bg-neutral-50 dark:bg-black/20 border-neutral-200 dark:border-neutral-600 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/5'
                                 }`}
                         >
                             <Moon size={18} /> Dark
@@ -277,7 +282,7 @@ const Settings = () => {
                             onClick={() => setTheme('system')}
                             className={`px-6 py-3 rounded-xl border transition-all font-medium flex items-center gap-2 ${theme === 'system'
                                 ? 'bg-emerald-600 border-emerald-600 text-white shadow-lg shadow-emerald-500/20'
-                                : 'bg-neutral-50 dark:bg-black/20 border-neutral-200 dark:border-white/20 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/5'
+                                : 'bg-neutral-50 dark:bg-black/20 border-neutral-200 dark:border-neutral-600 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/5'
                                 }`}
                         >
                             <Monitor size={18} /> System
@@ -286,7 +291,7 @@ const Settings = () => {
                 </div>
 
                 {/* ── Language Configuration ── */}
-                <div className="p-6 bg-white dark:bg-white/5 border border-neutral-200 dark:border-white/20 rounded-2xl shadow-sm dark:shadow-none">
+                <div className="p-6 bg-white dark:bg-white/5 border border-neutral-200 dark:border-neutral-600 rounded-2xl shadow-sm dark:shadow-none">
                     <h2 className="text-xl font-semibold mb-6 flex items-center gap-3 text-emerald-400">
                         <Languages className="w-6 h-6" />
                         {t('settings.language')}
@@ -298,7 +303,7 @@ const Settings = () => {
                                 onClick={() => setLang(l)}
                                 className={`px-6 py-3 rounded-xl border transition-all font-medium ${lang === l
                                     ? 'bg-emerald-600 border-emerald-600 text-white shadow-lg shadow-emerald-500/20'
-                                    : 'bg-neutral-50 dark:bg-black/20 border-neutral-200 dark:border-white/20 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/5'
+                                    : 'bg-neutral-50 dark:bg-black/20 border-neutral-200 dark:border-neutral-600 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/5'
                                     }`}
                             >
                                 {({ ru: '🇷🇺 Русский', en: '🇬🇧 English', de: '🇩🇪 Deutsch', uk: '🇺🇦 Українська' } as Record<string, string>)[l] || l.toUpperCase()}
@@ -308,7 +313,7 @@ const Settings = () => {
                 </div>
 
                 {/* ── Server Configuration ── */}
-                <div className="p-6 bg-white dark:bg-white/5 border border-neutral-200 dark:border-white/20 rounded-2xl shadow-sm dark:shadow-none">
+                <div className="p-6 bg-white dark:bg-white/5 border border-neutral-200 dark:border-neutral-600 rounded-2xl shadow-sm dark:shadow-none">
                     <h2 className="text-xl font-semibold mb-6 flex items-center gap-3 text-blue-600 dark:text-blue-400">
                         <SettingsIcon className="w-6 h-6" />
                         {t('sidebar.serverStatus')}
@@ -321,13 +326,13 @@ const Settings = () => {
                                 value={printerConfig.serverIp || ''}
                                 onChange={(e) => setPrinterConfig({ ...printerConfig, serverIp: e.target.value })}
                                 placeholder={t('settings.serverIpPlaceholder')}
-                                className="w-full bg-white dark:bg-black/30 border border-neutral-200 dark:border-white/20 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-all hover:bg-neutral-50 dark:hover:bg-black/40 font-mono"
+                                className="w-full bg-white dark:bg-black/30 border border-neutral-200 dark:border-neutral-600 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-all hover:bg-neutral-50 dark:hover:bg-black/40 font-mono"
                             />
                             <button
                                 onClick={handleSync}
                                 disabled={isSyncing || !printerConfig.serverIp}
                                 className={`px-6 rounded-xl font-medium transition-all flex items-center gap-2 ${isSyncing || !printerConfig.serverIp
-                                    ? 'bg-neutral-100 dark:bg-neutral-800 text-neutral-400 dark:text-neutral-500 cursor-not-allowed'
+                                    ? 'bg-neutral-100 dark:bg-neutral-700 text-neutral-400 dark:text-neutral-500 cursor-not-allowed'
                                     : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg hover:shadow-blue-500/20'
                                     }`}
                             >
@@ -341,57 +346,40 @@ const Settings = () => {
                         </p>
                     </div>
 
-                    {/* License / Demo status of the connected server */}
-                    <div className="mt-6 pt-6 border-t border-neutral-200 dark:border-white/5">
-                        {license ? (
-                            license.mode === 'demo' ? (
-                                <div className="p-4 rounded-xl border bg-amber-50 dark:bg-amber-500/10 border-amber-200 dark:border-amber-500/20">
-                                    <div className="flex items-center gap-2 text-amber-700 dark:text-amber-300 font-semibold">
-                                        <ShieldAlert className="w-5 h-5 shrink-0" />
-                                        <span>{t('license.demo')}</span>
-                                    </div>
-                                    <p className="mt-2 text-sm text-amber-700/80 dark:text-amber-300/80">
-                                        {t('license.demoHint')}
-                                    </p>
-                                </div>
-                            ) : (
-                                <div className="p-4 rounded-xl border bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/20">
-                                    <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-300 font-semibold">
-                                        <ShieldCheck className="w-5 h-5 shrink-0" />
-                                        <span>{t('license.licensed')}: {license.edition}</span>
-                                    </div>
-                                    <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5 text-sm text-neutral-700 dark:text-neutral-300">
-                                        {license.customer && (
-                                            <div className="flex justify-between gap-2">
-                                                <span className="text-neutral-500 dark:text-neutral-400">{t('license.customer')}</span>
-                                                <span className="font-medium truncate">{license.customer}</span>
-                                            </div>
-                                        )}
-                                        {license.expires && (
-                                            <div className="flex justify-between gap-2">
-                                                <span className="text-neutral-500 dark:text-neutral-400">{t('license.expires')}</span>
-                                                <span className={`font-mono ${license.expired ? 'text-amber-600 dark:text-amber-400' : ''}`}>
-                                                    {license.expires}{license.expired ? ` (${t('license.expired')})` : ''}
-                                                </span>
-                                            </div>
-                                        )}
-                                        <div className="flex justify-between gap-2">
-                                            <span className="text-neutral-500 dark:text-neutral-400">{t('license.stations')}</span>
-                                            <span className="font-mono">{license.stations_used} / {license.max_stations ?? '∞'}</span>
-                                        </div>
-                                    </div>
-                                </div>
-                            )
-                        ) : (
-                            <p className="text-sm text-neutral-500 dark:text-neutral-400 flex items-center gap-2">
-                                <ShieldCheck className="w-4 h-4 opacity-50" />
-                                {t('license.unknown')}
-                            </p>
-                        )}
+                    {/* License / Demo status — summary; full details live in the dedicated License panel. */}
+                    <div className="mt-6 pt-6 border-t border-neutral-200 dark:border-neutral-600">
+                        <div className="flex items-center justify-between gap-3 flex-wrap">
+                            <div className="text-sm min-w-0">
+                                {license ? (
+                                    license.mode === 'demo' ? (
+                                        <span className="flex items-center gap-2 font-medium text-amber-600 dark:text-amber-400">
+                                            <ShieldAlert className="w-4 h-4 shrink-0" />{t('license.demo')}
+                                        </span>
+                                    ) : (
+                                        <span className={`flex items-center gap-2 font-medium ${license.expired ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                                            {license.expired ? <ShieldAlert className="w-4 h-4 shrink-0" /> : <ShieldCheck className="w-4 h-4 shrink-0" />}
+                                            <span className="truncate">{t('license.licensed')}: {license.edition}{license.expired ? ` (${t('license.statusExpired')})` : ''}</span>
+                                        </span>
+                                    )
+                                ) : (
+                                    <span className="flex items-center gap-2 text-neutral-500 dark:text-neutral-400">
+                                        <ShieldCheck className="w-4 h-4 opacity-50 shrink-0" />{t('license.unknown')}
+                                    </span>
+                                )}
+                            </div>
+                            {onNavigate && (
+                                <button
+                                    onClick={() => onNavigate('license')}
+                                    className="flex items-center gap-2 px-4 py-2 rounded-xl bg-neutral-100 dark:bg-white/5 border border-neutral-200 dark:border-neutral-600 text-sm font-medium text-neutral-600 dark:text-neutral-300 hover:text-emerald-600 dark:hover:text-emerald-400 hover:border-emerald-300 dark:hover:border-emerald-500/40 transition-colors shrink-0"
+                                >
+                                    <KeyRound className="w-4 h-4" />{t('license.openPanel')}
+                                </button>
+                            )}
+                        </div>
                     </div>
 
                     {/* Offline Sync Controls */}
-                    <div className="mt-6 pt-6 border-t border-neutral-200 dark:border-white/5">
+                    <div className="mt-6 pt-6 border-t border-neutral-200 dark:border-neutral-600">
                         <label className="block text-sm text-neutral-600 dark:text-neutral-400 mb-3">{t('settings.offlineSync') || 'Offline Synchronization'}</label>
                         <div className="flex gap-3 flex-wrap">
                             <button
@@ -481,7 +469,7 @@ const Settings = () => {
                 </div>
 
                 {/* ── Printer Configuration ── */}
-                <div className="p-6 bg-white dark:bg-white/5 border border-neutral-200 dark:border-white/20 rounded-2xl shadow-sm dark:shadow-none">
+                <div className="p-6 bg-white dark:bg-white/5 border border-neutral-200 dark:border-neutral-600 rounded-2xl shadow-sm dark:shadow-none">
                     <h2 className="text-xl font-semibold mb-6 flex items-center gap-3 text-amber-600 dark:text-amber-400">
                         <Printer className="w-6 h-6" />
                         {t('settings.printer')}
@@ -532,7 +520,7 @@ const Settings = () => {
                     </div>
 
                     {/* Auto-Print Toggle */}
-                    <div className="mt-6 p-4 bg-neutral-50 dark:bg-black/20 rounded-xl border border-neutral-200 dark:border-white/5">
+                    <div className="mt-6 p-4 bg-neutral-50 dark:bg-black/20 rounded-xl border border-neutral-200 dark:border-neutral-600">
                         <div className="flex justify-between items-center">
                             <div>
                                 <div className="font-medium text-neutral-900 dark:text-white">{t('settings.autoPrint')}</div>
@@ -554,16 +542,16 @@ const Settings = () => {
                 </div>
 
                 {/* ── Scale Configuration ── */}
-                <div className="p-6 bg-white dark:bg-white/5 border border-neutral-200 dark:border-white/20 rounded-2xl shadow-sm dark:shadow-none">
+                <div className="p-6 bg-white dark:bg-white/5 border border-neutral-200 dark:border-neutral-600 rounded-2xl shadow-sm dark:shadow-none">
                     <h2 className="text-xl font-semibold mb-1 text-neutral-900 dark:text-white">{t('settings.scales')}</h2>
                     <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-6">{t('settings.scalesDesc')}</p>
 
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                         {/* Left Column: Connection */}
                         <div className="space-y-6">
-                            <h3 className="text-lg font-medium text-neutral-800 dark:text-white/80 border-b border-neutral-200 dark:border-white/5 pb-2">{t('settings.connectionInterface')}</h3>
+                            <h3 className="text-lg font-medium text-neutral-800 dark:text-white/80 border-b border-neutral-200 dark:border-neutral-600 pb-2">{t('settings.connectionInterface')}</h3>
 
-                            <div className="flex bg-neutral-100 dark:bg-black/20 p-1.5 rounded-xl border border-neutral-200 dark:border-white/20 w-full mb-2">
+                            <div className="flex bg-neutral-100 dark:bg-black/20 p-1.5 rounded-xl border border-neutral-200 dark:border-neutral-600 w-full mb-2">
                                 <button
                                     onClick={() => {
                                         setConfig({ ...config, type: 'serial' });
@@ -611,7 +599,7 @@ const Settings = () => {
                                         <select
                                             value={config.path}
                                             onChange={(e) => setConfig({ ...config, path: e.target.value })}
-                                            className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-white/20 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                                            className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-neutral-600 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
                                         >
                                             {ports.map(p => (
                                                 <option key={p.path} value={p.path}>{p.path} {p.manufacturer ? `(${p.manufacturer})` : ''}</option>
@@ -624,7 +612,7 @@ const Settings = () => {
                                         <select
                                             value={config.baudRate}
                                             onChange={(e) => setConfig({ ...config, baudRate: Number(e.target.value) })}
-                                            className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-white/20 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                                            className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-neutral-600 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
                                         >
                                             {[1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200].map(rate => (
                                                 <option key={rate} value={rate}>{rate}</option>
@@ -642,7 +630,7 @@ const Settings = () => {
                                             type="text"
                                             value={config.host}
                                             onChange={(e) => setConfig({ ...config, host: e.target.value })}
-                                            className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-white/20 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                                            className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-neutral-600 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
                                         />
                                     </div>
                                     <div>
@@ -651,7 +639,7 @@ const Settings = () => {
                                             type="number"
                                             value={config.port}
                                             onChange={(e) => setConfig({ ...config, port: Number(e.target.value) })}
-                                            className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-white/20 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                                            className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-neutral-600 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
                                         />
                                     </div>
                                 </div>
@@ -660,14 +648,14 @@ const Settings = () => {
 
                         {/* Right Column: Protocol & Advanced */}
                         <div className="space-y-6">
-                            <h3 className="text-lg font-medium text-neutral-800 dark:text-white/80 border-b border-neutral-200 dark:border-white/5 pb-2">{t('settings.protocolSettings')}</h3>
+                            <h3 className="text-lg font-medium text-neutral-800 dark:text-white/80 border-b border-neutral-200 dark:border-neutral-600 pb-2">{t('settings.protocolSettings')}</h3>
 
                             <div>
                                 <label className="block text-sm text-neutral-600 dark:text-neutral-400 mb-2">{t('settings.protocol')}</label>
                                 <select
                                     value={config.protocolId}
                                     onChange={(e) => setConfig({ ...config, protocolId: e.target.value })}
-                                    className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-white/20 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                                    className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-neutral-600 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
                                     disabled={config.type === 'simulator'}
                                 >
                                     {protocols.map(p => (
@@ -696,7 +684,7 @@ const Settings = () => {
                                                 className={`px-3 py-3 rounded-xl border text-sm transition-all ${
                                                     active
                                                         ? 'border-emerald-500 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
-                                                        : 'border-neutral-200 dark:border-white/20 bg-neutral-50 dark:bg-black/20 text-neutral-700 dark:text-neutral-300 hover:border-emerald-400/50'
+                                                        : 'border-neutral-200 dark:border-neutral-600 bg-neutral-50 dark:bg-black/20 text-neutral-700 dark:text-neutral-300 hover:border-emerald-400/50'
                                                 }`}
                                             >
                                                 <div className="font-semibold">{p.label}</div>
@@ -714,7 +702,7 @@ const Settings = () => {
                                         type="number"
                                         value={config.pollingInterval}
                                         onChange={(e) => setConfig({ ...config, pollingInterval: Number(e.target.value) })}
-                                        className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-white/20 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                                        className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-neutral-600 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
                                     />
                                 </div>
                                 <div>
@@ -723,7 +711,7 @@ const Settings = () => {
                                         type="number"
                                         value={config.stabilityCount}
                                         onChange={(e) => setConfig({ ...config, stabilityCount: Number(e.target.value) })}
-                                        className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-white/20 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                                        className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-neutral-600 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
                                     />
                                 </div>
                             </div>
@@ -749,7 +737,7 @@ const Settings = () => {
                         </p>
                         <button
                             onClick={() => window.electron.send('open-logs-folder', {})}
-                            className="w-fit px-6 py-3 bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 border border-neutral-300 dark:border-white/5 hover:border-neutral-400 dark:hover:border-white/10 text-neutral-900 dark:text-white font-medium rounded-xl transition-all flex items-center gap-2"
+                            className="w-fit px-6 py-3 bg-neutral-100 dark:bg-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-700 border border-neutral-300 dark:border-neutral-600 hover:border-neutral-400 dark:hover:border-white/10 text-neutral-900 dark:text-white font-medium rounded-xl transition-all flex items-center gap-2"
                         >
                             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -774,7 +762,7 @@ const Settings = () => {
                         className="absolute inset-0 bg-neutral-900/40 dark:bg-black/80 backdrop-blur-sm"
                         onClick={() => { if (!isResetting) { setShowResetModal(false); setResetConfirmText(''); } }}
                     />
-                    <div className="relative bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-white/20 rounded-3xl p-8 max-w-md w-full shadow-2xl animate-in fade-in zoom-in duration-200">
+                    <div className="relative bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-600 rounded-3xl p-8 max-w-md w-full shadow-2xl animate-in fade-in zoom-in duration-200">
                         <div className="w-16 h-16 bg-red-100 dark:bg-red-500/10 rounded-full flex items-center justify-center mb-6 mx-auto">
                             <RefreshCw className="w-8 h-8 text-red-600 dark:text-red-500" />
                         </div>
@@ -793,7 +781,7 @@ const Settings = () => {
                             onChange={(e) => setResetConfirmText(e.target.value)}
                             placeholder="RESET"
                             autoFocus
-                            className="w-full text-center font-mono tracking-widest uppercase bg-neutral-50 dark:bg-black/30 border border-neutral-300 dark:border-white/20 rounded-xl px-4 py-3 text-neutral-900 dark:text-white mb-2 focus:outline-none focus:ring-2 focus:ring-red-500/50"
+                            className="w-full text-center font-mono tracking-widest uppercase bg-neutral-50 dark:bg-black/30 border border-neutral-300 dark:border-neutral-600 rounded-xl px-4 py-3 text-neutral-900 dark:text-white mb-2 focus:outline-none focus:ring-2 focus:ring-red-500/50"
                         />
                         <p className="text-xs text-center text-neutral-500 dark:text-neutral-400 mb-6">{t('settings.resetTypeHint')}</p>
 
@@ -801,7 +789,7 @@ const Settings = () => {
                             <button
                                 disabled={isResetting}
                                 onClick={() => { setShowResetModal(false); setResetConfirmText(''); }}
-                                className="flex-1 px-6 py-3 bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-900 dark:text-white font-medium rounded-xl transition-all"
+                                className="flex-1 px-6 py-3 bg-neutral-100 dark:bg-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-900 dark:text-white font-medium rounded-xl transition-all"
                             >
                                 {t('common.cancel') || 'Cancel'}
                             </button>

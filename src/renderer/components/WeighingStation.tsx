@@ -993,7 +993,7 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
     return (
         <div className="grid grid-cols-12 gap-6 h-full p-4 relative">
             {/* Product Information Card */}
-            <div className="col-span-8 bg-white dark:bg-neutral-900/50 border border-neutral-200 dark:border-white/5 rounded-3xl p-8 backdrop-blur shadow-sm dark:shadow-2xl">
+            <div className="col-span-8 bg-white dark:bg-neutral-900/50 border border-neutral-200 dark:border-neutral-600 rounded-3xl p-8 backdrop-blur shadow-sm dark:shadow-2xl">
                 <div className="flex justify-between items-start mb-8 gap-4">
                     <div>
                         <h2 className="text-2xl font-semibold text-neutral-900 dark:text-white">{t('ws.title')}</h2>
@@ -1044,7 +1044,7 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
                 <div className="space-y-6 relative">
                     <div onClick={() => setIsProductModalOpen(true)} className="cursor-pointer group">
                         <label className="block text-sm font-medium text-neutral-400 mb-2">{t('ws.search')}</label>
-                        <div className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-300 dark:border-white/10 rounded-2xl px-5 py-4 text-lg text-neutral-500 dark:text-neutral-400 flex items-center justify-between group-hover:bg-neutral-100 dark:group-hover:bg-black/40 group-active:scale-[0.98] transition-all">
+                        <div className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-300 dark:border-neutral-600 rounded-2xl px-5 py-4 text-lg text-neutral-500 dark:text-neutral-400 flex items-center justify-between group-hover:bg-neutral-100 dark:group-hover:bg-black/40 group-active:scale-[0.98] transition-all">
                             <span className={selectedProduct ? "text-neutral-900 dark:text-white" : ""}>
                                 {selectedProduct ? selectedProduct.name : "..."}
                             </span>
@@ -1070,7 +1070,7 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
 
                 {/* Weight Display Area */}
                 <div className="mt-8 grid grid-cols-2 gap-4">
-                    <div className="bg-neutral-50 dark:bg-black/30 border border-neutral-200 dark:border-white/10 rounded-3xl p-8 text-center relative overflow-hidden group">
+                    <div className="bg-neutral-50 dark:bg-black/30 border border-neutral-200 dark:border-neutral-600 rounded-3xl p-8 text-center relative overflow-hidden group">
                         <div className="absolute inset-0 bg-gradient-to-br from-emerald-100/50 dark:from-emerald-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
                         <label className="text-xs uppercase tracking-widest text-neutral-500 font-bold">{t('ws.gross')}</label>
                         <div className="text-7xl font-mono text-emerald-600 dark:text-emerald-400 mt-2 font-light tracking-tighter">
@@ -1083,7 +1083,7 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
                             </div>
                         )}
                     </div>
-                    <div className="bg-neutral-50 dark:bg-black/30 border border-neutral-200 dark:border-white/10 rounded-3xl p-8 text-center">
+                    <div className="bg-neutral-50 dark:bg-black/30 border border-neutral-200 dark:border-neutral-600 rounded-3xl p-8 text-center">
                         <label className="text-xs uppercase tracking-widest text-neutral-500 font-bold">{t('ws.net')}</label>
                         <div className="text-7xl font-mono text-neutral-700 dark:text-neutral-300 mt-2 font-light tracking-tighter">
                             {getNetWeight()} <span className="text-2xl text-neutral-500 dark:text-neutral-600">{t('ws.kg')}</span>
@@ -1106,7 +1106,7 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
                 <div className="grid grid-cols-2 gap-4">
                     <button
                         onClick={handleRepeat}
-                        className="py-8 bg-neutral-100 dark:bg-neutral-800/50 hover:bg-neutral-200 dark:hover:bg-neutral-800 border border-neutral-300 dark:border-white/5 hover:border-neutral-400 dark:hover:border-white/10 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group shadow-sm dark:shadow-none"
+                        className="py-8 bg-neutral-100 dark:bg-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-600 border border-neutral-300 dark:border-neutral-600 hover:border-neutral-400 dark:hover:border-white/10 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group shadow-sm dark:shadow-none"
                     >
                         <RefreshCw className="w-6 h-6 text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-800 dark:group-hover:text-white transition-colors" />
                         <span className="text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-800 dark:group-hover:text-white uppercase text-xs tracking-widest">{t('ws.reprintSmall')}</span>
@@ -1114,7 +1114,7 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
                     <button
                         onClick={handleCloseBox}
                         disabled={unitsInBox === 0}
-                        className="py-8 bg-neutral-100 dark:bg-neutral-800/50 hover:bg-neutral-200 dark:hover:bg-neutral-800 border border-neutral-300 dark:border-white/5 hover:border-neutral-400 dark:hover:border-white/10 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group shadow-sm dark:shadow-none disabled:opacity-40 disabled:pointer-events-none"
+                        className="py-8 bg-neutral-100 dark:bg-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-600 border border-neutral-300 dark:border-neutral-600 hover:border-neutral-400 dark:hover:border-white/10 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group shadow-sm dark:shadow-none disabled:opacity-40 disabled:pointer-events-none"
                     >
                         <Box className="w-6 h-6 text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-800 dark:group-hover:text-white transition-colors" />
                         <span className="text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-800 dark:group-hover:text-white uppercase text-xs tracking-widest">{t('ws.closeBox')}</span>
@@ -1136,11 +1136,11 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
                     {t('pallet.printSheet')}
                 </button>
 
-                <div className="mt-6 p-6 bg-white dark:bg-neutral-900/50 border border-neutral-200 dark:border-white/5 shadow-sm dark:shadow-none rounded-3xl backdrop-blur">
+                <div className="mt-6 p-6 bg-white dark:bg-neutral-900/50 border border-neutral-200 dark:border-neutral-600 shadow-sm dark:shadow-none rounded-3xl backdrop-blur">
                     <h3 className="text-sm font-semibold mb-4 text-neutral-500 dark:text-white/60 uppercase tracking-widest">{t('ws.sessionStats')}</h3>
                     <div className="space-y-3">
                         <div
-                            className="flex justify-between items-center p-3 bg-neutral-100 dark:bg-white/5 border border-neutral-300 dark:border-white/10 rounded-xl group cursor-pointer hover:bg-emerald-50 dark:hover:bg-emerald-500/10 hover:border-emerald-300 dark:hover:border-emerald-500/30 transition-all active:scale-[0.98]"
+                            className="flex justify-between items-center p-3 bg-neutral-100 dark:bg-white/5 border border-neutral-300 dark:border-neutral-600 rounded-xl group cursor-pointer hover:bg-emerald-50 dark:hover:bg-emerald-500/10 hover:border-emerald-300 dark:hover:border-emerald-500/30 transition-all active:scale-[0.98]"
                             onClick={(e) => {
                                 e.stopPropagation();
                                 // Batch is metadata applied to future packs — safe to change anytime.
@@ -1152,13 +1152,13 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
                                 <span className="text-xl font-mono font-bold text-neutral-900 dark:text-white group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
                                     {batchNumber || <span className="text-neutral-400 dark:text-neutral-700 italic text-sm">{t('ws.enterPlaceholder')}</span>}
                                 </span>
-                                <div className="p-2 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-white/10 rounded-lg group-hover:bg-emerald-100 dark:group-hover:bg-emerald-500/20 group-hover:border-emerald-400 dark:group-hover:border-emerald-500/40 transition-colors">
+                                <div className="p-2 bg-white dark:bg-neutral-700 border border-neutral-300 dark:border-neutral-600 rounded-lg group-hover:bg-emerald-100 dark:group-hover:bg-emerald-500/20 group-hover:border-emerald-400 dark:group-hover:border-emerald-500/40 transition-colors">
                                     <Hash className="w-4 h-4 text-emerald-600 dark:text-emerald-500" />
                                 </div>
                             </div>
                         </div>
                         <div
-                            className="flex justify-between items-center p-3 bg-neutral-100 dark:bg-white/5 border border-neutral-300 dark:border-white/10 rounded-xl group cursor-pointer hover:bg-emerald-50 dark:hover:bg-emerald-500/10 hover:border-emerald-300 dark:hover:border-emerald-500/30 transition-all active:scale-[0.98]"
+                            className="flex justify-between items-center p-3 bg-neutral-100 dark:bg-white/5 border border-neutral-300 dark:border-neutral-600 rounded-xl group cursor-pointer hover:bg-emerald-50 dark:hover:bg-emerald-500/10 hover:border-emerald-300 dark:hover:border-emerald-500/30 transition-all active:scale-[0.98]"
                             onClick={(e) => {
                                 e.stopPropagation();
                                 if (unitsInBox > 0) {
@@ -1173,20 +1173,20 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
                                 <span className="text-xl font-mono font-bold text-neutral-900 dark:text-white group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
                                     {labelingDate.toLocaleDateString('ru-RU')}
                                 </span>
-                                <div className="p-2 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-white/10 rounded-lg group-hover:bg-emerald-100 dark:group-hover:bg-emerald-500/20 group-hover:border-emerald-400 dark:group-hover:border-emerald-500/40 transition-colors">
+                                <div className="p-2 bg-white dark:bg-neutral-700 border border-neutral-300 dark:border-neutral-600 rounded-lg group-hover:bg-emerald-100 dark:group-hover:bg-emerald-500/20 group-hover:border-emerald-400 dark:group-hover:border-emerald-500/40 transition-colors">
                                     <Calendar className="w-4 h-4 text-emerald-600 dark:text-emerald-500" />
                                 </div>
                             </div>
                         </div>
-                        <div className="flex justify-between text-sm py-2 border-b border-neutral-200 dark:border-white/5">
+                        <div className="flex justify-between text-sm py-2 border-b border-neutral-200 dark:border-neutral-600">
                             <span className="text-neutral-500">{t('ws.packNum')}</span>
                             <span className="font-mono text-emerald-600 dark:text-emerald-400">{displayPackNumber || '--'}</span>
                         </div>
-                        <div className="flex justify-between text-sm py-2 border-b border-neutral-200 dark:border-white/5">
+                        <div className="flex justify-between text-sm py-2 border-b border-neutral-200 dark:border-neutral-600">
                             <span className="text-neutral-500">{t('ws.boxNum')}</span>
                             <span className="font-mono text-emerald-600 dark:text-emerald-400">{displayBoxNumber || '--'}</span>
                         </div>
-                        <div className="py-2 border-b border-neutral-200 dark:border-white/5">
+                        <div className="py-2 border-b border-neutral-200 dark:border-neutral-600">
                             <div className="flex justify-between text-sm mb-1.5">
                                 <span className="text-neutral-500">{t('ws.inBox')}</span>
                                 <div className="flex items-center gap-2">
@@ -1200,7 +1200,7 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
                                 </div>
                             )}
                         </div>
-                        <div className="flex justify-between text-sm py-2 border-b border-neutral-200 dark:border-white/5">
+                        <div className="flex justify-between text-sm py-2 border-b border-neutral-200 dark:border-neutral-600">
                             <span className="text-neutral-500">{t('ws.boxesOnPallet')}</span>
                             <span className="font-mono text-amber-600 dark:text-amber-400">{boxesInPallet}</span>
                         </div>
@@ -1230,7 +1230,7 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
             {/* Custom Alert Modal */}
             {alertMessage && (
                 <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[300] flex items-center justify-center p-4 animate-in fade-in duration-200">
-                    <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-white/10 rounded-[2rem] p-10 max-w-2xl w-full text-center shadow-2xl relative animate-in zoom-in-95 duration-200">
+                    <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-600 rounded-[2rem] p-10 max-w-2xl w-full text-center shadow-2xl relative animate-in zoom-in-95 duration-200">
                         <button
                             onClick={() => setAlertMessage(null)}
                             className="absolute top-6 right-6 p-2 bg-neutral-100 dark:bg-white/5 hover:bg-neutral-200 dark:hover:bg-white/10 rounded-full transition-colors"
@@ -1250,7 +1250,7 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
 
                         <button
                             onClick={() => setAlertMessage(null)}
-                            className="w-full py-6 !bg-neutral-800 hover:!bg-neutral-700 dark:!bg-neutral-300 dark:hover:!bg-neutral-200 !text-white dark:!text-black active:!bg-neutral-900 dark:active:!bg-neutral-400 active:scale-[0.98] transition-all rounded-2xl font-bold text-xl shadow-lg border border-transparent dark:border-white/20"
+                            className="w-full py-6 !bg-neutral-800 hover:!bg-neutral-700 dark:!bg-neutral-300 dark:hover:!bg-neutral-200 !text-white dark:!text-black active:!bg-neutral-900 dark:active:!bg-neutral-400 active:scale-[0.98] transition-all rounded-2xl font-bold text-xl shadow-lg border border-transparent dark:border-neutral-600"
                         >
                             {t('ws.ok')}
                         </button>

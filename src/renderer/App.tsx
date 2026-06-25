@@ -14,6 +14,7 @@ import { ThemeProvider } from './components/ThemeProvider';
 // only mounted (and their effects/IPC run) when actually opened.
 const Products = lazy(() => import('./components/Products'));
 const Settings = lazy(() => import('./components/Settings'));
+const LicensePanel = lazy(() => import('./components/LicensePanel'));
 
 const App = () => {
     const { t } = useTranslation();
@@ -54,7 +55,10 @@ const App = () => {
                 // Check for Identity (Physical Station ID)
                 const id = await window.electron.invoke('get-identity');
                 if (id) {
-                    setStationNumber(parseInt(id.station_number));
+                    // station_number can be missing/garbage (e.g. unprovisioned / not yet synced);
+                    // guard parseInt so the sidebar shows "--" instead of "NaN".
+                    const n = parseInt(id.station_number, 10);
+                    setStationNumber(Number.isFinite(n) ? n : null);
                     setStationUuid(id.station_uuid || null);
                     setProvisioned(!!id.station_uuid);
                 } else {
@@ -222,9 +226,14 @@ const App = () => {
                             <Suspense fallback={null}><Products /></Suspense>
                         </div>
                     )}
+                    {activeTab === 'license' && (
+                        <div style={{ height: '100%' }}>
+                            <Suspense fallback={null}><LicensePanel /></Suspense>
+                        </div>
+                    )}
                     {activeTab === 'settings' && (
                         <div style={{ height: '100%' }}>
-                            <Suspense fallback={null}><Settings /></Suspense>
+                            <Suspense fallback={null}><Settings onNavigate={setActiveTab} /></Suspense>
                         </div>
                     )}
                 </main>

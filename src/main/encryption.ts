@@ -48,6 +48,26 @@ function loadToken(): string | null {
     }
 }
 
+/** True once this station has a stored license token (i.e. it has decrypted at least one
+ *  LPI2 identity/update file). Reporting needs this — see outbox.enqueueReport. */
+export function hasLicenseToken(): boolean {
+    return loadToken() !== null;
+}
+
+/** Best-effort license_id from a token's payload, WITHOUT verifying the signature.
+ *  Used only to decide whether an incoming file belongs to the same license as the one
+ *  this station is already bound to. null when unparseable. */
+function licenseIdOf(token: string): string | null {
+    try {
+        const dot = token.indexOf('.');
+        if (dot < 0) return null;
+        const payload = JSON.parse(b64urlToBuffer(token.slice(0, dot)).toString('utf-8'));
+        return typeof payload.license_id === 'string' ? payload.license_id : null;
+    } catch {
+        return null;
+    }
+}
+
 function b64urlToBuffer(s: string): Buffer {
     let t = s.replace(/-/g, '+').replace(/_/g, '/');
     while (t.length % 4) t += '=';
@@ -109,11 +129,32 @@ export function decrypt(buffer: Buffer): any {
 
         const iv = body.subarray(0, 16);
         const ciphertext = body.subarray(16);
-        const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
-        const plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf-8');
+        let plaintext: string;
+        try {
+            const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
+            plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf-8');
+        } catch {
+            // AES-256-CBC carries no auth tag, so a corrupted transfer (e.g. a truncated USB
+            // copy) surfaces here as an opaque PKCS7 pad error. Translate it to a clear cause.
+            throw new Error('Файл повреждён — расшифровка не удалась. Попробуйте экспортировать и перенести файл заново.');
+        }
 
-        saveToken(token); // remember the license so this station can issue its own .lpr reports
-        return JSON.parse(plaintext);
+        // Remember the license so this station can later sign its OWN .lpr reports — but do NOT
+        // let a mis-delivered file from ANOTHER customer silently repoint an already-bound station
+        // (the identity-lock guards uuid/number, not license_id).
+        const existing = loadToken();
+        const incomingId = licenseIdOf(token);
+        if (!existing || licenseIdOf(existing) === incomingId) {
+            saveToken(token);
+        } else {
+            console.warn(`[encryption] refusing to overwrite license token: station is bound to license ${licenseIdOf(existing)}, incoming file carries ${incomingId}`);
+        }
+
+        try {
+            return JSON.parse(plaintext);
+        } catch {
+            throw new Error('Файл расшифрован, но содержит некорректные данные (не JSON).');
+        }
     }
 
     // Legacy / unencrypted fallback: plain JSON (older files, or pre-LPI2 transition).

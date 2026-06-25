@@ -1,5 +1,5 @@
 import React from 'react';
-import { Scale, Settings, Package, LogOut, ChevronLeft, Menu, Weight, ClipboardList, User, UserCog } from 'lucide-react';
+import { Scale, Settings, Package, LogOut, ChevronLeft, Menu, Weight, ClipboardList, User, UserCog, KeyRound } from 'lucide-react';
 import clsx from 'clsx';
 import { useTranslation } from '../i18n';
 import { useLicenseStatus } from '../hooks/useLicenseStatus';
@@ -26,6 +26,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, serverStatus
         { id: 'fixedWeight', labelKey: 'sidebar.fixedWeight', icon: Weight },
         { id: 'printJob', labelKey: 'sidebar.printJob', icon: ClipboardList },
         { id: 'products', labelKey: 'sidebar.products', icon: Package },
+        { id: 'license', labelKey: 'license.title', icon: KeyRound },
         { id: 'settings', labelKey: 'sidebar.settings', icon: Settings },
     ];
 
@@ -35,7 +36,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, serverStatus
 
     return (
         <div className={clsx(
-            "bg-white/50 dark:bg-neutral-900/50 backdrop-blur border-r border-neutral-200 dark:border-white/5 flex flex-col transition-all duration-300",
+            "bg-white/50 dark:bg-neutral-900/50 backdrop-blur border-r border-neutral-200 dark:border-neutral-600 flex flex-col transition-all duration-300",
             isCollapsed ? "w-[4.5rem] p-3" : "w-64 p-4"
         )}>
             <div className={clsx("flex items-center gap-1.5 py-6 mb-6", isCollapsed ? "justify-center" : "justify-between")}>
@@ -47,9 +48,9 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, serverStatus
                     <>
                         <div className="flex items-center gap-1.5 overflow-hidden">
                             <div className="flex items-center justify-center shrink-0">
-                                <img src="./sidebar-logo.svg" alt="LabelPilot Logo" className="w-10 h-10 dark:filter dark:grayscale dark:brightness-200" />
+                                <img src="./sidebar-logo.svg" alt="LabelPilot Logo" className="w-10 h-10" />
                             </div>
-                            <h1 className="text-2xl font-black tracking-tighter whitespace-nowrap text-neutral-800 dark:text-neutral-300" style={{ fontFamily: "'Outfit', sans-serif", textShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>LabelPilot</h1>
+                            <h1 className="text-2xl font-black tracking-tighter whitespace-nowrap text-neutral-800 dark:text-white" style={{ fontFamily: "'Outfit', sans-serif", textShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>LabelPilot</h1>
                         </div>
                         <button onClick={toggleCollapse} className="p-1.5 hover:bg-neutral-100 dark:hover:bg-white/5 rounded-lg transition-colors shrink-0 outline-none">
                             <ChevronLeft className="w-5 h-5 text-neutral-500 dark:text-neutral-400" />
@@ -93,7 +94,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, serverStatus
             </div>
 
             <div className={clsx(
-                "mt-auto py-4 text-xs text-neutral-500 dark:text-neutral-600 border-t border-neutral-200 dark:border-white/5 pt-6",
+                "mt-auto py-4 text-xs text-neutral-500 dark:text-neutral-600 border-t border-neutral-200 dark:border-neutral-600 pt-6",
                 isCollapsed ? "px-0 space-y-4 flex flex-col items-center" : "px-2 space-y-2.5"
             )}>
                 {/* Server Status */}
@@ -117,7 +118,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, serverStatus
                 {/* Station Number */}
                 <div className={clsx("flex items-center group", isCollapsed ? "justify-center" : "justify-between")} title={isCollapsed ? t('ws.stationNumber') : undefined}>
                     {!isCollapsed && <span className="group-hover:text-neutral-700 dark:group-hover:text-neutral-400 transition-colors uppercase tracking-wider text-[10px] font-bold">{t('ws.stationNumber')}</span>}
-                    <span className="text-neutral-700 dark:text-white font-mono bg-neutral-100 dark:bg-white/5 px-2 py-0.5 rounded border border-neutral-200 dark:border-white/5 min-w-[2.5rem] text-center">
+                    <span className="text-neutral-700 dark:text-white font-mono bg-neutral-100 dark:bg-white/5 px-2 py-0.5 rounded border border-neutral-200 dark:border-neutral-600 min-w-[2.5rem] text-center">
                         {stationNumber !== null ? String(stationNumber).padStart(2, '0') : '--'}
                     </span>
                 </div>
@@ -133,7 +134,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, serverStatus
                                 "flex items-center justify-center rounded-full border w-9 h-9 transition-colors",
                                 isDemo
                                     ? "bg-amber-100 dark:bg-amber-500/10 border-amber-300 dark:border-amber-500/30 text-amber-600 dark:text-amber-400 cursor-default"
-                                    : "bg-neutral-100 dark:bg-white/5 border-neutral-200 dark:border-white/10 text-neutral-500 dark:text-neutral-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:border-emerald-300 dark:hover:border-emerald-500/40"
+                                    : "bg-neutral-100 dark:bg-white/5 border-neutral-200 dark:border-neutral-600 text-neutral-500 dark:text-neutral-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:border-emerald-300 dark:hover:border-emerald-500/40"
                             )}
                         >
                             <User className="w-4 h-4" />
@@ -150,7 +151,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, serverStatus
                                 <button
                                     onClick={() => logout()}
                                     title={t('operator.switch')}
-                                    className="flex items-center gap-1 shrink-0 px-2 py-1 rounded-lg bg-neutral-100 dark:bg-white/5 border border-neutral-200 dark:border-white/10 text-[10px] font-bold uppercase tracking-wider text-neutral-500 dark:text-neutral-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:border-emerald-300 dark:hover:border-emerald-500/40 transition-colors"
+                                    className="flex items-center gap-1 shrink-0 px-2 py-1 rounded-lg bg-neutral-100 dark:bg-white/5 border border-neutral-200 dark:border-neutral-600 text-[10px] font-bold uppercase tracking-wider text-neutral-500 dark:text-neutral-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:border-emerald-300 dark:hover:border-emerald-500/40 transition-colors"
                                 >
                                     <UserCog className="w-3.5 h-3.5" />
                                     {t('operator.switch')}
@@ -170,9 +171,8 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, serverStatus
 
                 {/* Software Version */}
                 {!isCollapsed && (
-                    <div className="pt-2 opacity-70 flex justify-between items-center text-[10px] border-t border-neutral-200 dark:border-white/5 mt-1">
-                        <span className="text-emerald-600 dark:text-emerald-500 font-bold tracking-widest uppercase">v{packageJson.version}</span>
-                        <span className="font-bold tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-emerald-500 to-cyan-500 dark:from-emerald-400 dark:to-cyan-400">LabelPilot</span>
+                    <div className="pt-2 opacity-70 flex items-center text-[10px] border-t border-neutral-200 dark:border-neutral-600 mt-1">
+                        <span className="text-emerald-600 dark:text-emerald-500 font-bold tracking-widest uppercase">{t('sidebar.version')} {packageJson.version}</span>
                     </div>
                 )}
             </div>

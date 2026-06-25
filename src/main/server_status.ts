@@ -14,15 +14,26 @@ export class ServerStatusManager {
     }
 
     // Adaptive cadence: poll often while disconnected (so reconnection is detected quickly),
-    // but back off once connected — the steady state — to cut the constant 5s HTTP round-trip
-    // on an always-on weak POS. Also skip the network call entirely while the window is hidden.
+    // back off once connected — the steady state — and back off FURTHER (but never stop) while
+    // the window is hidden, so a reconnect that happens while minimized is still noticed and the
+    // report outbox drains via onReconnect. (Previously hidden windows skipped the check
+    // entirely, stranding the outbox until the window was shown again.)
     private readonly POLL_CONNECTED_MS = 15000;
     private readonly POLL_DISCONNECTED_MS = 5000;
+    private readonly POLL_HIDDEN_MS = 60000;
 
     constructor() { }
 
     setMainWindow(win: BrowserWindow) {
         this.mainWindow = win;
+        // Re-check connectivity the moment the window is shown/focused, so a reconnect that
+        // happened while the window was minimized is detected at once (and the report outbox
+        // drains immediately via the disconnected->connected transition) rather than waiting
+        // for the next slow hidden-cadence tick.
+        const recheck = () => { void this.checkConnection(); };
+        win.on('show', recheck);
+        win.on('focus', recheck);
+        win.on('restore', recheck);
         // Immediate status report after window is set
         this.sendStatusUpdate();
     }
@@ -30,18 +41,20 @@ export class ServerStatusManager {
     startPolling() {
         this.stopPolling();
         const tick = async () => {
-            const hidden = !this.mainWindow || this.mainWindow.isDestroyed() || !this.mainWindow.isVisible();
-            if (!hidden) {
-                await this.checkConnection();
-            }
-            const delay = this.lastStatus === 'connected' ? this.POLL_CONNECTED_MS : this.POLL_DISCONNECTED_MS;
-            this.timer = setTimeout(tick, delay);
+            // Always poll (even while hidden); nextDelay() just slows the cadence when hidden.
+            await this.checkConnection();
+            this.timer = setTimeout(tick, this.nextDelay());
         };
         // Initial immediate check, then self-schedule with adaptive delay.
         this.checkConnection().finally(() => {
-            const delay = this.lastStatus === 'connected' ? this.POLL_CONNECTED_MS : this.POLL_DISCONNECTED_MS;
-            this.timer = setTimeout(tick, delay);
+            this.timer = setTimeout(tick, this.nextDelay());
         });
+    }
+
+    private nextDelay(): number {
+        const hidden = !this.mainWindow || this.mainWindow.isDestroyed() || !this.mainWindow.isVisible();
+        if (hidden) return this.POLL_HIDDEN_MS;
+        return this.lastStatus === 'connected' ? this.POLL_CONNECTED_MS : this.POLL_DISCONNECTED_MS;
     }
 
     stopPolling() {

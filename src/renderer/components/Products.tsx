@@ -63,7 +63,7 @@ const Products: React.FC = () => {
                     value={searchQuery}
                     onChange={e => setSearchQuery(e.target.value)}
                     placeholder={t('products.search')}
-                    className="w-full pl-11 pr-4 py-3 bg-white dark:bg-black/30 border border-neutral-300 dark:border-white/10 rounded-xl text-neutral-900 dark:text-white placeholder-neutral-400 dark:placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 shadow-sm dark:shadow-none transition-colors"
+                    className="w-full pl-11 pr-4 py-3 bg-white dark:bg-black/30 border border-neutral-300 dark:border-neutral-600 rounded-xl text-neutral-900 dark:text-white placeholder-neutral-400 dark:placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 shadow-sm dark:shadow-none transition-colors"
                 />
             </div>
 
@@ -86,7 +86,7 @@ const Products: React.FC = () => {
                         const extra = parseExtra(product.extra_data);
 
                         return (
-                            <div key={product.id} className="bg-white dark:bg-white/5 border border-neutral-200 dark:border-white/10 rounded-xl overflow-hidden shadow-sm dark:shadow-none transition-all">
+                            <div key={product.id} className="bg-white dark:bg-white/5 border border-neutral-200 dark:border-neutral-600 rounded-xl overflow-hidden shadow-sm dark:shadow-none transition-all">
                                 <button
                                     onClick={() => setExpandedId(isExpanded ? null : product.id)}
                                     className="w-full grid grid-cols-12 gap-3 items-center px-5 py-4 hover:bg-neutral-100 dark:hover:bg-white/5 transition-colors text-left"
@@ -107,7 +107,7 @@ const Products: React.FC = () => {
                                 </button>
 
                                 {isExpanded && (
-                                    <div className="px-5 pb-5 pt-2 border-t border-neutral-200 dark:border-white/5">
+                                    <div className="px-5 pb-5 pt-2 border-t border-neutral-200 dark:border-neutral-600">
                                         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                                             <div className="bg-neutral-50 dark:bg-black/20 p-3 rounded-lg border border-neutral-100 dark:border-transparent">
                                                 <div className="text-xs text-neutral-500 mb-1">{t('products.packLabel')}</div>

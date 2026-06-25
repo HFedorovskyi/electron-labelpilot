@@ -33,6 +33,9 @@ export const COMPAT_MATRIX: Record<string, { minServerVersion: string }> = {
     '1.0.0': { minServerVersion: '1.0.0' },
     // Client 1.3.0 uses the LPI2 license-derived crypto — needs server 1.1.0+.
     '1.3.0': { minServerVersion: '1.1.0' },
+    // Client 1.3.7 requires the server to ENCRYPT its live LAN push (sync_data / send_to_station)
+    // as LPI2 — a 1.3.7 client rejects unauthenticated plaintext pushes, so it needs server 1.1.13+.
+    '1.3.7': { minServerVersion: '1.1.13' },
     // Add new entries when a new client version requires a newer server:
     // '2.0.0': { minServerVersion: '2.0.0' },
 };

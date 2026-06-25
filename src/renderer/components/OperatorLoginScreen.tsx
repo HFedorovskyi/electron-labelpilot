@@ -135,10 +135,10 @@ const OperatorLoginScreen: React.FC<OperatorLoginScreenProps> = ({ onLoggedIn })
                                     'group flex flex-col items-center gap-3 p-6 rounded-3xl border transition-all active:scale-[0.97] shadow-sm dark:shadow-none ' +
                                     (op.uuid === lastUuid
                                         ? 'bg-emerald-50 dark:bg-emerald-500/10 border-emerald-300 dark:border-emerald-500/40'
-                                        : 'bg-white dark:bg-neutral-900/50 border-neutral-200 dark:border-white/10 hover:border-emerald-300 dark:hover:border-emerald-500/40 hover:bg-emerald-50/50 dark:hover:bg-emerald-500/5')
+                                        : 'bg-white dark:bg-neutral-900/50 border-neutral-200 dark:border-neutral-600 hover:border-emerald-300 dark:hover:border-emerald-500/40 hover:bg-emerald-50/50 dark:hover:bg-emerald-500/5')
                                 }
                             >
-                                <div className="w-16 h-16 rounded-full bg-neutral-100 dark:bg-white/5 border border-neutral-200 dark:border-white/10 flex items-center justify-center group-hover:bg-emerald-100 dark:group-hover:bg-emerald-500/20 transition-colors">
+                                <div className="w-16 h-16 rounded-full bg-neutral-100 dark:bg-white/5 border border-neutral-200 dark:border-neutral-600 flex items-center justify-center group-hover:bg-emerald-100 dark:group-hover:bg-emerald-500/20 transition-colors">
                                     <User className="w-8 h-8 text-neutral-500 dark:text-neutral-400 group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors" />
                                 </div>
                                 <div className="min-h-[2.5rem] flex flex-col items-center justify-center">
@@ -152,7 +152,7 @@ const OperatorLoginScreen: React.FC<OperatorLoginScreenProps> = ({ onLoggedIn })
                     </div>
                 ) : (
                     /* NO-OPERATORS-YET empty state — never hard-lock. */
-                    <div className="mx-auto max-w-md bg-white/80 dark:bg-neutral-900/50 backdrop-blur p-8 rounded-3xl border border-neutral-200 dark:border-white/10 shadow-sm">
+                    <div className="mx-auto max-w-md bg-white/80 dark:bg-neutral-900/50 backdrop-blur p-8 rounded-3xl border border-neutral-200 dark:border-neutral-600 shadow-sm">
                         <p className="text-neutral-500 dark:text-neutral-400 mb-8">{t('operator.noOperators')}</p>
                         <button
                             onClick={handleSync}
@@ -164,7 +164,7 @@ const OperatorLoginScreen: React.FC<OperatorLoginScreenProps> = ({ onLoggedIn })
                         </button>
                         <button
                             onClick={handleContinueWithoutOperator}
-                            className="w-full py-4 bg-neutral-100 dark:bg-white/5 hover:bg-neutral-200 dark:hover:bg-white/10 border border-neutral-200 dark:border-white/10 text-neutral-700 dark:text-neutral-300 rounded-xl font-medium transition-all flex items-center justify-center gap-2"
+                            className="w-full py-4 bg-neutral-100 dark:bg-white/5 hover:bg-neutral-200 dark:hover:bg-white/10 border border-neutral-200 dark:border-neutral-600 text-neutral-700 dark:text-neutral-300 rounded-xl font-medium transition-all flex items-center justify-center gap-2"
                         >
                             {t('operator.continueWithout')}
                             <ArrowRight className="w-5 h-5" />

@@ -37,7 +37,7 @@ const NumericKeypad: React.FC<NumericKeypadProps> = ({ value, onUpdate, onClose,
 
     return (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
-            <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-white/10 rounded-[2.5rem] p-8 w-[400px] shadow-sm dark:shadow-2xl relative animate-in zoom-in-95 duration-200">
+            <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-600 rounded-[2.5rem] p-8 w-[400px] shadow-sm dark:shadow-2xl relative animate-in zoom-in-95 duration-200">
                 <button
                     onClick={onClose}
                     className="absolute top-6 right-6 p-2 bg-neutral-100 dark:bg-white/5 hover:bg-neutral-200 dark:hover:bg-white/10 rounded-full transition-colors"
@@ -47,7 +47,7 @@ const NumericKeypad: React.FC<NumericKeypadProps> = ({ value, onUpdate, onClose,
 
                 <h3 className="text-2xl font-bold text-neutral-900 dark:text-white mb-6 text-center">{title}</h3>
 
-                <div className="bg-neutral-50 dark:bg-black/40 border border-neutral-200 dark:border-white/10 rounded-2xl p-6 mb-8 text-center shadow-inner dark:shadow-none">
+                <div className="bg-neutral-50 dark:bg-black/40 border border-neutral-200 dark:border-neutral-600 rounded-2xl p-6 mb-8 text-center shadow-inner dark:shadow-none">
                     <div className="text-4xl font-mono font-bold text-emerald-600 dark:text-emerald-400 min-h-[44px] break-all tracking-widest">
                         {value
                             ? (mask ? '•'.repeat(value.length) : value)
@@ -64,10 +64,10 @@ const NumericKeypad: React.FC<NumericKeypadProps> = ({ value, onUpdate, onClose,
                             className += "bg-red-50 dark:bg-red-500/10 text-red-600 dark:text-red-500 border-red-200 dark:border-red-500/20 hover:bg-red-100 dark:hover:bg-red-500/20";
                             action = handleClear;
                         } else if (btn === '⌫') {
-                            className += "bg-neutral-200 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-300 dark:hover:bg-neutral-700 border-neutral-300 dark:border-transparent";
+                            className += "bg-neutral-200 dark:bg-neutral-700 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-300 dark:hover:bg-neutral-700 border-neutral-300 dark:border-transparent";
                             action = handleBackspace;
                         } else {
-                            className += "bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-white hover:bg-neutral-200 dark:hover:bg-neutral-700 border-neutral-300 dark:border-white/5";
+                            className += "bg-neutral-100 dark:bg-neutral-700 text-neutral-900 dark:text-white hover:bg-neutral-200 dark:hover:bg-neutral-700 border-neutral-300 dark:border-neutral-600";
                         }
 
                         return (

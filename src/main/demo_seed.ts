@@ -56,9 +56,9 @@ export async function exitDemo(): Promise<{ success: boolean; restored: boolean;
         resetDatabase();      // recreates a clean empty schema
         clearDemoFlag();
 
-        // Fallback for stations that entered demo BEFORE the backup existed: identity.json is
-        // untouched by demo seeding (only the DB station row was rewritten), so after the reset
-        // loadIdentity() returns the real identity from that file — restore from it.
+        // Fallback for stations that entered demo BEFORE the backup existed: identity.json
+        // MIGHT still hold the real identity. (Note: demo seeding can also overwrite it with
+        // the demo station, so only accept a non-demo value here.)
         if (!backup || !backup.uuid || String(backup.uuid).startsWith('demo-')) {
             try {
                 const { loadIdentity } = require('./identity');
@@ -78,6 +78,11 @@ export async function exitDemo(): Promise<{ success: boolean; restored: boolean;
                 server_url: backup.server_url || '',
             });
             restored = true;
+        } else {
+            // Nothing real to restore (demo overwrote identity.json too). Drop the demo
+            // identity file so loadIdentity() stops reporting the demo station — the client
+            // then re-registers via discovery (matched by IP) and re-syncs the real catalog.
+            try { const { deleteIdentity } = require('./identity'); deleteIdentity(); } catch { /* ignore */ }
         }
         try { fs.unlinkSync(identityBackupPath()); } catch { /* ignore */ }
         return { success: true, restored };
