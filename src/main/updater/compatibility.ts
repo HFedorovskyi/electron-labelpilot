@@ -38,6 +38,8 @@ export const COMPAT_MATRIX: Record<string, { minServerVersion: string }> = {
     '1.3.7': { minServerVersion: '1.1.13' },
     // 1.3.8 adds flush-on-quit hardening; same LAN-auth requirement as 1.3.7.
     '1.3.8': { minServerVersion: '1.1.13' },
+    // 1.3.9 fixes the printed-label unique_id (per-pack, not barcode); same server requirement.
+    '1.3.9': { minServerVersion: '1.1.13' },
     // Add new entries when a new client version requires a newer server:
     // '2.0.0': { minServerVersion: '2.0.0' },
 };

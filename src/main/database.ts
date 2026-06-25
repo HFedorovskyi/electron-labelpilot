@@ -714,8 +714,11 @@ export function getExportData(opts: { sincePackId?: number; sinceErrorId?: numbe
   const boxes = db.prepare('SELECT * FROM boxes').all();
   const pallets = db.prepare('SELECT * FROM pallet').all();
 
-  // Prefix the no-barcode fallback id with the station uuid so two different stations can't both
-  // emit `pack-1` and have the server's unique_id dedup silently drop one as a duplicate.
+  // The server dedupes printed labels on unique_id, so it MUST be unique per physical pack — NOT
+  // the barcode. Fixed-weight products (and unconfigured/placeholder barcodes) print the SAME
+  // barcode on every label, which would collapse a whole shift into one row on the server (the
+  // classic "only 1 label showed up" symptom). The pack's local id, namespaced by the station
+  // uuid, is unique per pack and still idempotent on re-send (USB re-export / retry).
   const stationRow = db.prepare('SELECT uuid FROM station LIMIT 1').get() as { uuid?: string } | undefined;
   const stationUuid = stationRow?.uuid || 'nostation';
 
@@ -726,7 +729,7 @@ export function getExportData(opts: { sincePackId?: number; sinceErrorId?: numbe
   const printed_labels = packs
     .filter((p) => p.status !== 'Deleted')
     .map((p) => ({
-      unique_id: p.barcode_value || `${stationUuid}-pack-${p.id}`,
+      unique_id: `${stationUuid}-pack-${p.id}`,
       pack_id: p.id,
       product_id: p.nomenclature_id,
       user_name: p.operator_name || '',
