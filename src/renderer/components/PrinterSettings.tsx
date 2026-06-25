@@ -122,16 +122,14 @@ const PrinterSettings = ({ title, config, onChange, systemPrinters, serialPorts,
                             <button
                                 key={proto.id}
                                 onClick={() => update('protocol', proto.id)}
-                                className={`flex flex-col items-start p-3 rounded-xl border transition-all duration-200 ${config.protocol === proto.id
+                                className={`flex flex-col items-center justify-start gap-1 p-3 rounded-xl border transition-all duration-200 min-w-0 ${config.protocol === proto.id
                                     ? 'bg-emerald-600 dark:bg-emerald-600 border-emerald-500 dark:border-emerald-400 text-white shadow-[0_0_15px_rgba(16,185,129,0.4)] scale-105 z-10'
                                     : 'bg-white dark:bg-neutral-800/50 border-neutral-200 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-700 hover:text-neutral-900 dark:hover:text-white'
                                     }`}
                             >
-                                <div className="flex items-center gap-2 mb-1">
-                                    <proto.icon size={16} />
-                                    <span className="font-bold text-xs">{proto.label}</span>
-                                </div>
-                                <span className="text-[10px] opacity-60 leading-tight">{proto.desc}</span>
+                                <proto.icon size={16} className="shrink-0" />
+                                <span className="font-bold text-xs leading-tight break-words text-center w-full">{proto.label}</span>
+                                <span className="text-[10px] opacity-60 leading-tight break-words text-center w-full">{proto.desc}</span>
                             </button>
                         ))}
                     </div>

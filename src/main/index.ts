@@ -749,6 +749,21 @@ ipcMain.handle('seed-demo-data', async () => {
     }
 });
 
+// Leave demo mode: wipe demo data, clear the durable flag, and RESTORE the real station
+// identity backed up on entry (so the server recognizes the station again).
+ipcMain.handle('exit-demo', async () => {
+    const { exitDemo } = require('./demo_seed');
+    try {
+        const r = await exitDemo();
+        if (r.success) {
+            BrowserWindow.getAllWindows().forEach(w => w.webContents.send('data-updated'));
+        }
+        return r;
+    } catch (e: any) {
+        return { success: false, message: e.message };
+    }
+});
+
 ipcMain.handle('offline-import', async () => {
     const { importOfflineUpdate } = require('./offline_sync');
     const result = await importOfflineUpdate();

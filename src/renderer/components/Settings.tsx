@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Save, RefreshCw, Settings as SettingsIcon, Printer, Languages, Moon, Sun, Monitor, ShieldCheck, ShieldAlert } from 'lucide-react';
+import { Save, RefreshCw, Settings as SettingsIcon, Printer, Languages, Moon, Sun, Monitor, ShieldCheck, ShieldAlert, LogOut } from 'lucide-react';
 import PrinterSettings from './PrinterSettings';
 import UpdateSettings from './UpdateSettings';
 import { useTranslation, type Lang } from '../i18n';
@@ -28,6 +28,11 @@ const Settings = () => {
     const { t, lang, setLang } = useTranslation();
     const { theme, setTheme } = useTheme();
     const { license } = useLicenseStatus();
+    // Durable local-demo state (the seeded demo), independent of the server license mode.
+    const [isDemo, setIsDemo] = useState(false);
+    useEffect(() => {
+        window.electron.invoke('demo:status').then((r: any) => setIsDemo(!!r?.isDemo)).catch(() => { });
+    }, []);
     const [ports, setPorts] = useState<SerialPortInfo[]>([]);
     const [protocols, setProtocols] = useState<ProtocolInfo[]>([]);
     const [config, setConfig] = useState({
@@ -430,6 +435,23 @@ const Settings = () => {
                                 <ShieldAlert className="w-5 h-5" />
                                 {t('demo.seedButton') || 'Демо режим'}
                             </button>
+                            {isDemo && (
+                                <button
+                                    onClick={async () => {
+                                        if (!window.confirm(t('demo.exitConfirm'))) return;
+                                        const res = await window.electron.invoke('exit-demo');
+                                        if (res?.success) {
+                                            window.location.reload();
+                                        } else {
+                                            showToast(res?.message || t('demo.exitFailed'));
+                                        }
+                                    }}
+                                    className="px-5 py-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-medium shadow-lg hover:shadow-rose-500/20 flex items-center gap-2 transition-all"
+                                >
+                                    <LogOut className="w-5 h-5" />
+                                    {t('demo.exitButton')}
+                                </button>
+                            )}
                             <button
                                 onClick={async () => {
                                     const res = await window.electron.invoke('offline-import');

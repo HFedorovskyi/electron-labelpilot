@@ -216,12 +216,16 @@ export const MassaK_A_TB_P: ScaleProtocol = {
     }
 };
 
-// Massa-K (Protocol J / SimplePacking Match)
-// Discovered via serial sniffer: 4800, 8, Even, 1
+// Massa-K binary protocol polled with the single byte 'J' (0x4A) at 4800/8/Even/1.
+// Response frame: [status][reserved][weight:int16LE grams …]; status bit 0x80 = stable,
+// bit 0x40 = negative. Example: 80 00 D0 07 00 -> 0x07D0 = 2000 g = 2 kg, stable.
+// (Was labelled "SimplePacking Match" after the 3rd-party software it was sniffed against;
+//  renamed to an accurate vendor-grounded name. The id is kept so existing station configs
+//  that selected this protocol keep resolving.)
 export const MassaK_J: ScaleProtocol = {
     id: 'massak_j',
-    name: 'Massa-K (SimplePacking Match)',
-    description: 'Special variant using "J" command at 4800 baud (Even parity)',
+    name: 'Massa-K (Binary Protocol J)',
+    description: 'Бинарный протокол Massa-K: запрос «J» (0x4A), 4800 бод, чётность Even',
     pollingRequired: true,
     defaultBaudRate: 4800,
     parity: 'even',

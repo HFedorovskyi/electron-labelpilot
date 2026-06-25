@@ -30,6 +30,9 @@ export const translations: Record<Lang, Record<string, string>> = {
         'demo.seedWipe': 'Включить демо-режим? Это ЗАМЕНИТ все локальные данные (товары, шаблоны, ШК) образцами.',
         'demo.seedWipeProvisioned': 'Внимание: станция уже настроена. Включение демо-режима УДАЛИТ все текущие локальные данные и заменит их образцами.',
         'demo.seedFailed': 'Не удалось загрузить демо-данные',
+        'demo.exitButton': 'Выйти из демо',
+        'demo.exitConfirm': 'Выйти из демо-режима? Демо-данные будут удалены, а реальная привязка станции к серверу восстановится.',
+        'demo.exitFailed': 'Не удалось выйти из демо-режима',
 
         // App
         'app.syncComplete': 'Синхронизация завершена',
@@ -358,6 +361,9 @@ export const translations: Record<Lang, Record<string, string>> = {
         'demo.seedWipe': 'Enable demo mode? This REPLACES all local data (products, templates, barcodes) with samples.',
         'demo.seedWipeProvisioned': 'Warning: this station is already provisioned. Enabling demo mode will DELETE all current local data and replace it with samples.',
         'demo.seedFailed': 'Failed to load demo data',
+        'demo.exitButton': 'Exit demo',
+        'demo.exitConfirm': 'Exit demo mode? Demo data will be removed and the station reconnects to the server as before.',
+        'demo.exitFailed': 'Failed to exit demo mode',
 
         // App
         'app.syncComplete': 'Sync complete',
@@ -686,6 +692,9 @@ export const translations: Record<Lang, Record<string, string>> = {
         'demo.seedWipe': 'Demo-Modus aktivieren? Dies ERSETZT alle lokalen Daten (Produkte, Vorlagen, Barcodes) durch Beispiele.',
         'demo.seedWipeProvisioned': 'Achtung: Diese Station ist bereits eingerichtet. Das Aktivieren des Demo-Modus LÖSCHT alle aktuellen lokalen Daten und ersetzt sie durch Beispiele.',
         'demo.seedFailed': 'Demo-Daten konnten nicht geladen werden',
+        'demo.exitButton': 'Demo verlassen',
+        'demo.exitConfirm': 'Demo-Modus verlassen? Die Demo-Daten werden entfernt und die Station verbindet sich wie zuvor mit dem Server.',
+        'demo.exitFailed': 'Demo-Modus konnte nicht verlassen werden',
 
         // App
         'app.syncComplete': 'Synchronisierung abgeschlossen',
@@ -1010,6 +1019,9 @@ export const translations: Record<Lang, Record<string, string>> = {
         'demo.seedWipe': 'Увімкнути демо-режим? Це ЗАМІНИТЬ усі локальні дані (товари, шаблони, ШК) зразками.',
         'demo.seedWipeProvisioned': 'Увага: станцію вже налаштовано. Увімкнення демо-режиму ВИДАЛИТЬ усі поточні локальні дані та замінить їх зразками.',
         'demo.seedFailed': 'Не вдалося завантажити демо-дані',
+        'demo.exitButton': 'Вийти з демо',
+        'demo.exitConfirm': 'Вийти з демо-режиму? Демо-дані буде видалено, а станцію буде повторно підключено до сервера, як раніше.',
+        'demo.exitFailed': 'Не вдалося вийти з демо-режиму',
         'app.syncComplete': 'Синхронізація завершена',
         'settings.title': 'Налаштування',
         'settings.theme': 'Зовнішній вигляд',

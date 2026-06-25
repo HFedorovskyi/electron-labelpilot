@@ -4,6 +4,9 @@ import { Mettler_SICS } from './mettler';
 import { MassaK_100, MassaK_Lite, MassaK_Protocol1, MassaK_A_TB, MassaK_Continuous, MassaK_A_TB_P, MassaK_J } from './massak_extended';
 import { Shtrih_M } from './shtrihm';
 import { Mertech } from './mertech';
+import { Dibal_Delta } from './dibal';
+import { AND_Standard } from './and_std';
+import { Ohaus, Sartorius_SBI, Radwag, Kern, DiniArgeo } from './eu_ascii';
 import { Simulator } from './simulator';
 
 export const PROTOCOLS: Record<string, ScaleProtocol> = {
@@ -18,6 +21,13 @@ export const PROTOCOLS: Record<string, ScaleProtocol> = {
     [MassaK_Lite.id]: MassaK_Lite,
     [Shtrih_M.id]: Shtrih_M,
     [Mertech.id]: Mertech,
+    [AND_Standard.id]: AND_Standard,
+    [Dibal_Delta.id]: Dibal_Delta,
+    [Ohaus.id]: Ohaus,
+    [Sartorius_SBI.id]: Sartorius_SBI,
+    [Radwag.id]: Radwag,
+    [Kern.id]: Kern,
+    [DiniArgeo.id]: DiniArgeo,
     [Simulator.id]: Simulator,
 
     'generic': {

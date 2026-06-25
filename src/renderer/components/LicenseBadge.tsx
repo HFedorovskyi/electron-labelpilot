@@ -24,9 +24,9 @@ const LicenseBadge: FC<LicenseBadgeProps> = ({ license, collapsed }) => {
 
     const isDemo = license.mode === 'demo';
     const expired = license.expired;
-    const label = isDemo
-        ? t('license.demoBadge')
-        : `${t('license.licensed')}: ${license.edition}`;
+    // The sidebar row already carries a "ЛИЦЕНЗИЯ" label, so the badge shows only the
+    // edition (no redundant "Лицензия:" prefix) — keeps it short enough for the sidebar.
+    const label = isDemo ? t('license.demoBadge') : license.edition;
 
     const tone = isDemo || expired
         ? 'text-amber-600 dark:text-amber-400 bg-amber-100/60 dark:bg-amber-500/10 border-amber-500/30'
@@ -49,12 +49,12 @@ const LicenseBadge: FC<LicenseBadgeProps> = ({ license, collapsed }) => {
         <div
             title={isDemo ? t('license.demoHint') : `${t('license.licensed')}: ${license.edition}`}
             className={clsx(
-                'flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[10px] font-bold uppercase tracking-wider',
+                'flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[10px] font-bold uppercase tracking-wider min-w-0 max-w-full self-start',
                 tone
             )}
         >
             <Icon className="w-3.5 h-3.5 shrink-0" />
-            <span className="truncate">{label}</span>
+            <span className="truncate min-w-0">{label}</span>
         </div>
     );
 };

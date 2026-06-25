@@ -162,8 +162,8 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, serverStatus
 
                 {/* License / Demo status — non-blocking; renders nothing until known */}
                 {license && (
-                    <div className={clsx("flex items-center", isCollapsed ? "justify-center" : "justify-between")}>
-                        {!isCollapsed && <span className="uppercase tracking-wider text-[10px] font-bold">{t('license.title')}</span>}
+                    <div className={clsx("min-w-0", isCollapsed ? "flex items-center justify-center" : "flex flex-col gap-1.5")}>
+                        {!isCollapsed && license.mode !== 'licensed' && <span className="uppercase tracking-wider text-[10px] font-bold">{t('license.title')}</span>}
                         <LicenseBadge license={license} collapsed={isCollapsed} />
                     </div>
                 )}

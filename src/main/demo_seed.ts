@@ -12,9 +12,79 @@
  * blocked by a version check).
  */
 
+import fs from 'fs';
+import path from 'path';
+import { app } from 'electron';
 import { processSyncData } from './processor';
 import { setDemoFlag } from './demo_flag';
+import { savePrintJob, clearAllPrintJobs } from './database';
 import type { LabelDoc } from './printer/generator/types';
+
+// Entering demo overwrites the local DB (incl. the station identity) with a synthetic
+// "demo-" station, which the server can't recognize. To make demo NON-destructive we
+// snapshot the real identity on entry and restore it on exit, so the station returns to
+// the server with the exact same uuid/number it had before.
+function identityBackupPath(): string {
+    return path.join(app.getPath('userData'), 'identity_pre_demo.json');
+}
+
+/** Snapshot the current REAL station identity (no-op if none yet, or already a demo one). */
+export function backupRealIdentity(): void {
+    try {
+        const { getStationIdentity } = require('./database');
+        const id = getStationIdentity();
+        if (id && id.uuid && !String(id.uuid).startsWith('demo-')) {
+            fs.writeFileSync(identityBackupPath(), JSON.stringify({
+                uuid: id.uuid, number: id.number, name: id.name || '', server_url: id.server_url || '',
+            }));
+        }
+    } catch (e) {
+        console.error('[demo] backupRealIdentity failed:', e);
+    }
+}
+
+/** Leave demo: wipe demo data + clear the durable flag, then restore the real station
+ *  identity (if it was backed up on entry) so the server finds the station again. */
+export async function exitDemo(): Promise<{ success: boolean; restored: boolean; message?: string }> {
+    try {
+        const { resetDatabase, updateStationIdentity } = require('./database');
+        const { clearDemoFlag } = require('./demo_flag');
+
+        let backup: any = null;
+        try { backup = JSON.parse(fs.readFileSync(identityBackupPath(), 'utf-8')); } catch { /* no backup */ }
+
+        resetDatabase();      // recreates a clean empty schema
+        clearDemoFlag();
+
+        // Fallback for stations that entered demo BEFORE the backup existed: identity.json is
+        // untouched by demo seeding (only the DB station row was rewritten), so after the reset
+        // loadIdentity() returns the real identity from that file — restore from it.
+        if (!backup || !backup.uuid || String(backup.uuid).startsWith('demo-')) {
+            try {
+                const { loadIdentity } = require('./identity');
+                const fromFile = loadIdentity();
+                if (fromFile && fromFile.station_uuid && !String(fromFile.station_uuid).startsWith('demo-')) {
+                    backup = { uuid: fromFile.station_uuid, number: fromFile.station_number, name: '', server_url: fromFile.server_url || '' };
+                }
+            } catch { /* none */ }
+        }
+
+        let restored = false;
+        if (backup && backup.uuid && !String(backup.uuid).startsWith('demo-')) {
+            updateStationIdentity({
+                uuid: backup.uuid,
+                number: Number(backup.number) || 0,
+                name: backup.name || '',
+                server_url: backup.server_url || '',
+            });
+            restored = true;
+        }
+        try { fs.unlinkSync(identityBackupPath()); } catch { /* ignore */ }
+        return { success: true, restored };
+    } catch (e: any) {
+        return { success: false, restored: false, message: e?.message || String(e) };
+    }
+}
 
 const DPI = 300;
 
@@ -73,28 +143,28 @@ const PACK_WEIGHED: LabelDoc = labelDoc({
         {
             id: 'article', type: 'text',
             x: mm(2), y: mm(9.5), w: mm(54), h: mm(4), rotation: 0,
-            text: 'Арт.: {{article}}',
+            text: 'Art.: {{article}}',
             fontSize: 18, fontWeight: 400, fontFamily: 'Inter',
             textAlign: 'left', color: '#000000',
         },
         {
             id: 'weight', type: 'text',
             x: mm(2), y: mm(14), w: mm(54), h: mm(6), rotation: 0,
-            text: 'Масса нетто: {{weight_netto_pack}} кг',
+            text: 'Net weight: {{weight_netto_pack}} kg',
             fontSize: 24, fontWeight: 700, fontFamily: 'Inter',
             textAlign: 'left', color: '#000000',
         },
         {
             id: 'prod', type: 'text',
             x: mm(2), y: mm(20), w: mm(27), h: mm(4), rotation: 0,
-            text: 'Изгот.: {{production_date}}',
+            text: 'Prod.: {{production_date}}',
             fontSize: 16, fontWeight: 400, fontFamily: 'Inter',
             textAlign: 'left', color: '#000000',
         },
         {
             id: 'exp', type: 'text',
             x: mm(29), y: mm(20), w: mm(27), h: mm(4), rotation: 0,
-            text: 'Годен до: {{exp_date_full}}',
+            text: 'Best before: {{exp_date_full}}',
             fontSize: 16, fontWeight: 400, fontFamily: 'Inter',
             textAlign: 'left', color: '#000000',
         },
@@ -121,21 +191,21 @@ const PACK_FIXED: LabelDoc = labelDoc({
         {
             id: 'weight', type: 'text',
             x: mm(2), y: mm(9.5), w: mm(54), h: mm(6), rotation: 0,
-            text: 'Масса нетто: {{weight_netto_pack}} кг',
+            text: 'Net weight: {{weight_netto_pack}} kg',
             fontSize: 22, fontWeight: 700, fontFamily: 'Inter',
             textAlign: 'center', color: '#000000',
         },
         {
             id: 'protein', type: 'text',
             x: mm(2), y: mm(15.5), w: mm(54), h: mm(4), rotation: 0,
-            text: 'Белки: {{Белки}}  Жиры: {{Жиры}}',
+            text: 'Protein: {{Белки}}  Fat: {{Жиры}}',
             fontSize: 16, fontWeight: 400, fontFamily: 'Inter',
             textAlign: 'center', color: '#000000',
         },
         {
             id: 'exp', type: 'text',
             x: mm(2), y: mm(19.5), w: mm(54), h: mm(4), rotation: 0,
-            text: 'Изгот.: {{production_date}}   Годен до: {{exp_date_full}}',
+            text: 'Prod.: {{production_date}}   Best before: {{exp_date_full}}',
             fontSize: 15, fontWeight: 400, fontFamily: 'Inter',
             textAlign: 'center', color: '#000000',
         },
@@ -162,42 +232,42 @@ const BOX_LABEL: LabelDoc = labelDoc({
         {
             id: 'article', type: 'text',
             x: mm(4), y: mm(15), w: mm(92), h: mm(6), rotation: 0,
-            text: 'Артикул: {{article}}',
+            text: 'Article: {{article}}',
             fontSize: 24, fontWeight: 400, fontFamily: 'Inter',
             textAlign: 'left', color: '#000000',
         },
         {
             id: 'weight', type: 'text',
             x: mm(4), y: mm(22), w: mm(92), h: mm(7), rotation: 0,
-            text: 'Масса нетто: {{weight_netto_pack}} кг',
+            text: 'Net weight: {{weight_netto_pack}} kg',
             fontSize: 30, fontWeight: 700, fontFamily: 'Inter',
             textAlign: 'left', color: '#000000',
         },
         {
             id: 'packnum', type: 'text',
             x: mm(4), y: mm(30), w: mm(46), h: mm(6), rotation: 0,
-            text: 'Короб №: {{pack_number}}',
+            text: 'Box No.: {{pack_number}}',
             fontSize: 22, fontWeight: 400, fontFamily: 'Inter',
             textAlign: 'left', color: '#000000',
         },
         {
             id: 'sku', type: 'text',
             x: mm(50), y: mm(30), w: mm(46), h: mm(6), rotation: 0,
-            text: 'Код ШК: {{Код ШК}}',
+            text: 'SKU: {{Код ШК}}',
             fontSize: 22, fontWeight: 400, fontFamily: 'Inter',
             textAlign: 'left', color: '#000000',
         },
         {
             id: 'prod', type: 'text',
             x: mm(4), y: mm(37), w: mm(46), h: mm(5), rotation: 0,
-            text: 'Изготовлен: {{production_date}}',
+            text: 'Produced: {{production_date}}',
             fontSize: 20, fontWeight: 400, fontFamily: 'Inter',
             textAlign: 'left', color: '#000000',
         },
         {
             id: 'exp', type: 'text',
             x: mm(50), y: mm(37), w: mm(46), h: mm(5), rotation: 0,
-            text: 'Годен до: {{exp_date_full}}',
+            text: 'Best before: {{exp_date_full}}',
             fontSize: 20, fontWeight: 400, fontFamily: 'Inter',
             textAlign: 'left', color: '#000000',
         },
@@ -224,14 +294,14 @@ function buildDemoDataset() {
         station: {
             uuid: 'demo-0000-0000-0000-000000000001',
             number: 1,
-            name: 'Демо станция',
+            name: 'Demo Station',
             server_url: '',
         },
         payload: {
             nomenclature: [
                 {
                     id: 1,
-                    name: 'Сыр Гауда (весовой)',
+                    name: 'Gouda Cheese (by weight)',
                     article: 'DEMO-001',
                     exp_date: 30,
                     portion_container_id: 1,
@@ -243,13 +313,13 @@ function buildDemoDataset() {
                     is_fixed_weight: 0,
                     extra_data: {
                         'Код ШК': '2000000000015',
-                        'Белки': '24 г',
-                        'Жиры': '27 г',
+                        'Белки': '24 g',
+                        'Жиры': '27 g',
                     },
                 },
                 {
                     id: 2,
-                    name: 'Масло сливочное (весовое)',
+                    name: 'Butter (by weight)',
                     article: 'DEMO-002',
                     exp_date: 60,
                     portion_container_id: 1,
@@ -261,13 +331,13 @@ function buildDemoDataset() {
                     is_fixed_weight: 0,
                     extra_data: {
                         'Код ШК': '2000000000022',
-                        'Белки': '0.5 г',
-                        'Жиры': '82.5 г',
+                        'Белки': '0.5 g',
+                        'Жиры': '82.5 g',
                     },
                 },
                 {
                     id: 3,
-                    name: 'Творог 5% (фасовка 800г)',
+                    name: 'Cottage Cheese 5% (800 g pack)',
                     article: 'DEMO-003',
                     exp_date: 14,
                     portion_container_id: 1,
@@ -282,14 +352,14 @@ function buildDemoDataset() {
                     max_weight_grams: 850,
                     extra_data: {
                         'Код ШК': '2000000000039',
-                        'Белки': '16 г',
-                        'Жиры': '5 г',
+                        'Белки': '16 g',
+                        'Жиры': '5 g',
                     },
                 },
             ],
             containers: [
-                { id: 1, name: 'Упаковка', weight: 10.0 },
-                { id: 2, name: 'Короб', weight: 0.0 },
+                { id: 1, name: 'Wrapper', weight: 10.0 },
+                { id: 2, name: 'Box', weight: 0.0 },
             ],
             barcodes: [
                 {
@@ -305,9 +375,9 @@ function buildDemoDataset() {
                 },
             ],
             labels: [
-                { id: LABEL_PACK_WEIGHED_ID, name: 'Демо — упаковка (весовая)', structure: PACK_WEIGHED },
-                { id: LABEL_PACK_FIXED_ID, name: 'Демо — упаковка (фикс. вес)', structure: PACK_FIXED },
-                { id: LABEL_BOX_ID, name: 'Демо — короб', structure: BOX_LABEL },
+                { id: LABEL_PACK_WEIGHED_ID, name: 'Demo — Pack (by weight)', structure: PACK_WEIGHED },
+                { id: LABEL_PACK_FIXED_ID, name: 'Demo — Pack (fixed weight)', structure: PACK_FIXED },
+                { id: LABEL_BOX_ID, name: 'Demo — Box', structure: BOX_LABEL },
             ],
             packs: [],
         },
@@ -320,6 +390,16 @@ function buildDemoDataset() {
     };
 }
 
+// Demo print jobs for the "По заданию" (task-based marking) station — so that flow
+// is demonstrable without a server. They reference the demo nomenclature above and
+// cover both unit modes: pieces (pcs) and weighed (kg). Print jobs live in their own
+// table (not part of the sync payload), so they are seeded separately below.
+const DEMO_PRINT_JOBS = [
+    { job_id: 9001, nomenclature_id: 3, nomenclature_name: 'Cottage Cheese 5% (800 g pack)', nomenclature_article: 'DEMO-003', quantity: 50, quantity_unit: 'pcs', batch_number: 'DEMO-2025-01', marking_date: null },
+    { job_id: 9002, nomenclature_id: 1, nomenclature_name: 'Gouda Cheese (by weight)', nomenclature_article: 'DEMO-001', quantity: 30, quantity_unit: 'kg', batch_number: 'DEMO-2025-02', marking_date: null },
+    { job_id: 9003, nomenclature_id: 2, nomenclature_name: 'Butter (by weight)', nomenclature_article: 'DEMO-002', quantity: 40, quantity_unit: 'pcs', batch_number: 'DEMO-2025-03', marking_date: null },
+];
+
 /**
  * Seed the local DB with the bundled demo dataset.
  *
@@ -328,12 +408,22 @@ function buildDemoDataset() {
  * for confirming with the user before invoking.
  */
 export async function seedDemoData(): Promise<{ success: boolean; message: string }> {
+    // Snapshot the real station identity FIRST so exitDemo() can restore it later.
+    backupRealIdentity();
     const dataset = buildDemoDataset();
     const result = await processSyncData(dataset);
     // The station is now in demo: persist the DURABLE flag so demo mode survives
     // independently of the synthetic 'demo-' station uuid (see demo_flag.ts).
     if (result.success) {
         setDemoFlag();
+        // Seed demo print jobs (separate table). Non-fatal: the rest of the demo
+        // still works even if this fails.
+        try {
+            clearAllPrintJobs();
+            for (const job of DEMO_PRINT_JOBS) savePrintJob(job);
+        } catch (err) {
+            console.error('[demo_seed] failed to seed demo print jobs:', err);
+        }
     }
     return result;
 }
