@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain, shell, dialog } from 'electron';
 import path from 'path';
 import { initDatabase, recordPrintError } from './database';
-import { enqueueReport, startReportScheduler } from './outbox';
+import { enqueueReport, startReportScheduler, spoolPendingSync } from './outbox';
 import { scaleManager } from './scales';
 
 // Import usb_sync
@@ -925,6 +925,14 @@ startSyncServer((data) => {
     } else {
         log.warn('[Sync] mainWindow is null — cannot send data-updated');
     }
+});
+
+// Best-effort final flush before exit: persist the last un-reported packs/errors to the outbox
+// so closing a station BETWEEN periodic flushes doesn't leave its final marking data undelivered.
+// Synchronous + no network, so it completes before the process exits and can't hang the quit; the
+// next launch (or reconnect) drains the spool, and the server dedupes.
+app.on('before-quit', () => {
+    try { spoolPendingSync('app-quit'); } catch { /* ignore */ }
 });
 
 app.on('window-all-closed', () => {

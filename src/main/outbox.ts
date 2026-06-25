@@ -96,6 +96,31 @@ export function enqueueReport(reason: string): Promise<void> {
     });
 }
 
+/**
+ * SYNCHRONOUS best-effort flush for app shutdown: write any un-reported delta straight to the
+ * outbox (no network), so a station closed BETWEEN periodic flushes doesn't leave its last packs
+ * undelivered. Safe to call from app 'before-quit' — a sync DB read + encrypt + file write
+ * completes before the process exits, and there is no network call to hang the quit. The server
+ * dedupes (unique_id / event_uid), so this can never double-count.
+ */
+export function spoolPendingSync(reason: string): void {
+    try {
+        if (!autoReportEnabled()) return;
+        const st = getReportState();
+        const built = buildReportPayload({ sincePackId: st.lastPackId, sinceErrorId: st.lastErrorId });
+        if (!built.hasData) return;
+        spool(built.blob);
+        // Advance the watermark only after the durable spool write succeeded.
+        setReportState({ lastPackId: built.maxPackId, lastErrorId: built.maxErrorId });
+        console.log(`[outbox] ${reason}: spooled ${built.labelCount} labels, ${built.logCount} logs on shutdown`);
+    } catch (e) {
+        // Best-effort: the marking data is still in the local DB and the watermark is NOT advanced,
+        // so the next launch re-reports it from the watermark. (A no-license station throws on the
+        // missing token here — same deferred path as enqueueReport.)
+        console.error('[outbox] spoolPendingSync failed (data stays in DB, will re-report):', e);
+    }
+}
+
 /** Drain the spool: re-POST each pending blob, deleting it on success; stop on first failure. */
 export function flushOutbox(): Promise<void> {
     return serialize(async () => {
@@ -128,6 +153,11 @@ export function startReportScheduler(): void {
         // Jitter ±20% so many stations don't all hit the server on the same tick.
         timer = setTimeout(tick, base + Math.floor(base * 0.2 * Math.random()));
     };
+    // Catch-up shortly after launch: deliver anything left from the previous session (e.g. packs
+    // printed right before the app was closed) instead of waiting a full interval. The short delay
+    // lets server_status run its first connectivity check, so we send rather than spool when online.
+    setTimeout(() => { void flushOutbox().then(() => enqueueReport('startup')); }, 8000);
+
     const base = intervalMs();
     timer = setTimeout(tick, base + Math.floor(base * 0.2 * Math.random()));
 
