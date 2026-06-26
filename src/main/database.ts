@@ -735,6 +735,12 @@ export function getExportData(opts: { sincePackId?: number; sinceErrorId?: numbe
     pack_name: p.number,
     printed_at: p.created_at,
     weight_netto_grams: p.weight_netto == null ? null : Math.round(p.weight_netto * 1000),
+    // Per-pack traceability passport for the server audit report.
+    weight_brutto_grams: p.weight_brutto == null ? null : Math.round(p.weight_brutto * 1000),
+    batch: p.batch ?? null,
+    production_date: p.production_date ?? null,
+    expiration_date: p.expiration_date ?? null,
+    barcode: p.barcode_value ?? null,
     deleted_at: p.deleted_at ?? null,
   });
   const printed_labels = packs.filter((p) => p.status !== 'Deleted').map(toLabel);
