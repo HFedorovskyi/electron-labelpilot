@@ -47,6 +47,9 @@ export const COMPAT_MATRIX: Record<string, { minServerVersion: string }> = {
     // 1.3.11 reports the per-pack audit passport (batch/dates/barcode/brutto). Backward-compatible
     // (older server ignores the extra fields); the audit detail needs server 1.1.18 to store them.
     '1.3.11': { minServerVersion: '1.1.13' },
+    // 1.3.12 rotates to the PRODUCTION Ed25519 license key — incompatible with old-key servers, so it
+    // requires server 1.1.23+ (first server with the new key). Enforces the key-rotation lockstep.
+    '1.3.12': { minServerVersion: '1.1.23' },
     // Add new entries when a new client version requires a newer server:
     // '2.0.0': { minServerVersion: '2.0.0' },
 };
