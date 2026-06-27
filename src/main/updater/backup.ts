@@ -14,10 +14,17 @@ export interface BackupInfo {
 const FILES_TO_BACKUP = [
     'client_data.db',
     'identity.json',
+    'license.token',      // station license — without it a rollback would lose licensed state
+    'report_state.json',  // report watermark — keep it paired with the DB snapshot
     'printer-config.json',
     'scale-config.json',
     'numbering-config.json',
 ];
+
+// The offline report spool is a DIRECTORY of *.lpr blobs (pending uploads). Snapshot it too so a
+// rollback is a complete restore. Forward updates never touch userData, so the live spool is safe
+// regardless; this only closes the rollback-fidelity gap.
+const DIRS_TO_BACKUP = ['outbox'];
 
 const MAX_BACKUPS = 3;
 
@@ -63,6 +70,21 @@ export async function createBackup(): Promise<BackupInfo> {
         if (fs.existsSync(src)) {
             fs.copyFileSync(src, path.join(backupPath, file));
             copiedCount++;
+        }
+    }
+
+    // Snapshot directory state (the offline outbox spool) — copy each file into backup/<dir>/.
+    for (const dir of DIRS_TO_BACKUP) {
+        const srcDir = path.join(userData, dir);
+        if (!fs.existsSync(srcDir)) continue;
+        const dstDir = path.join(backupPath, dir);
+        fs.mkdirSync(dstDir, { recursive: true });
+        for (const entry of fs.readdirSync(srcDir)) {
+            const s = path.join(srcDir, entry);
+            if (fs.statSync(s).isFile()) {
+                fs.copyFileSync(s, path.join(dstDir, entry));
+                copiedCount++;
+            }
         }
     }
 
@@ -117,6 +139,25 @@ export async function restoreBackup(backupId: string): Promise<void> {
             fs.copyFileSync(src, path.join(userData, file));
             log.info(`[Backup] Restored: ${file}`);
         }
+    }
+
+    // Restore spool directories by MERGE (copy backed-up blobs back; never delete spool files
+    // written live since the backup — those are still-valid pending uploads). .lpr filenames are
+    // timestamp+random, so collisions don't occur and the result is the union.
+    for (const dir of DIRS_TO_BACKUP) {
+        const srcDir = path.join(backupPath, dir);
+        if (!fs.existsSync(srcDir)) continue;
+        const dstDir = path.join(userData, dir);
+        fs.mkdirSync(dstDir, { recursive: true });
+        let n = 0;
+        for (const entry of fs.readdirSync(srcDir)) {
+            const s = path.join(srcDir, entry);
+            if (fs.statSync(s).isFile()) {
+                fs.copyFileSync(s, path.join(dstDir, entry));
+                n++;
+            }
+        }
+        if (n) log.info(`[Backup] Restored ${dir}/ (${n} file(s), merged)`);
     }
 
     log.info(`[Backup] Restore complete from "${backupId}".`);

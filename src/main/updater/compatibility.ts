@@ -50,6 +50,9 @@ export const COMPAT_MATRIX: Record<string, { minServerVersion: string }> = {
     // 1.3.12 rotates to the PRODUCTION Ed25519 license key — incompatible with old-key servers, so it
     // requires server 1.1.23+ (first server with the new key). Enforces the key-rotation lockstep.
     '1.3.12': { minServerVersion: '1.1.23' },
+    // 1.3.13 only completes the update BACKUP snapshot (license.token + report_state.json + outbox/);
+    // no protocol change, so it keeps the same minimum server as 1.3.12.
+    '1.3.13': { minServerVersion: '1.1.23' },
     // Add new entries when a new client version requires a newer server:
     // '2.0.0': { minServerVersion: '2.0.0' },
 };
