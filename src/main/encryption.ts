@@ -22,8 +22,8 @@ import { app } from 'electron';
 const LPI2_MAGIC = Buffer.from('LPI2\n');
 
 // Ed25519 public key (hex of the 32-byte raw key) — MUST match the server's
-// LICENSE_PUBLIC_KEY_HEX. This is the DEV key; regenerate for production in lockstep.
-const LICENSE_PUBLIC_KEY_HEX = '4df148b80088269eb55d2b1fccc75b18a9e52f57f324c8f5971b7267ab46f8fe';
+// LICENSE_PUBLIC_KEY_HEX and the LABELPILOT_LICENSE_PUBLIC_KEY used to sign. Production key (2026).
+const LICENSE_PUBLIC_KEY_HEX = 'bd770682b1bef5aa9c081320dad25e7e1c81752e357bdeb36d9016b4afe45e56';
 const ED25519_SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
 const HKDF_SALT = Buffer.from('labelpilot-data-key|salt|v1');
 
