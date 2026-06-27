@@ -83,35 +83,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # Mirror the installer to a PUBLIC Supabase Storage bucket so the sales site can
-      # serve a stable download URL (works even if this repo is private). The .exe is
-      # already on disk from "Build & Package" — upload it directly. Never fails the release.
-      - name: Mirror installer to Supabase Storage
-        if: startsWith(github.ref, 'refs/tags/')
-        shell: pwsh
-        continue-on-error: true
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: |
-          if ([string]::IsNullOrEmpty($env:SUPABASE_URL) -or [string]::IsNullOrEmpty($env:SUPABASE_SERVICE_ROLE_KEY)) {
-            Write-Host "Supabase secrets not set - skipping mirror."; exit 0
-          }
-          $exe = Get-ChildItem dist-build/*.exe | Select-Object -First 1
-          if (-not $exe) { Write-Host "No .exe found - skipping."; exit 0 }
-          $base = $env:SUPABASE_URL.TrimEnd('/')
-          # Ensure the public "downloads" bucket exists (ignore "already exists").
-          try {
-            Invoke-RestMethod -Method Post -Uri "$base/storage/v1/bucket" `
-              -Headers @{ Authorization = "Bearer $($env:SUPABASE_SERVICE_ROLE_KEY)"; apikey = $env:SUPABASE_SERVICE_ROLE_KEY; "Content-Type" = "application/json" } `
-              -Body '{"id":"downloads","name":"downloads","public":true}'
-            Write-Host "Bucket 'downloads' created."
-          } catch { Write-Host "Bucket create skipped (likely exists): $($_.Exception.Message)" }
-          $headers = @{ Authorization = "Bearer $($env:SUPABASE_SERVICE_ROLE_KEY)"; "x-upsert" = "true" }
-          # Upload under a stable "latest" name (site URL never changes) and the versioned name.
-          foreach ($name in @("LabelPilot-Setup-latest.exe", $exe.Name)) {
-            $uri = "$base/storage/v1/object/downloads/client/$name"
-            Write-Host "Uploading -> $uri"
-            Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -ContentType "application/octet-stream" -InFile $exe.FullName
-          }
-          Write-Host "Mirrored installer to Supabase Storage."
+      # NOTE: the installer is NOT mirrored to Supabase Storage (a ~117 MB .exe exceeds the
+      # Free-plan 50 MB file limit). The sales site serves downloads via the "download-client"
+      # Edge Function, which streams the latest GitHub release asset server-side (GitHub origin
+      # hidden). Nothing extra to publish here.
