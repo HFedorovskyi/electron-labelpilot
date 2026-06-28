@@ -113,7 +113,7 @@ const PrinterSettings = ({ title, config, onChange, systemPrinters, serialPorts,
                 {/* Protocol Selection */}
                 <div>
                     <label className="block text-sm text-neutral-600 dark:text-neutral-400 mb-2">{t('settings.protocolLabel')}</label>
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-1 gap-2">
                         {[
                             { id: 'zpl', icon: Activity, label: t('settings.protocolZplClassic'), desc: t('settings.protocolZplClassicDesc') },
                             { id: 'image', icon: Activity, label: t('settings.protocolZplAccurate'), desc: t('settings.protocolZplAccurateDesc') },
@@ -122,14 +122,16 @@ const PrinterSettings = ({ title, config, onChange, systemPrinters, serialPorts,
                             <button
                                 key={proto.id}
                                 onClick={() => update('protocol', proto.id)}
-                                className={`flex flex-col items-center justify-start gap-1 p-3 rounded-xl border transition-all duration-200 min-w-0 ${config.protocol === proto.id
-                                    ? 'bg-emerald-600 dark:bg-emerald-600 border-emerald-500 dark:border-emerald-400 text-white shadow-[0_0_15px_rgba(16,185,129,0.4)] scale-105 z-10'
+                                className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl border transition-all duration-200 text-left ${config.protocol === proto.id
+                                    ? 'bg-emerald-600 dark:bg-emerald-600 border-emerald-500 dark:border-emerald-400 text-white shadow-[0_0_15px_rgba(16,185,129,0.4)] z-10'
                                     : 'bg-white dark:bg-neutral-700 border-neutral-200 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-700 hover:text-neutral-900 dark:hover:text-white'
                                     }`}
                             >
-                                <proto.icon size={16} className="shrink-0" />
-                                <span className="font-bold text-xs leading-tight break-words text-center w-full">{proto.label}</span>
-                                <span className="text-[10px] opacity-60 leading-tight break-words text-center w-full">{proto.desc}</span>
+                                <proto.icon size={18} className="shrink-0" />
+                                <span className="min-w-0 flex-1">
+                                    <span className="block font-bold text-xs leading-tight">{proto.label}</span>
+                                    <span className="block text-[10px] opacity-60 leading-tight mt-0.5">{proto.desc}</span>
+                                </span>
                             </button>
                         ))}
                     </div>

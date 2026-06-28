@@ -681,13 +681,13 @@ const Settings = ({ onNavigate }: SettingsProps) => {
                                                 key={p.id}
                                                 type="button"
                                                 onClick={() => setConfig({ ...config, pollingInterval: p.poll, stabilityCount: p.count })}
-                                                className={`px-3 py-3 rounded-xl border text-sm transition-all ${
+                                                className={`px-2 py-2.5 rounded-xl border text-sm transition-all ${
                                                     active
                                                         ? 'border-emerald-500 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
                                                         : 'border-neutral-200 dark:border-neutral-600 bg-neutral-50 dark:bg-black/20 text-neutral-700 dark:text-neutral-300 hover:border-emerald-400/50'
                                                 }`}
                                             >
-                                                <div className="font-semibold">{p.label}</div>
+                                                <div className="font-semibold text-[13px] leading-tight break-words">{p.label}</div>
                                                 <div className="text-xs opacity-60 mt-0.5">{p.hint}</div>
                                             </button>
                                         );
