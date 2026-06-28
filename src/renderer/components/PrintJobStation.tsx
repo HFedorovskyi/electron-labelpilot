@@ -706,11 +706,11 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
     const boxFillColor = boxFillPct >= 100 ? 'bg-red-500' : boxFillPct >= 80 ? 'bg-amber-500' : 'bg-emerald-500';
 
     return (
-        <div className="grid grid-cols-12 gap-6 h-full p-4 relative">
+        <div className="grid grid-cols-12 gap-6 h-full p-3 relative">
             {/* Main Panel — Job List */}
-            <div className="col-span-8 bg-white dark:bg-neutral-900/50 border border-neutral-200 dark:border-neutral-600 rounded-3xl p-8 backdrop-blur shadow-sm dark:shadow-2xl flex flex-col overflow-hidden">
+            <div className="col-span-8 bg-white dark:bg-neutral-900/50 border border-neutral-200 dark:border-neutral-600 rounded-2xl p-5 backdrop-blur shadow-sm dark:shadow-2xl flex flex-col overflow-hidden">
                 {/* Header */}
-                <div className="flex justify-between items-center mb-6">
+                <div className="flex justify-between items-center mb-4">
                     <h2 className="text-2xl font-semibold text-neutral-900 dark:text-white flex items-center gap-3">
                         <ClipboardList className="w-7 h-7 text-violet-500" />
                         {t('pj.title')}
@@ -753,8 +753,8 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
 
                 {/* Weight Display (for all modes when a job is active) */}
                 {activeJob && (
-                    <div className="mb-6 grid grid-cols-2 gap-4">
-                        <div className="bg-neutral-50 dark:bg-black/30 border border-neutral-200 dark:border-neutral-600 rounded-3xl p-8 text-center relative overflow-hidden group">
+                    <div className="mb-4 grid grid-cols-2 gap-4">
+                        <div className="bg-neutral-50 dark:bg-black/30 border border-neutral-200 dark:border-neutral-600 rounded-2xl p-4 text-center relative overflow-hidden group">
                             <div className="absolute inset-0 bg-gradient-to-br from-emerald-100/50 dark:from-emerald-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
                             <div className="flex justify-between items-center mb-2 gap-1.5">
                                 <label className="text-xs uppercase tracking-widest text-neutral-500 font-bold">{t('ws.gross')}</label>
@@ -768,7 +768,7 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
                                     </span>
                                 </div>
                             </div>
-                            <div className="text-7xl font-mono text-emerald-600 dark:text-emerald-400 mt-2 font-light tracking-tighter">
+                            <div className="text-6xl font-mono text-emerald-600 dark:text-emerald-400 mt-2 font-light tracking-tighter">
                                 {weight} <span className="text-2xl text-emerald-500/50">{t('ws.kg')}</span>
                             </div>
                             {isStable && (
@@ -777,9 +777,9 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
                                 </div>
                             )}
                         </div>
-                        <div className="bg-neutral-50 dark:bg-black/30 border border-neutral-200 dark:border-neutral-600 rounded-3xl p-8 text-center">
+                        <div className="bg-neutral-50 dark:bg-black/30 border border-neutral-200 dark:border-neutral-600 rounded-2xl p-4 text-center">
                             <label className="text-xs uppercase tracking-widest text-neutral-500 font-bold">{t('ws.net')}</label>
-                            <div className="text-7xl font-mono text-neutral-700 dark:text-neutral-300 mt-2 font-light tracking-tighter">
+                            <div className="text-6xl font-mono text-neutral-700 dark:text-neutral-300 mt-2 font-light tracking-tighter">
                                 {getNetWeight()} <span className="text-2xl text-neutral-500 dark:text-neutral-600">{t('ws.kg')}</span>
                             </div>
                         </div>
@@ -832,7 +832,7 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
                                 <div
                                     key={job.job_id}
                                     onClick={() => selectJob(job)}
-                                    className={`p-5 rounded-2xl border cursor-pointer transition-all group ${activeJob?.job_id === job.job_id
+                                    className={`p-4 rounded-2xl border cursor-pointer transition-all group ${activeJob?.job_id === job.job_id
                                             ? 'bg-violet-50 dark:bg-violet-500/10 border-violet-300 dark:border-violet-500/30 shadow-lg shadow-violet-500/5'
                                             : 'bg-neutral-50 dark:bg-black/20 border-neutral-200 dark:border-neutral-600 hover:bg-neutral-100 dark:hover:bg-black/30 hover:border-neutral-300 dark:hover:border-white/10'
                                         }`}
@@ -915,26 +915,26 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
                         <button
                             onClick={activeJob.quantity_unit === 'pcs' ? handlePrintPcsPack : handlePrintKgPack}
                             disabled={!activeJob || !labelDoc || scaleStatus !== 'connected'}
-                            className="w-full py-8 bg-violet-600 hover:bg-violet-500 active:bg-violet-700 transition-all rounded-3xl font-bold text-2xl shadow-[0_10px_40px_-10px_rgba(139,92,246,0.5)] flex items-center justify-center gap-3 border-t border-white/10 text-white disabled:opacity-40 disabled:pointer-events-none disabled:shadow-none"
+                            className="w-full py-4 bg-violet-600 hover:bg-violet-500 active:bg-violet-700 transition-all rounded-3xl font-bold text-xl shadow-[0_10px_40px_-10px_rgba(139,92,246,0.5)] flex items-center justify-center gap-3 border-t border-white/10 text-white disabled:opacity-40 disabled:pointer-events-none disabled:shadow-none"
                         >
-                            <Printer className="w-8 h-8" /> {t('ws.print')}
+                            <Printer className="w-6 h-6" /> {t('ws.print')}
                         </button>
 
                         {/* Action buttons */}
                         <div className="grid grid-cols-2 gap-4">
-                            <button onClick={handleRepeat} className="py-8 bg-neutral-100 dark:bg-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-600 border border-neutral-300 dark:border-neutral-600 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group">
+                            <button onClick={handleRepeat} className="py-4 bg-neutral-100 dark:bg-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-600 border border-neutral-300 dark:border-neutral-600 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group">
                                 <RefreshCw className="w-6 h-6 text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-800 dark:group-hover:text-white transition-colors" />
                                 <span className="text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-800 dark:group-hover:text-white uppercase text-xs tracking-widest">{t('ws.reprintSmall')}</span>
                             </button>
-                            <button onClick={handleCloseBox} disabled={unitsInBox === 0} className="py-8 bg-neutral-100 dark:bg-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-600 border border-neutral-300 dark:border-neutral-600 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group disabled:opacity-40 disabled:pointer-events-none">
+                            <button onClick={handleCloseBox} disabled={unitsInBox === 0} className="py-4 bg-neutral-100 dark:bg-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-600 border border-neutral-300 dark:border-neutral-600 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group disabled:opacity-40 disabled:pointer-events-none">
                                 <Box className="w-6 h-6 text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-800 dark:group-hover:text-white transition-colors" />
                                 <span className="text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-800 dark:group-hover:text-white uppercase text-xs tracking-widest">{t('ws.closeBox')}</span>
                             </button>
-                            <button onClick={() => setIsDeleteModalOpen(true)} className="py-8 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/40 border border-red-300 dark:border-red-500/30 hover:border-red-400 dark:hover:border-red-500/50 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group col-span-2">
+                            <button onClick={() => setIsDeleteModalOpen(true)} className="py-4 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/40 border border-red-300 dark:border-red-500/30 hover:border-red-400 dark:hover:border-red-500/50 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group col-span-2">
                                 <Trash2 className="w-6 h-6 text-red-500 dark:text-red-400 transition-colors" />
                                 <span className="text-red-600 dark:text-red-400 uppercase text-xs tracking-widest">{t('ws.delete')}</span>
                             </button>
-                            <button onClick={() => setConfirmCompleteJobId(activeJob.job_id)} className="py-8 bg-emerald-50 dark:bg-emerald-500/5 hover:bg-emerald-100 dark:hover:bg-emerald-500/10 border border-emerald-300 dark:border-emerald-500/20 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group col-span-2">
+                            <button onClick={() => setConfirmCompleteJobId(activeJob.job_id)} className="py-4 bg-emerald-50 dark:bg-emerald-500/5 hover:bg-emerald-100 dark:hover:bg-emerald-500/10 border border-emerald-300 dark:border-emerald-500/20 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group col-span-2">
                                 <CheckCircle2 className="w-6 h-6 text-emerald-500 group-hover:text-emerald-600 transition-colors" />
                                 <span className="text-emerald-600 dark:text-emerald-400 group-hover:text-emerald-700 dark:group-hover:text-emerald-300 uppercase text-xs tracking-widest">{t('pj.complete')}</span>
                             </button>
@@ -949,17 +949,17 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
 
                 <button
                     onClick={() => printPalletSheet({ printerConfig, selectedProduct: product, t, setAlert: setAlertMessage, operatorName: operator?.full_name || '', busyRef: isPalletPrintingRef })}
-                    className="w-full py-5 bg-violet-600 hover:bg-violet-500 active:bg-violet-700 transition-all rounded-2xl font-bold text-lg text-white flex items-center justify-center gap-3 shadow-[0_10px_30px_-12px_rgba(124,58,237,0.6)] border-t border-white/10"
+                    className="w-full py-3 bg-violet-600 hover:bg-violet-500 active:bg-violet-700 transition-all rounded-2xl font-bold text-lg text-white flex items-center justify-center gap-3 shadow-[0_10px_30px_-12px_rgba(124,58,237,0.6)] border-t border-white/10"
                 >
                     <Layers className="w-6 h-6" />
                     {t('pallet.printSheet')}
                 </button>
 
                 {/* Session Stats */}
-                <div className="mt-auto p-6 bg-white dark:bg-neutral-900/50 border border-neutral-200 dark:border-neutral-600 shadow-sm dark:shadow-none rounded-3xl backdrop-blur">
-                    <h3 className="text-sm font-semibold mb-4 text-neutral-500 dark:text-white/60 uppercase tracking-widest">{t('ws.sessionStats')}</h3>
-                    <div className="space-y-3">
-                        <div className="flex justify-between items-center p-3 bg-neutral-100 dark:bg-white/5 border border-neutral-300 dark:border-neutral-600 rounded-xl cursor-pointer hover:bg-emerald-50 dark:hover:bg-emerald-500/10 transition-all"
+                <div className="mt-auto p-4 bg-white dark:bg-neutral-900/50 border border-neutral-200 dark:border-neutral-600 shadow-sm dark:shadow-none rounded-2xl backdrop-blur">
+                    <h3 className="text-sm font-semibold mb-3 text-neutral-500 dark:text-white/60 uppercase tracking-widest">{t('ws.sessionStats')}</h3>
+                    <div className="space-y-2">
+                        <div className="flex justify-between items-center p-2.5 bg-neutral-100 dark:bg-white/5 border border-neutral-300 dark:border-neutral-600 rounded-xl cursor-pointer hover:bg-emerald-50 dark:hover:bg-emerald-500/10 transition-all"
                             onClick={() => setIsDatePickerOpen(true)}>
                             <span className="text-xs uppercase tracking-wider text-neutral-500 font-bold">{t('pj.labelingDate')}</span>
                             <div className="flex items-center gap-3">
@@ -972,7 +972,7 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
                             </div>
                         </div>
 
-                        <div className="p-3 bg-neutral-100 dark:bg-white/5 border border-neutral-300 dark:border-neutral-600 rounded-xl">
+                        <div className="p-2.5 bg-neutral-100 dark:bg-white/5 border border-neutral-300 dark:border-neutral-600 rounded-xl">
                             <div className="flex justify-between items-center mb-1.5">
                                 <span className="text-xs uppercase tracking-wider text-neutral-500 font-bold">{t('ws.inBox')}</span>
                                 <span className="text-lg font-mono font-bold text-neutral-900 dark:text-white">{unitsInBox}{boxFillLimit > 0 ? ` / ${boxFillLimit}` : ''}</span>
@@ -987,7 +987,7 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
                             { label: t('ws.boxesOnPallet'), value: boxesInPallet },
                             { label: t('ws.totalUnits'), value: totalUnits },
                         ].map((stat, i) => (
-                            <div key={i} className="flex justify-between items-center p-3 bg-neutral-100 dark:bg-white/5 border border-neutral-300 dark:border-neutral-600 rounded-xl">
+                            <div key={i} className="flex justify-between items-center p-2.5 bg-neutral-100 dark:bg-white/5 border border-neutral-300 dark:border-neutral-600 rounded-xl">
                                 <span className="text-xs uppercase tracking-wider text-neutral-500 font-bold">{stat.label}</span>
                                 <span className="text-lg font-mono font-bold text-neutral-900 dark:text-white">{stat.value}</span>
                             </div>

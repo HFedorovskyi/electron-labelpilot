@@ -57,6 +57,8 @@ export const COMPAT_MATRIX: Record<string, { minServerVersion: string }> = {
     '1.3.14': { minServerVersion: '1.1.23' },
     // 1.3.15 is UI-only (stabilization-preset label fit + horizontal print-protocol cards).
     '1.3.15': { minServerVersion: '1.1.23' },
+    // 1.3.16 is UI-only (density pass so the marking screens fit 1366x768 with no scroll).
+    '1.3.16': { minServerVersion: '1.1.23' },
     // Add new entries when a new client version requires a newer server:
     // '2.0.0': { minServerVersion: '2.0.0' },
 };

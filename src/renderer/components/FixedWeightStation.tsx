@@ -669,11 +669,11 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
     const stableOutOfRange = isStable && !!selectedProduct && parseFloat(weight) > 0.010 && !inRange;
 
     return (
-        <div className="grid grid-cols-12 gap-6 h-full p-4 relative">
+        <div className="grid grid-cols-12 gap-6 h-full p-3 relative">
             {/* Main Card */}
-            <div className="col-span-8 bg-white dark:bg-neutral-900/50 border border-neutral-200 dark:border-neutral-600 rounded-3xl p-8 backdrop-blur shadow-sm dark:shadow-2xl flex flex-col">
+            <div className="col-span-8 bg-white dark:bg-neutral-900/50 border border-neutral-200 dark:border-neutral-600 rounded-2xl p-5 backdrop-blur shadow-sm dark:shadow-2xl flex flex-col">
                 {/* Header */}
-                <div className="flex justify-between items-start mb-6 gap-4">
+                <div className="flex justify-between items-start mb-4 gap-4">
                     <h2 className="text-2xl font-semibold text-neutral-900 dark:text-white">{t('fw.title')}</h2>
                     <div className="flex items-center gap-2 flex-wrap justify-end">
                         {subMode === 'scale' && (
@@ -701,7 +701,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                 </div>
 
                 {/* Sub-mode tabs */}
-                <div className="flex gap-2 mb-6">
+                <div className="flex gap-2 mb-4">
                     <button onClick={() => setSubMode('scale')}
                         className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-2xl text-sm font-semibold transition-all border ${subMode === 'scale'
                             ? 'bg-emerald-100/50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 shadow-sm'
@@ -717,7 +717,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                 </div>
 
                 {/* Product selector */}
-                <div onClick={() => setIsProductModalOpen(true)} className="cursor-pointer group mb-6">
+                <div onClick={() => setIsProductModalOpen(true)} className="cursor-pointer group mb-4">
                     <label className="block text-sm font-medium text-neutral-400 mb-2">{t('ws.search')}</label>
                     <div className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-300 dark:border-neutral-600 rounded-2xl px-5 py-4 text-lg text-neutral-500 dark:text-neutral-400 flex items-center justify-between group-hover:bg-neutral-100 dark:group-hover:bg-black/40 transition-all">
                         <span className={selectedProduct ? "text-neutral-900 dark:text-white" : ""}>{selectedProduct ? selectedProduct.name : "..."}</span>
@@ -727,7 +727,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
 
                 {/* Product info */}
                 {selectedProduct && (
-                    <div className="p-5 bg-emerald-50 dark:bg-emerald-500/5 border border-emerald-200 dark:border-emerald-500/10 rounded-2xl mb-6">
+                    <div className="p-4 bg-emerald-50 dark:bg-emerald-500/5 border border-emerald-200 dark:border-emerald-500/10 rounded-2xl mb-4">
                         <h3 className="text-sm uppercase tracking-wider text-emerald-600 dark:text-emerald-500/60 font-bold mb-1">{t('products.name')}</h3>
                         <div className="text-2xl font-bold text-emerald-700 dark:text-emerald-100 mb-2">{selectedProduct.name}</div>
                         <div className="flex flex-wrap gap-4 text-sm">
@@ -746,7 +746,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                 {subMode === 'scale' && (
                     <div className="flex-1 flex flex-col">
                         <div className="grid grid-cols-2 gap-4 flex-1">
-                            <div className="bg-neutral-50 dark:bg-black/30 border border-neutral-200 dark:border-neutral-600 rounded-3xl p-8 text-center relative overflow-hidden">
+                            <div className="bg-neutral-50 dark:bg-black/30 border border-neutral-200 dark:border-neutral-600 rounded-2xl p-4 text-center relative overflow-hidden">
                                 <label className="text-xs uppercase tracking-widest text-neutral-500 font-bold">{t('ws.gross')}</label>
                                 <div className="text-6xl font-mono text-emerald-600 dark:text-emerald-400 mt-2 font-light tracking-tighter">
                                     {weight} <span className="text-2xl text-emerald-500/50">{t('ws.kg')}</span>
@@ -757,7 +757,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                                     </div>
                                 )}
                             </div>
-                            <div className="bg-neutral-50 dark:bg-black/30 border border-neutral-200 dark:border-neutral-600 rounded-3xl p-8 text-center">
+                            <div className="bg-neutral-50 dark:bg-black/30 border border-neutral-200 dark:border-neutral-600 rounded-2xl p-4 text-center">
                                 <label className="text-xs uppercase tracking-widest text-neutral-500 font-bold">{t('ws.net')}</label>
                                 <div className="text-6xl font-mono text-neutral-700 dark:text-neutral-300 mt-2 font-light tracking-tighter">
                                     {getNetWeight()} <span className="text-2xl text-neutral-500 dark:text-neutral-600">{t('ws.kg')}</span>
@@ -785,12 +785,12 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                     <div className="flex-1 flex flex-col gap-4">
                         <div className="grid grid-cols-2 gap-4">
                             <div onClick={() => !isCountPrinting && setShowPacksKeypad(true)}
-                                className="cursor-pointer p-6 bg-blue-50 dark:bg-blue-500/5 border border-blue-200 dark:border-blue-500/10 rounded-2xl text-center hover:bg-blue-100 dark:hover:bg-blue-500/10 transition-all">
+                                className="cursor-pointer p-4 bg-blue-50 dark:bg-blue-500/5 border border-blue-200 dark:border-blue-500/10 rounded-2xl text-center hover:bg-blue-100 dark:hover:bg-blue-500/10 transition-all">
                                 <label className="text-xs uppercase tracking-widest text-blue-500 font-bold">{t('fw.packsPerBox')}</label>
                                 <div className="text-5xl font-mono text-blue-700 dark:text-blue-300 mt-2 font-bold">{packsPerBoxInput || '—'}</div>
                             </div>
                             <div onClick={() => !isCountPrinting && setShowBoxesKeypad(true)}
-                                className="cursor-pointer p-6 bg-amber-50 dark:bg-amber-500/5 border border-amber-200 dark:border-amber-500/10 rounded-2xl text-center hover:bg-amber-100 dark:hover:bg-amber-500/10 transition-all">
+                                className="cursor-pointer p-4 bg-amber-50 dark:bg-amber-500/5 border border-amber-200 dark:border-amber-500/10 rounded-2xl text-center hover:bg-amber-100 dark:hover:bg-amber-500/10 transition-all">
                                 <label className="text-xs uppercase tracking-widest text-amber-500 font-bold">{t('fw.totalBoxes')}</label>
                                 <div className="text-5xl font-mono text-amber-700 dark:text-amber-300 mt-2 font-bold">{totalBoxesInput || '—'}</div>
                             </div>
@@ -798,7 +798,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
 
                         {/* Progress */}
                         {isCountPrinting && (
-                            <div className="p-6 bg-neutral-50 dark:bg-black/30 border border-neutral-200 dark:border-neutral-600 rounded-2xl">
+                            <div className="p-4 bg-neutral-50 dark:bg-black/30 border border-neutral-200 dark:border-neutral-600 rounded-2xl">
                                 <div className="flex justify-between mb-3">
                                     <span className="text-sm font-bold text-neutral-500 uppercase tracking-widest">{t('fw.progress')}</span>
                                     <span className="text-sm font-mono text-neutral-700 dark:text-neutral-300">
@@ -821,19 +821,19 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                     <>
                         <button onClick={() => handlePrint()}
                             disabled={!selectedProduct || !labelDoc || status !== 'connected' || !inRange}
-                            className="w-full py-8 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 transition-all rounded-3xl font-bold text-2xl flex items-center justify-center gap-3 border-t border-white/10 shadow-[0_10px_40px_-10px_rgba(16,185,129,0.5)] disabled:opacity-40 disabled:pointer-events-none disabled:shadow-none">
-                            <Printer className="w-8 h-8" /> {t('ws.print')}
+                            className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 transition-all rounded-3xl font-bold text-xl flex items-center justify-center gap-3 border-t border-white/10 shadow-[0_10px_40px_-10px_rgba(16,185,129,0.5)] disabled:opacity-40 disabled:pointer-events-none disabled:shadow-none">
+                            <Printer className="w-6 h-6" /> {t('ws.print')}
                         </button>
                         <div className="grid grid-cols-2 gap-4">
-                            <button onClick={handleRepeat} className="py-8 bg-neutral-100 dark:bg-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-600 border border-neutral-300 dark:border-neutral-600 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group">
+                            <button onClick={handleRepeat} className="py-4 bg-neutral-100 dark:bg-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-600 border border-neutral-300 dark:border-neutral-600 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group">
                                 <RefreshCw className="w-6 h-6 text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-800 dark:group-hover:text-white transition-colors" />
                                 <span className="text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-800 dark:group-hover:text-white uppercase text-xs tracking-widest">{t('ws.reprintSmall')}</span>
                             </button>
-                            <button onClick={handleCloseBox} disabled={unitsInBox === 0} className="py-8 bg-neutral-100 dark:bg-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-600 border border-neutral-300 dark:border-neutral-600 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group disabled:opacity-40 disabled:pointer-events-none">
+                            <button onClick={handleCloseBox} disabled={unitsInBox === 0} className="py-4 bg-neutral-100 dark:bg-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-600 border border-neutral-300 dark:border-neutral-600 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group disabled:opacity-40 disabled:pointer-events-none">
                                 <Box className="w-6 h-6 text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-800 dark:group-hover:text-white transition-colors" />
                                 <span className="text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-800 dark:group-hover:text-white uppercase text-xs tracking-widest">{t('ws.closeBox')}</span>
                             </button>
-                            <button onClick={() => setIsDeleteModalOpen(true)} className="py-8 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/40 border border-red-300 dark:border-red-500/30 hover:border-red-400 dark:hover:border-red-500/50 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group col-span-2">
+                            <button onClick={() => setIsDeleteModalOpen(true)} className="py-4 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/40 border border-red-300 dark:border-red-500/30 hover:border-red-400 dark:hover:border-red-500/50 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group col-span-2">
                                 <Trash2 className="w-6 h-6 text-red-500 dark:text-red-400 transition-colors" />
                                 <span className="text-red-600 dark:text-red-400 uppercase text-xs tracking-widest">{t('ws.delete')}</span>
                             </button>
@@ -843,12 +843,12 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                     <>
                         {!isCountPrinting ? (
                             <button onClick={handleCountStart}
-                                className="w-full py-8 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 transition-all rounded-3xl font-bold text-2xl shadow-[0_10px_40px_-10px_rgba(59,130,246,0.5)] flex items-center justify-center gap-3 border-t border-white/10 text-white">
+                                className="w-full py-4 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 transition-all rounded-3xl font-bold text-2xl shadow-[0_10px_40px_-10px_rgba(59,130,246,0.5)] flex items-center justify-center gap-3 border-t border-white/10 text-white">
                                 <Play className="w-8 h-8" /> {t('fw.start')}
                             </button>
                         ) : (
                             <button onClick={() => { cancelCountRef.current = true; }}
-                                className="w-full py-8 bg-red-600 hover:bg-red-500 active:bg-red-700 transition-all rounded-3xl font-bold text-2xl shadow-[0_10px_40px_-10px_rgba(239,68,68,0.5)] flex items-center justify-center gap-3 border-t border-white/10 text-white animate-pulse">
+                                className="w-full py-4 bg-red-600 hover:bg-red-500 active:bg-red-700 transition-all rounded-3xl font-bold text-2xl shadow-[0_10px_40px_-10px_rgba(239,68,68,0.5)] flex items-center justify-center gap-3 border-t border-white/10 text-white animate-pulse">
                                 <Square className="w-8 h-8" /> {t('fw.stop')}
                             </button>
                         )}
@@ -857,35 +857,35 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
 
                 <button
                     onClick={() => printPalletSheet({ printerConfig, selectedProduct, t, setAlert: setAlertMessage, operatorName: operator?.full_name || '', busyRef: isPalletPrintingRef })}
-                    className="w-full py-5 bg-amber-600 hover:bg-amber-500 active:bg-amber-700 transition-all rounded-2xl font-bold text-lg text-white flex items-center justify-center gap-3 shadow-[0_10px_30px_-12px_rgba(217,119,6,0.6)] border-t border-white/10"
+                    className="w-full py-3 bg-amber-600 hover:bg-amber-500 active:bg-amber-700 transition-all rounded-2xl font-bold text-lg text-white flex items-center justify-center gap-3 shadow-[0_10px_30px_-12px_rgba(217,119,6,0.6)] border-t border-white/10"
                 >
                     <Layers className="w-6 h-6" />
                     {t('pallet.printSheet')}
                 </button>
 
                 {/* Session Stats */}
-                <div className="mt-auto p-6 bg-white dark:bg-neutral-900/50 border border-neutral-200 dark:border-neutral-600 shadow-sm dark:shadow-none rounded-3xl backdrop-blur">
-                    <h3 className="text-sm font-semibold mb-4 text-neutral-500 dark:text-white/60 uppercase tracking-widest">{t('ws.sessionStats')}</h3>
-                    <div className="space-y-3">
-                        <div className="flex justify-between items-center p-3 bg-neutral-100 dark:bg-white/5 border border-neutral-300 dark:border-neutral-600 rounded-xl group cursor-pointer hover:bg-emerald-50 dark:hover:bg-emerald-500/10 transition-all"
+                <div className="mt-auto p-4 bg-white dark:bg-neutral-900/50 border border-neutral-200 dark:border-neutral-600 shadow-sm dark:shadow-none rounded-2xl backdrop-blur">
+                    <h3 className="text-sm font-semibold mb-3 text-neutral-500 dark:text-white/60 uppercase tracking-widest">{t('ws.sessionStats')}</h3>
+                    <div className="space-y-2">
+                        <div className="flex justify-between items-center p-2.5 bg-neutral-100 dark:bg-white/5 border border-neutral-300 dark:border-neutral-600 rounded-xl group cursor-pointer hover:bg-emerald-50 dark:hover:bg-emerald-500/10 transition-all"
                             onClick={() => { setIsKeypadOpen(true); }}>
                             <span className="text-xs uppercase tracking-wider text-neutral-500 font-bold">{t('ws.batchLabel')}</span>
                             <div className="flex items-center gap-3">
-                                <span className="text-xl font-mono font-bold text-neutral-900 dark:text-white group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
+                                <span className="text-lg font-mono font-bold text-neutral-900 dark:text-white group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
                                     {batchNumber || <span className="text-neutral-400 dark:text-neutral-700 italic text-sm">{t('ws.enterPlaceholder')}</span>}
                                 </span>
                                 <div className="p-2 bg-white dark:bg-neutral-700 border border-neutral-300 dark:border-neutral-600 rounded-lg"><Hash className="w-4 h-4 text-emerald-600 dark:text-emerald-500" /></div>
                             </div>
                         </div>
-                        <div className="flex justify-between items-center p-3 bg-neutral-100 dark:bg-white/5 border border-neutral-300 dark:border-neutral-600 rounded-xl group cursor-pointer hover:bg-emerald-50 dark:hover:bg-emerald-500/10 transition-all"
+                        <div className="flex justify-between items-center p-2.5 bg-neutral-100 dark:bg-white/5 border border-neutral-300 dark:border-neutral-600 rounded-xl group cursor-pointer hover:bg-emerald-50 dark:hover:bg-emerald-500/10 transition-all"
                             onClick={() => { if (unitsInBox > 0) { setAlertMessage(t('ws.closeBoxBeforeChange')); return; } setIsDatePickerOpen(true); }}>
                             <span className="text-xs uppercase tracking-wider text-neutral-500 font-bold">{t('ws.dateLabel')}</span>
                             <div className="flex items-center gap-3">
-                                <span className="text-xl font-mono font-bold text-neutral-900 dark:text-white">{labelingDate.toLocaleDateString('ru-RU')}</span>
+                                <span className="text-lg font-mono font-bold text-neutral-900 dark:text-white">{labelingDate.toLocaleDateString('ru-RU')}</span>
                                 <div className="p-2 bg-white dark:bg-neutral-700 border border-neutral-300 dark:border-neutral-600 rounded-lg"><Calendar className="w-4 h-4 text-emerald-600 dark:text-emerald-500" /></div>
                             </div>
                         </div>
-                        <div className="py-2 border-b border-neutral-200 dark:border-neutral-600">
+                        <div className="py-1.5 border-b border-neutral-200 dark:border-neutral-600">
                             <div className="flex justify-between text-sm mb-1.5">
                                 <span className="text-neutral-500">{t('ws.inBox')}</span>
                                 <div className="flex items-center gap-2">
@@ -899,11 +899,11 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                                 </div>
                             )}
                         </div>
-                        <div className="flex justify-between text-sm py-2 border-b border-neutral-200 dark:border-neutral-600">
+                        <div className="flex justify-between text-sm py-1.5 border-b border-neutral-200 dark:border-neutral-600">
                             <span className="text-neutral-500">{t('ws.boxesOnPallet')}</span>
                             <span className="font-mono text-amber-600 dark:text-amber-400">{boxesInPallet}</span>
                         </div>
-                        <div className="flex justify-between text-sm py-2">
+                        <div className="flex justify-between text-sm py-1.5">
                             <span className="text-neutral-500">{t('ws.totalUnits')}</span>
                             <span className="font-mono text-neutral-900 dark:text-white">{totalUnits}</span>
                         </div>
