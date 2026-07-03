@@ -70,6 +70,17 @@ function cancelWorkerIdleDestroy() {
 
 function scheduleWorkerIdleDestroy() {
     if (workerIdleTimer) clearTimeout(workerIdleTimer);
+    // If any configured printer prints via the 'browser' protocol, keep the worker alive:
+    // recreating it means reloading the full renderer bundle (multi-second on a weak
+    // terminal with HDD), paid on nearly EVERY label printed less often than the idle
+    // window. The ~60-150MB renderer is simply the cost of having such a printer.
+    try {
+        const { loadPrinterConfig } = require('./config');
+        const cfg = loadPrinterConfig();
+        const anyBrowser = [cfg.packPrinter, cfg.boxPrinter, cfg.palletPrinter]
+            .some((d: any) => d && d.protocol === 'browser');
+        if (anyBrowser) return;
+    } catch { /* config unreadable — fall through to the normal idle destroy */ }
     workerIdleTimer = setTimeout(() => {
         workerIdleTimer = null;
         if (workerWindow && !workerWindow.isDestroyed()) {
@@ -127,9 +138,11 @@ function createWorkerWindow() {
     });
 
     const devUrl = 'http://127.0.0.1:5173';
+    // Slim print entry (PrintView only) — a cold worker parses hundreds of KB less
+    // than the full app bundle. ?print=true kept for the App.tsx fallback branch.
     const url = app.isPackaged
-        ? `file://${path.join(app.getAppPath(), 'dist/index.html')}?print=true`
-        : `${devUrl}?print=true`;
+        ? `file://${path.join(app.getAppPath(), 'dist/print.html')}?print=true`
+        : `${devUrl}/print.html?print=true`;
 
     workerWindow.loadURL(url);
 
@@ -237,39 +250,51 @@ app.whenReady().then(() => {
     // Printing Handlers
     //
     // Pipelined queues for the PrinterService path (zpl/image/tspl):
-    //   genQueue chains label generation (CPU-only)
-    //   sendQueue chains physical send (I/O), and waits for both the previous send AND its own gen
-    // This lets label N+1 generate in parallel with the send of label N.
+    //   genQueue chains label generation (CPU-only, one CPU → one global queue)
+    //   sendQueues chains physical send (I/O) PER PRINTER: a box label to printer B must
+    //   not wait behind a pack label still spooling to printer A, and a dead printer's
+    //   timeouts must not freeze the other devices' output.
+    // Each send waits for both the previous send on ITS printer AND its own gen,
+    // so label N+1 generates in parallel with the send of label N.
     let genQueue: Promise<any> = Promise.resolve();
-    let sendQueue: Promise<any> = Promise.resolve();
+    const sendQueues: Map<string, Promise<any>> = new Map();
     // Browser/webContents.print path stays strictly sequential.
     let browserPrintQueue: Promise<any> = Promise.resolve();
 
+    // Shared pipeline enqueue for the PrinterService path. Resolves true/false with the
+    // final print outcome; callers may await it ('print-label') or fire-and-forget
+    // ('record-and-print' — outcome reaches the UI via printer-status-update pushes).
+    const enqueuePrint = async (printerConfig: any, labelDoc: any, data: any, docKey?: string): Promise<boolean> => {
+        const startTime = Date.now();
+        const { printerService } = await import('./printer/PrinterService');
+
+        const myGen = genQueue.then(() => printerService.generateBuffer(printerConfig, labelDoc, data, docKey));
+        genQueue = myGen.catch(() => undefined);
+
+        const queueKey = printerConfig.id || printerConfig.name || '__default__';
+        const prevSend = sendQueues.get(queueKey) || Promise.resolve();
+        const mySend = Promise.all([prevSend, myGen]).then(([, buf]) =>
+            printerService.sendBuffer(printerConfig, buf as Buffer)
+        );
+        sendQueues.set(queueKey, mySend.catch(() => undefined));
+
+        try {
+            await mySend;
+            log.info(`Printed via PrinterService (${printerConfig.protocol}) to ${printerConfig.name} in ${Date.now() - startTime}ms`);
+            return true;
+        } catch (e) {
+            log.error('PrinterService failed:', e);
+            recordPrintError(`Печать не удалась (${printerConfig.protocol}, ${printerConfig.name || ''}): ${(e as any)?.message || e}`);
+            return false;
+        }
+    };
+
     ipcMain.handle('print-label', async (_, options) => {
-        const { silent, labelDoc, data, printerConfig, printerName } = options;
+        const { silent, labelDoc, data, printerConfig, printerName, docKey } = options;
 
         // ── PrinterService path: pipelined gen + send ─────────────────
         if (printerConfig && typeof printerConfig === 'object' && printerConfig.protocol !== 'browser') {
-            const startTime = Date.now();
-            const { printerService } = await import('./printer/PrinterService');
-
-            const myGen = genQueue.then(() => printerService.generateBuffer(printerConfig, labelDoc, data));
-            genQueue = myGen.catch(() => undefined);
-
-            const mySend = Promise.all([sendQueue, myGen]).then(([, buf]) =>
-                printerService.sendBuffer(printerConfig, buf as Buffer)
-            );
-            sendQueue = mySend.catch(() => undefined);
-
-            try {
-                await mySend;
-                log.info(`Printed via PrinterService (${printerConfig.protocol}) to ${printerConfig.name} in ${Date.now() - startTime}ms`);
-                return true;
-            } catch (e) {
-                log.error('PrinterService failed:', e);
-                recordPrintError(`Печать не удалась (${printerConfig.protocol}, ${printerConfig.name || ''}): ${(e as any)?.message || e}`);
-                return false;
-            }
+            return await enqueuePrint(printerConfig, labelDoc, data, docKey);
         }
 
         // ── Legacy browser path: sequential, uses worker window ───────
@@ -338,6 +363,31 @@ app.whenReady().then(() => {
             log.error('Print queue error:', err);
             return false;
         }));
+    });
+
+    // ── Merged record + print ─────────────────────────────────────────
+    // The pack hot path used to be two sequential renderer round trips: await
+    // record-pack (sync SQLite), hop back to the renderer (event-loop requeue,
+    // 10-30ms of jitter on a busy 2-core Atom), then invoke print-label. Here the
+    // DB transaction and the print dispatch happen in the SAME main-process turn:
+    // the label starts generating before the renderer even receives the reply.
+    // Returns the recordPack result; print outcome reaches the UI via the
+    // printer-status-update push. Browser-protocol printers aren't dispatchable
+    // here (worker-window flow) — printDispatched:false tells the renderer to use
+    // the legacy print-label call.
+    ipcMain.handle('record-and-print', async (_, options) => {
+        const { record, labelDoc, data, printerConfig, docKey } = options;
+        const { recordPack } = await import('./database');
+        const recordResult = recordPack(record);
+        if (!recordResult?.success) return { ...recordResult, printDispatched: false };
+
+        let printDispatched = false;
+        if (labelDoc && printerConfig && typeof printerConfig === 'object' && printerConfig.protocol !== 'browser') {
+            const printData = { ...data, box_number: recordResult.boxNumber };
+            void enqueuePrint(printerConfig, labelDoc, printData, docKey);
+            printDispatched = true;
+        }
+        return { ...recordResult, printDispatched };
     });
 });
 
@@ -443,6 +493,31 @@ ipcMain.handle('printer:warmup', async (_, args: { printerIds?: ('pack' | 'box' 
         if (anyBrowser && (!workerWindow || workerWindow.isDestroyed())) {
             log.info('[printer:warmup] pre-creating worker window for browser-protocol printing');
             createWorkerWindow();
+        }
+
+        // Pallet BG pre-upload (image protocol only). The pallet static layer is the
+        // largest single upload in the app — pay it at station entry, not at pallet close
+        // while the operator waits at the wrap station. Fire-and-forget; the template is
+        // resolved main-side (any label with canvas.labelType === 'pallet'), and
+        // warmupBackground is idempotent via the per-printer upload tracking.
+        const pallet = config.palletPrinter;
+        if (pallet && pallet.protocol === 'image' && hasTarget(pallet)) {
+            void (async () => {
+                try {
+                    const { initDatabase } = await import('./database');
+                    const rows: any[] = initDatabase().prepare('SELECT * FROM labels').all();
+                    for (const l of rows) {
+                        let doc: any = null;
+                        try { doc = JSON.parse(l.structure); } catch { continue; }
+                        if (doc?.canvas?.labelType !== 'pallet') continue;
+                        await printerService.warmupConnection(pallet);
+                        await printerService.warmupBackground(pallet, doc);
+                        break;
+                    }
+                } catch (e) {
+                    log.warn('[printer:warmup] pallet BG warmup failed (best-effort)', e);
+                }
+            })();
         }
         return { ok: true, results };
     } catch (e) {
@@ -699,6 +774,16 @@ ipcMain.handle('session:set', (_, { uuid, pin }: { uuid: string; pin?: string })
 });
 
 ipcMain.handle('session:logout', () => {
+    // Hard gate: an operator hands over a CLEAN station. An open box/pallet must not
+    // silently span two operators (its packs would carry mixed operator attribution
+    // in reports), so switching is refused until they are closed.
+    const { getOpenEntitiesSummary } = require('./database');
+    const open = getOpenEntitiesSummary();
+    if (open.openBoxCount > 0 || open.openPalletCount > 0) {
+        log.info(`[session] logout blocked: openBoxes=${open.openBoxCount} (last №${open.openBoxNumber}), openPallets=${open.openPalletCount}`);
+        return { ok: false, reason: 'open_entities', ...open };
+    }
+
     const { logoutSession } = require('./session');
     logoutSession();
     BrowserWindow.getAllWindows().forEach((win) =>
@@ -907,8 +992,18 @@ import { CanvasBitmapGenerator } from './printer/generator/CanvasBitmapGenerator
 // Register ipc handlers
 startSyncServer((data) => {
     log.info('[Sync] Sync complete callback fired. Broadcasting data-updated...');
-    // Clear printer background GRF cache so updated templates get fresh backgrounds
-    CanvasBitmapGenerator.clearBackgroundCache();
+    // Clear printer background GRF cache so updated templates get fresh backgrounds.
+    // NOT for print-job pushes: they change no templates, and wiping here would force a
+    // full static re-render (+re-upload) of every template right when a job arrives mid-shift.
+    // Routed through printerService so the generation worker's caches clear too.
+    if (data?.type !== 'print_job') {
+        try {
+            const { printerService } = require('./printer/PrinterService');
+            printerService.clearGeneratorCaches();
+        } catch {
+            CanvasBitmapGenerator.clearBackgroundCache();
+        }
+    }
     if (mainWindow) {
         mainWindow.webContents.send('sync-complete', { success: true, ...data });
         // Notify all windows that data has been updated so components reload

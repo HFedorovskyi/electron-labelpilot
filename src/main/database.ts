@@ -425,6 +425,26 @@ export function closeBox(boxId: number, weightNetto: number, weightBrutto: numbe
   return { success: true };
 }
 
+/**
+ * Open (unclosed) work items — used to gate operator switching: a box/pallet must not
+ * silently span two operators (packs inside would get mixed operator attribution).
+ */
+export function getOpenEntitiesSummary(): {
+  openBoxCount: number;
+  openBoxNumber: string | null;
+  openPalletCount: number;
+} {
+  const db = initDatabase();
+  const boxes = db.prepare("SELECT COUNT(*) as count FROM boxes WHERE status = 'Open'").get() as { count: number };
+  const lastOpenBox = db.prepare("SELECT number FROM boxes WHERE status = 'Open' ORDER BY id DESC LIMIT 1").get() as { number: string } | undefined;
+  const pallets = db.prepare("SELECT COUNT(*) as count FROM pallet WHERE status = 'Open'").get() as { count: number };
+  return {
+    openBoxCount: boxes.count,
+    openBoxNumber: lastOpenBox?.number ?? null,
+    openPalletCount: pallets.count,
+  };
+}
+
 export function getLatestCounters(nomenclatureId?: number) {
   const db = initDatabase();
 

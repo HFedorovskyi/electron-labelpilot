@@ -6,19 +6,28 @@ export interface CurrentOperator {
     short_code?: string;
 }
 
+export interface LogoutResult {
+    ok: boolean;
+    /** 'open_entities' → blocked: close the open box/pallet first. */
+    reason?: string;
+    openBoxCount?: number;
+    openBoxNumber?: string | null;
+    openPalletCount?: number;
+}
+
 interface SessionState {
     operator: CurrentOperator | null;
     /** A synthetic demo operator forces a logged-in state without a real DB operator. */
     isDemo: boolean;
     refresh: () => Promise<void>;
-    logout: () => Promise<void>;
+    logout: () => Promise<LogoutResult>;
 }
 
 const SessionContext = createContext<SessionState>({
     operator: null,
     isDemo: false,
     refresh: async () => {},
-    logout: async () => {},
+    logout: async () => ({ ok: false }),
 });
 
 interface SessionProviderProps {
@@ -43,14 +52,19 @@ export function SessionProvider({ children, demoOperator = null }: SessionProvid
         }
     }, [demoOperator]);
 
-    const logout = useCallback(async () => {
-        if (demoOperator) return; // demo session is not logged out
+    const logout = useCallback(async (): Promise<LogoutResult> => {
+        if (demoOperator) return { ok: false, reason: 'demo' }; // demo session is not logged out
         try {
-            await window.electron.invoke('session:logout');
+            const res: LogoutResult = await window.electron.invoke('session:logout');
+            // Only clear on success — main refuses the logout while a box/pallet is
+            // still open (the caller shows the reason to the user).
+            if (res?.ok) setOperator(null);
+            return res ?? { ok: true };
         } catch {
-            /* ignore */
+            // IPC failure: fail open like before (don't trap the user in a session).
+            setOperator(null);
+            return { ok: true };
         }
-        setOperator(null);
     }, [demoOperator]);
 
     useEffect(() => {

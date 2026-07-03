@@ -61,7 +61,12 @@ const OperatorLoginScreen: React.FC<OperatorLoginScreenProps> = ({ onLoggedIn })
             const res = await window.electron.invoke('session:set', { uuid, pin: enteredPin });
             if (res?.ok) {
                 await refresh();
-                onLoggedIn();
+                // Deliberately NOT calling onLoggedIn() here: the gate closes via the
+                // session-changed broadcast (currentOperator gets set). onLoggedIn() is
+                // ONLY the "continue without operator" fail-open — calling it on a real
+                // login marked the session as 'entered anyway' and permanently disabled
+                // the "switch operator" button (logout cleared the operator but the
+                // stuck flag kept the login screen from ever showing again).
             } else {
                 setError(res?.reason === 'bad_pin' ? t('operator.wrongPin') : t('operator.loginFailed'));
             }

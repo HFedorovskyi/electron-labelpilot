@@ -146,6 +146,17 @@ export interface PrinterDeviceConfig {
     // RAM-cache mode for `image` protocol. Default: 'auto'.
     // Switch to 'off' for non-Zebra ZPL-compatible printers that lack ~DG/R: drive.
     ramCache?: RamCacheMode;
+
+    // Encode the static-layer graphic as :Z64: (zlib+base64) instead of hex RLE.
+    // 2-4x smaller payload — decisive on serial links. Off by default: Zebra ZPL II
+    // and most modern emulations support it, but not every clone does.
+    z64?: boolean;
+
+    // TCP only. Keep the socket open between labels (with keepalive) instead of the
+    // default 400ms idle-close. Real printers render on ^XZ and benefit (~10-100ms
+    // reconnect saved per label at operator pace); the default close exists only for
+    // virtual/Labelary-style receivers that finalize a job on connection close.
+    persistentConnection?: boolean;
 }
 
 export interface PrinterConfig {

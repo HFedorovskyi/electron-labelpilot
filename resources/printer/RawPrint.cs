@@ -106,13 +106,91 @@ namespace RawPrint
         }
     }
     
-    class Program 
+    class Program
     {
-        static void Main(string[] args) 
+        // ── Resident server mode ─────────────────────────────────────────
+        // RawPrint.exe --server
+        // Protocol (stdin → stdout, one request at a time):
+        //   "PRINT\t<printerName>\t<byteCount>\n" followed by exactly byteCount raw bytes
+        //   → "OK\n" or "ERR <message>\n"
+        // Exits when stdin closes. Eliminates the per-label process spawn (CLR init +
+        // Defender scan, 100-400ms on weak terminals) and the temp-file roundtrip.
+        static int ServerLoop()
         {
-            if (args.Length < 2) 
+            Stream stdin = Console.OpenStandardInput();
+            StreamWriter writer = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false));
+            writer.AutoFlush = true;
+
+            while (true)
             {
-                Console.WriteLine("Usage: RawPrint.exe \"Printer Name\" \"Path to File\"");
+                string line = ReadLineRaw(stdin);
+                if (line == null) return 0; // stdin closed → parent exited
+                line = line.Trim();
+                if (line.Length == 0) continue;
+
+                string[] parts = line.Split('\t');
+                int count;
+                if (parts.Length != 3 || parts[0] != "PRINT" ||
+                    !int.TryParse(parts[2], out count) || count < 0 || count > 64 * 1024 * 1024)
+                {
+                    writer.WriteLine("ERR bad-command");
+                    continue;
+                }
+
+                byte[] data = new byte[count];
+                int off = 0;
+                while (off < count)
+                {
+                    int n = stdin.Read(data, off, count - off);
+                    if (n <= 0) return 1; // stream broke mid-payload
+                    off += n;
+                }
+
+                bool ok = false;
+                string err = "";
+                try
+                {
+                    IntPtr p = Marshal.AllocCoTaskMem(count);
+                    try
+                    {
+                        Marshal.Copy(data, 0, p, count);
+                        ok = RawPrinterHelper.SendBytesToPrinter(parts[1], p, count);
+                    }
+                    finally { Marshal.FreeCoTaskMem(p); }
+                    if (!ok) err = "winspool error";
+                }
+                catch (Exception ex)
+                {
+                    ok = false;
+                    err = ex.Message.Replace('\r', ' ').Replace('\n', ' ');
+                }
+                writer.WriteLine(ok ? "OK" : ("ERR " + err));
+            }
+        }
+
+        // Console.In buffers ahead and would swallow payload bytes — read the raw stream.
+        static string ReadLineRaw(Stream s)
+        {
+            StringBuilder sb = new StringBuilder();
+            while (true)
+            {
+                int b = s.ReadByte();
+                if (b < 0) return sb.Length > 0 ? sb.ToString() : null;
+                if (b == '\n') return sb.ToString();
+                if (b != '\r') sb.Append((char)b);
+            }
+        }
+
+        static void Main(string[] args)
+        {
+            if (args.Length == 1 && args[0] == "--server")
+            {
+                Environment.Exit(ServerLoop());
+            }
+
+            if (args.Length < 2)
+            {
+                Console.WriteLine("Usage: RawPrint.exe \"Printer Name\" \"Path to File\"  |  RawPrint.exe --server");
                 return;
             }
             

@@ -71,7 +71,7 @@ export class SerialStrategy implements IConnectionStrategy {
         return this.connected && !!this.port && this.port.isOpen;
     }
 
-    async query(data: Buffer, timeoutMs: number): Promise<Buffer | null> {
+    async query(data: Buffer, timeoutMs: number, doneWhen?: (accumulated: Buffer) => boolean): Promise<Buffer | null> {
         if (!this.port || !this.port.isOpen) return null;
         const port = this.port;
 
@@ -88,7 +88,13 @@ export class SerialStrategy implements IConnectionStrategy {
                 resolve(result);
             };
 
-            const onData = (buf: Buffer) => { chunks.push(buf); };
+            const onData = (buf: Buffer) => {
+                chunks.push(buf);
+                if (doneWhen) {
+                    const acc = Buffer.concat(chunks);
+                    if (doneWhen(acc)) finish(acc);
+                }
+            };
             const onError = () => finish(null);
 
             const timer = setTimeout(() => {

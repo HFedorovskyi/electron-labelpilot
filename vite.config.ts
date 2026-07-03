@@ -15,6 +15,13 @@ export default defineConfig({
     // No prod sourcemaps — smaller install, faster writes on weak eMMC.
     sourcemap: false,
     rollupOptions: {
+      // Two pages: the full app and a slim print-worker entry (PrintView only) that a
+      // recreated hidden worker window can load in hundreds of ms instead of parsing
+      // the entire app bundle.
+      input: {
+        main: 'index.html',
+        print: 'print.html',
+      },
       output: {
         // Split stable vendor code into separate cacheable chunks so the main app
         // chunk is smaller to parse/compile on a weak CPU each cold start. bwip-js is

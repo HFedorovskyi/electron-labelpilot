@@ -124,7 +124,10 @@ const App = () => {
         // Keep the gate in sync when the operator logs in / out (broadcast from main).
         const removeSessionListener = window.electron.on('session-changed', (op: CurrentOperator | null) => {
             setCurrentOperator(op ?? null);
-            if (op) setEnteredAnyway(false); // a real login supersedes the "continue without" choice
+            // Any explicit session change resets the "continue without operator" choice:
+            // a real login supersedes it, and a logout ("switch operator") must re-open
+            // the login gate — a stale flag here made the switch button appear dead.
+            setEnteredAnyway(false);
         });
 
         const removeDiscoveryListener = window.electron.on('discovery-event', (data: any) => {

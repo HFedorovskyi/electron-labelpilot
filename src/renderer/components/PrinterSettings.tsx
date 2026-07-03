@@ -22,6 +22,9 @@ export interface PrinterDeviceConfig {
     darkness?: number; // 0-30
     printSpeed?: number; // 2-12
     dpi?: number; // 203 | 300 | 600
+    ramCache?: 'auto' | 'on' | 'off'; // image protocol: printer RAM-drive background caching
+    z64?: boolean;                    // image protocol: Z64 (zlib) graphic encoding vs hex RLE
+    persistentConnection?: boolean;   // tcp: keep the socket open between labels
 }
 
 interface PrinterSettingsProps {
@@ -205,6 +208,29 @@ const PrinterSettings = ({ title, config, onChange, systemPrinters, serialPorts,
                                 className="w-full bg-white dark:bg-black/30 border border-neutral-200 dark:border-neutral-600 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"
                             />
                         </div>
+                        {/* Real printers render on ^XZ — keeping the socket open saves the
+                            reconnect handshake on every label. The close-per-job default
+                            exists only for virtual/Labelary-style receivers. */}
+                        <div className="col-span-3">
+                            <label className="block text-sm text-neutral-600 dark:text-neutral-400 mb-2">{t('settings.tcpConnModeLabel')}</label>
+                            <div className="grid grid-cols-2 gap-2">
+                                {([
+                                    { id: false, label: t('settings.tcpConnModeClose') },
+                                    { id: true, label: t('settings.tcpConnModeKeep') },
+                                ] as const).map((m) => (
+                                    <button
+                                        key={String(m.id)}
+                                        onClick={() => update('persistentConnection', m.id)}
+                                        className={`p-3 rounded-xl border transition-all duration-200 ${(!!config.persistentConnection === m.id)
+                                            ? 'bg-emerald-600 dark:bg-emerald-600 border-emerald-500 dark:border-emerald-400 text-white shadow-[0_0_15px_rgba(16,185,129,0.4)] scale-105 z-10'
+                                            : 'bg-white dark:bg-neutral-700 border-neutral-200 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-700 hover:text-neutral-900 dark:hover:text-white'
+                                            }`}
+                                    >
+                                        <div className="font-bold text-xs text-center">{m.label}</div>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
                     </div>
                 )}
 
@@ -239,7 +265,58 @@ const PrinterSettings = ({ title, config, onChange, systemPrinters, serialPorts,
                     </div>
                 )}
 
+                {/* RAM-cache mode — only meaningful for the image (canvas-bitmap) protocol.
+                    'auto' probes the printer; 'on' forces the fast ~DG/R:/^XG path on known
+                    Zebra ZPL-II fleets; 'off' locks the safe inline path for emulations
+                    without a RAM drive. */}
+                {config.protocol === 'image' && (
+                    <div>
+                        <label className="block text-sm text-neutral-600 dark:text-neutral-400 mb-2">{t('settings.ramCacheLabel')}</label>
+                        <div className="grid grid-cols-3 gap-2">
+                            {([
+                                { id: 'auto', label: t('settings.ramCacheAuto') },
+                                { id: 'on', label: t('settings.ramCacheOn') },
+                                { id: 'off', label: t('settings.ramCacheOff') },
+                            ] as const).map((m) => (
+                                <button
+                                    key={m.id}
+                                    onClick={() => update('ramCache', m.id)}
+                                    className={`p-3 rounded-xl border transition-all duration-200 ${(config.ramCache === m.id) || (!config.ramCache && m.id === 'auto')
+                                        ? 'bg-emerald-600 dark:bg-emerald-600 border-emerald-500 dark:border-emerald-400 text-white shadow-[0_0_15px_rgba(16,185,129,0.4)] scale-105 z-10'
+                                        : 'bg-white dark:bg-neutral-700 border-neutral-200 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-700 hover:text-neutral-900 dark:hover:text-white'
+                                        }`}
+                                >
+                                    <div className="font-bold text-xs text-center">{m.label}</div>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                )}
 
+                {/* Graphic encoding — Z64 (zlib) is 2-4x smaller than hex RLE. Decisive on
+                    serial links; off by default since not every ZPL clone supports it. */}
+                {config.protocol === 'image' && (
+                    <div>
+                        <label className="block text-sm text-neutral-600 dark:text-neutral-400 mb-2">{t('settings.gfEncodingLabel')}</label>
+                        <div className="grid grid-cols-2 gap-2">
+                            {([
+                                { id: false, label: t('settings.gfEncodingRle') },
+                                { id: true, label: t('settings.gfEncodingZ64') },
+                            ] as const).map((m) => (
+                                <button
+                                    key={String(m.id)}
+                                    onClick={() => update('z64', m.id)}
+                                    className={`p-3 rounded-xl border transition-all duration-200 ${(!!config.z64 === m.id)
+                                        ? 'bg-emerald-600 dark:bg-emerald-600 border-emerald-500 dark:border-emerald-400 text-white shadow-[0_0_15px_rgba(16,185,129,0.4)] scale-105 z-10'
+                                        : 'bg-white dark:bg-neutral-700 border-neutral-200 dark:border-neutral-700 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-700 hover:text-neutral-900 dark:hover:text-white'
+                                        }`}
+                                >
+                                    <div className="font-bold text-xs text-center">{m.label}</div>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                )}
 
                 <div className="pt-2 flex justify-end">
                     <button

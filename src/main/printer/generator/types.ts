@@ -83,6 +83,11 @@ export interface GeneratorOptions {
     // 'inline' → embed static layer as ^GFA in every job (safe for any ZPL-compatible).
     // Determined by RamCacheCoordinator; the generator just executes the decision.
     cacheMode?: 'ram' | 'inline';
+    // Encode the static-layer graphic as :Z64: (zlib deflate + base64 + CRC16) instead of
+    // ASCII hex RLE. 2-4x smaller payload — decisive on serial links and for printers
+    // stuck on the inline path. Zebra ZPL II and most modern emulations support it, but
+    // not all — off by default, enabled per printer in settings.
+    z64?: boolean;
 }
 
 export interface ILabelGenerator {

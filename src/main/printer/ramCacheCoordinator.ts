@@ -34,7 +34,11 @@ interface Entry {
     decidedAt: number;
 }
 
-const PROBE_TIMEOUT_MS = 600;
+// TCP replies arrive in tens of ms; serial at 9600 baud needs seconds for the ^HW
+// directory listing to round-trip (hundreds of bytes at ~960B/s + printer processing).
+// A flat 600ms silently locked every serial Zebra to the slow inline path.
+const PROBE_TIMEOUT_TCP_MS = 600;
+const PROBE_TIMEOUT_SERIAL_MS = 3000;
 const PROBE_TTL_MS = 30 * 60 * 1000; // 30 min — re-probe periodically
 
 class RamCacheCoordinator {
@@ -51,7 +55,10 @@ class RamCacheCoordinator {
 
         const entry = this.entries.get(config.id);
         if (!entry) return 'inline'; // first print → safe fallback
-        if (Date.now() - entry.decidedAt > PROBE_TTL_MS) return 'inline'; // stale
+        // Stale-while-revalidate: past the TTL we keep honoring the last decision and
+        // let the next maybeProbe() refresh it in the background. Hard-flipping to
+        // 'inline' here would permanently degrade printers that print less often than
+        // the TTL (the re-probe confirmation would always arrive after the label).
         return entry.decision;
     }
 
@@ -70,24 +77,41 @@ class RamCacheCoordinator {
      * Fire-and-forget: caller doesn't await. Idempotent — multiple calls coalesce.
      */
     maybeProbe(config: PrinterDeviceConfig, strategy: IConnectionStrategy): void {
+        void this.probeInternal(config, strategy);
+    }
+
+    /**
+     * Awaitable probe for warmup paths (station entry): resolves once the decision is
+     * known, so a warmupBackground() that follows sees 'ram' instead of the pre-probe
+     * 'inline' default and can actually pre-upload. Off the print hot path.
+     */
+    async ensureDecision(config: PrinterDeviceConfig, strategy: IConnectionStrategy): Promise<Decision> {
+        await this.probeInternal(config, strategy);
+        return this.getDecision(config);
+    }
+
+    private probeInternal(config: PrinterDeviceConfig, strategy: IConnectionStrategy): Promise<void> {
         const mode = config.ramCache || 'auto';
-        if (mode !== 'auto') return; // explicit on/off doesn't need probing
+        if (mode !== 'auto') return Promise.resolve(); // explicit on/off doesn't need probing
 
         const existing = this.entries.get(config.id);
         if (existing && existing.state !== 'unknown' &&
             Date.now() - existing.decidedAt < PROBE_TTL_MS) {
-            return; // already decided or in-flight
+            return Promise.resolve(); // already decided or in-flight
         }
 
         if (typeof strategy.query !== 'function') {
             // No read channel (e.g. Windows spooler) — lock decision to inline.
             this.entries.set(config.id, { decision: 'inline', state: 'done', decidedAt: Date.now() });
             log.info(`[RamCacheCoordinator] "${config.id}" has no read channel → inline locked`);
-            return;
+            return Promise.resolve();
         }
 
-        this.entries.set(config.id, { decision: 'inline', state: 'probing', decidedAt: Date.now() });
-        this.runProbe(config, strategy).catch((e) => {
+        // Preserve the previous decision while the re-probe is in flight
+        // (stale-while-revalidate) — only first-ever probes start from 'inline'.
+        const carry = existing?.decision || 'inline';
+        this.entries.set(config.id, { decision: carry, state: 'probing', decidedAt: Date.now() });
+        return this.runProbe(config, strategy).catch((e) => {
             log.warn(`[RamCacheCoordinator] probe crashed for "${config.id}": ${e}`);
             this.entries.set(config.id, { decision: 'inline', state: 'done', decidedAt: Date.now() });
         });
@@ -105,9 +129,13 @@ class RamCacheCoordinator {
         const upload = `~DGR:${PROBE_NAME},1,1,FF\n`;
         const query = `^XA^HWR:LP_PROBE.GRF^XZ\n`;
         const cleanup = `^XA^IDR:LP_PROBE.GRF^XZ\n`;
+        const timeoutMs = config.connection === 'serial' ? PROBE_TIMEOUT_SERIAL_MS : PROBE_TIMEOUT_TCP_MS;
+        // Early-resolve as soon as the reply mentions the probe file — the warmup path
+        // awaits this probe, so on TCP this turns a fixed 600ms wait into ~tens of ms.
+        const doneWhen = (buf: Buffer) => buf.toString('ascii').toUpperCase().includes('LP_PROBE.GRF');
 
         try {
-            const reply = await strategy.query(Buffer.from(upload + query, 'utf-8'), PROBE_TIMEOUT_MS);
+            const reply = await strategy.query(Buffer.from(upload + query, 'utf-8'), timeoutMs, doneWhen);
 
             let decision: Decision = 'inline';
             if (reply && reply.length > 0) {

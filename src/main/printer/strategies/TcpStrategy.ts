@@ -6,11 +6,14 @@ export class TcpStrategy implements IConnectionStrategy {
     private socket: net.Socket | null = null;
     private connected: boolean = false;
     private idleTimer: NodeJS.Timeout | null = null;
+    private persistent: boolean = false;
     // Close the socket shortly after the last write. Many ZPL-over-TCP receivers finalize a
     // print job on connection close (e.g. Virtual ZPL Printer / Labelary-based tools) rather
     // than on ^XZ — a persistent socket would buffer forever and never render. Real printers
     // render on ^XZ and are unaffected. During a burst (pipelined batch) consecutive writes
     // reset the timer, so the socket is reused; it closes only once printing goes idle.
+    // With config.persistentConnection the idle-close is skipped entirely (keepalive holds
+    // the socket) — at operator pace this saves the reconnect handshake on every label.
     private static readonly IDLE_CLOSE_MS = 400;
 
     private clearIdleClose() {
@@ -19,6 +22,7 @@ export class TcpStrategy implements IConnectionStrategy {
 
     private scheduleIdleClose() {
         this.clearIdleClose();
+        if (this.persistent) return;
         this.idleTimer = setTimeout(() => {
             this.idleTimer = null;
             this.disconnect().catch(() => { /* best-effort */ });
@@ -27,6 +31,7 @@ export class TcpStrategy implements IConnectionStrategy {
 
     async connect(config: PrinterDeviceConfig): Promise<void> {
         this.clearIdleClose();
+        this.persistent = !!config.persistentConnection;
         return new Promise((resolve, reject) => {
             if (this.socket) {
                 this.disconnect();
@@ -44,6 +49,18 @@ export class TcpStrategy implements IConnectionStrategy {
                 this.connected = true;
                 // Remove timeout listener/setup for long-lived connection if needed
                 socket.setTimeout(0);
+                // Disable Nagle: label jobs are latency-sensitive one-shot writes, and the
+                // final sub-MSS segment would otherwise wait on the printer's delayed ACK
+                // (embedded print servers commonly delay 100-200ms) before ^XZ arrives.
+                socket.setNoDelay(true);
+                if (this.persistent) {
+                    socket.setKeepAlive(true, 30_000);
+                }
+                // Reflect remote closes (printer reboot, NAT drop) in isConnected() so the
+                // next send reconnects up-front instead of failing into the retry path.
+                socket.once('close', () => {
+                    if (this.socket === socket) this.connected = false;
+                });
                 resolve();
             });
 
@@ -91,7 +108,7 @@ export class TcpStrategy implements IConnectionStrategy {
         return this.connected && !!this.socket && !this.socket.destroyed;
     }
 
-    async query(data: Buffer, timeoutMs: number): Promise<Buffer | null> {
+    async query(data: Buffer, timeoutMs: number, doneWhen?: (accumulated: Buffer) => boolean): Promise<Buffer | null> {
         if (!this.socket || !this.connected) return null;
         const socket = this.socket;
         this.clearIdleClose(); // keep the socket open to read the reply
@@ -112,8 +129,13 @@ export class TcpStrategy implements IConnectionStrategy {
 
             const onData = (buf: Buffer) => {
                 chunks.push(buf);
-                // Don't resolve eagerly — let the timeout collect the full reply.
-                // Printers may send the response in multiple packets.
+                // Without a matcher, don't resolve eagerly — let the timeout collect the
+                // full reply (printers may send the response in multiple packets). With a
+                // matcher, resolve as soon as the caller has what it needs.
+                if (doneWhen) {
+                    const acc = Buffer.concat(chunks);
+                    if (doneWhen(acc)) finish(acc);
+                }
             };
             const onError = () => finish(null);
 

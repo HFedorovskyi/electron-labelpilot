@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, useMemo } from 'react';
 import { Printer, RefreshCw, Box, AlertCircle, X, Hash, Layers, Calendar, Search, Trash2 } from 'lucide-react';
 import { generateBarcode, type BarcodeData } from '../utils/barcodeGenerator';
 import { printPalletSheet } from '../utils/palletPrint';
+import { computeDocKey } from '../utils/docKey';
 import { useTranslation } from '../i18n';
 import NumericKeypad from './NumericKeypad';
 import DeleteItemsModal from './DeleteItemsModal';
@@ -23,6 +24,7 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
     const [lastPrintInfo, setLastPrintInfo] = useState<{ label: string; time: string } | null>(null);
     const printToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [labelDoc, setLabelDoc] = useState<any>(null);
+    const [labelDocKey, setLabelDocKey] = useState<string | null>(null);
 
     const [products, setProducts] = useState<any[]>([]);
     const [selectedProduct, setSelectedProduct] = useState<any | null>(null);
@@ -33,6 +35,7 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
     const [containers, setContainers] = useState<any[]>([]);
 
     const [boxLabelDoc, setBoxLabelDoc] = useState<any>(null);
+    const [boxLabelDocKey, setBoxLabelDocKey] = useState<string | null>(null);
     const [packBarcodeTemplate, setPackBarcodeTemplate] = useState<any>(null);
     const [boxBarcodeTemplate, setBoxBarcodeTemplate] = useState<any>(null);
     const [boxNetWeight, setBoxNetWeight] = useState(0);
@@ -475,6 +478,18 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
             .catch(() => { /* best-effort */ });
     }, [printerConfig]);
 
+    // Live pack-printer status from main-process pushes. Needed because merged
+    // record-and-print dispatches the print in main (no per-print promise to .then).
+    useEffect(() => {
+        const remove = window.electron.on('printer-status-update', (u: any) => {
+            const packId = (printerConfig.packPrinter as any)?.id;
+            if (!packId || !u || u.id !== packId) return;
+            if (u.status === 'error') setPrinterStatus('unreachable');
+            else if (u.status === 'connected') setPrinterStatus('ready');
+        });
+        return () => remove();
+    }, [printerConfig]);
+
     // Pre-upload static backgrounds for the current templates so first print is a cache hit.
     useEffect(() => {
         if (labelDoc) {
@@ -554,7 +569,9 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
 
             if (!selectedProduct) {
                 setLabelDoc(null);
+                setLabelDocKey(null);
                 setBoxLabelDoc(null);
+                setBoxLabelDocKey(null);
                 setPackBarcodeTemplate(null);
                 setBoxBarcodeTemplate(null);
                 return;
@@ -570,6 +587,7 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
                     if (doc && typeof doc.structure === 'string') {
                         pDoc = JSON.parse(doc.structure);
                         setLabelDoc(pDoc);
+                        setLabelDocKey(computeDocKey(doc.structure));
                     } else {
                         console.warn('DEBUG: Pack Label structure invalid or missing');
                     }
@@ -578,6 +596,7 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
                 }
             } else {
                 setLabelDoc(null);
+                setLabelDocKey(null);
             }
 
             // 2. Box Label
@@ -590,6 +609,7 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
                     if (doc && typeof doc.structure === 'string') {
                         bDoc = JSON.parse(doc.structure);
                         setBoxLabelDoc(bDoc);
+                        setBoxLabelDocKey(computeDocKey(doc.structure));
                     } else {
                         console.warn('DEBUG: Box Label structure invalid or missing', doc);
                     }
@@ -598,6 +618,7 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
                 }
             } else {
                 setBoxLabelDoc(null);
+                setBoxLabelDocKey(null);
             }
 
             // 3. Fetch Barcode Templates based on Label Definition
@@ -735,6 +756,7 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
             await window.electron.invoke('print-label', {
                 silent: true,
                 labelDoc: boxLabelDoc,
+                docKey: boxLabelDocKey || undefined,
                 data: boxData,
                 printerConfig: printerConfig.boxPrinter
             });
@@ -815,17 +837,27 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
             const expDatePack = new Date(labelingDate);
             expDatePack.setDate(labelingDate.getDate() + (selectedProduct?.exp_date || 0));
 
-            const recordResult = await window.electron.invoke('record-pack', {
-                number: predictedData.pack_number,
-                box_number: predictedBoxNum,
-                nomenclature_id: selectedProduct.id,
-                weight_netto: parseFloat(predictedData.weight_netto_pack),
-                weight_brutto: parseFloat(predictedData.weight_brutto_pack),
-                barcode_value: packBarcode,
-                station_number: stationNumber,
-                production_date: labelingDate.toISOString(),
-                expiration_date: expDatePack.toISOString(),
-                batch: batchNumber || ''
+            // 2+6 merged: the DB transaction AND the print dispatch happen in ONE
+            // main-process turn ('record-and-print') — the label starts generating
+            // before this renderer even receives the reply, removing a full IPC round
+            // trip plus the renderer event-loop requeue from every pack.
+            const recordResult = await window.electron.invoke('record-and-print', {
+                record: {
+                    number: predictedData.pack_number,
+                    box_number: predictedBoxNum,
+                    nomenclature_id: selectedProduct.id,
+                    weight_netto: parseFloat(predictedData.weight_netto_pack),
+                    weight_brutto: parseFloat(predictedData.weight_brutto_pack),
+                    barcode_value: packBarcode,
+                    station_number: stationNumber,
+                    production_date: labelingDate.toISOString(),
+                    expiration_date: expDatePack.toISOString(),
+                    batch: batchNumber || ''
+                },
+                labelDoc,
+                docKey: labelDocKey || undefined,
+                data: predictedData,
+                printerConfig: printerConfig.packPrinter || undefined
             });
 
             if (!recordResult.success) throw new Error('Database recording failed');
@@ -840,31 +872,34 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
             setCurrentBoxId(actualBoxId);
             setCurrentBoxNumber(actualBoxNumber);
 
-            // 4. Generate FINAL Label Data using the ACTUAL box number
-            // We override the box_number in dataObj
-            const finalPrintData = getLabelData();
-            finalPrintData.box_number = actualBoxNumber;
-            // Regenerate barcode with actual box number if it changed (though unlikely for pack label)
+            // Final label data = predicted data with the ACTUAL box number (verified:
+            // nothing else can differ — state is unchanged between the two computations).
+            const finalPrintData = { ...predictedData, box_number: actualBoxNumber };
 
-            // 5. Update pack record with final barcode in background (optional, for data integrity)
-            // But usually the barcode_value in pack table is used for re-printing.
-
-            // 6. Launch Printing in Background
-            window.electron.invoke('print-label', {
-                silent: true,
-                labelDoc,
-                data: finalPrintData,
-                printerConfig: printerConfig.packPrinter || undefined
-            })
-                .then((ok: any) => {
-                    if (printerConfig.packPrinter) setPrinterStatus(ok === false ? 'unreachable' : 'ready');
-                    if (ok !== false) {
-                        const time = new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-                        setLastPrintInfo({ label: String(finalPrintData.pack_number || ''), time });
-                        if (!isAuto) showPrintToast(t('ws.printSentToast'));
-                    }
+            if (recordResult.printDispatched) {
+                // Print already queued in main. Failures surface via the
+                // printer-status-update push listener; record success optimistically.
+                const time = new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+                setLastPrintInfo({ label: String(finalPrintData.pack_number || ''), time });
+                if (!isAuto) showPrintToast(t('ws.printSentToast'));
+            } else if (printerConfig.packPrinter) {
+                // Browser-protocol printer — worker-window path stays renderer-driven.
+                window.electron.invoke('print-label', {
+                    silent: true,
+                    labelDoc,
+                    data: finalPrintData,
+                    printerConfig: printerConfig.packPrinter
                 })
-                .catch(err => { console.error('Background Printing Error:', err); if (printerConfig.packPrinter) setPrinterStatus('unreachable'); });
+                    .then((ok: any) => {
+                        setPrinterStatus(ok === false ? 'unreachable' : 'ready');
+                        if (ok !== false) {
+                            const time = new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+                            setLastPrintInfo({ label: String(finalPrintData.pack_number || ''), time });
+                            if (!isAuto) showPrintToast(t('ws.printSentToast'));
+                        }
+                    })
+                    .catch(err => { console.error('Background Printing Error:', err); setPrinterStatus('unreachable'); });
+            }
 
             setLastPrinted({ doc: labelDoc, data: finalPrintData });
 
@@ -927,6 +962,7 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
                     window.electron.invoke('print-label', {
                         silent: true,
                         labelDoc: boxLabelDoc,
+                        docKey: boxLabelDocKey || undefined,
                         data: boxData,
                         printerConfig: printerConfig.boxPrinter || undefined
                     }).catch(err => console.error('Background Printing Error (Box):', err));

@@ -10,8 +10,10 @@ export interface IConnectionStrategy {
      * Returns null if the strategy has no read channel (e.g. Windows spooler) —
      * callers must treat null as "cannot probe" and fall back accordingly.
      * Returns a Buffer (possibly empty) when the strategy supports reading.
+     * If doneWhen is provided, resolves as soon as the accumulated reply satisfies it
+     * instead of always waiting out the full timeout.
      */
-    query?(data: Buffer, timeoutMs: number): Promise<Buffer | null>;
+    query?(data: Buffer, timeoutMs: number, doneWhen?: (accumulated: Buffer) => boolean): Promise<Buffer | null>;
 }
 
 export type PrinterStatus = 'connected' | 'disconnected' | 'error';

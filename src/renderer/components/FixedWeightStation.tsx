@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { Printer, RefreshCw, Box, AlertCircle, X, Hash, Calendar, Search, Scale, Package, Play, Square, CheckCircle2, Layers, Trash2 } from 'lucide-react';
 import { generateBarcode, type BarcodeData } from '../utils/barcodeGenerator';
+import { computeDocKey } from '../utils/docKey';
 import { printPalletSheet } from '../utils/palletPrint';
 import { useTranslation } from '../i18n';
 import NumericKeypad from './NumericKeypad';
@@ -23,6 +24,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
     const [weight, setWeight] = useState<string>('0.000');
     const [status, setStatus] = useState<string>('disconnected');
     const [labelDoc, setLabelDoc] = useState<any>(null);
+    const [labelDocKey, setLabelDocKey] = useState<string | null>(null);
     const [products, setProducts] = useState<any[]>([]);
     const [selectedProduct, setSelectedProduct] = useState<any | null>(null);
     const [isProductModalOpen, setIsProductModalOpen] = useState(false);
@@ -30,6 +32,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
     const [numberingConfig, setNumberingConfig] = useState<any>(null);
     const [containers, setContainers] = useState<any[]>([]);
     const [boxLabelDoc, setBoxLabelDoc] = useState<any>(null);
+    const [boxLabelDocKey, setBoxLabelDocKey] = useState<string | null>(null);
     const [packBarcodeTemplate, setPackBarcodeTemplate] = useState<any>(null);
     const [boxBarcodeTemplate, setBoxBarcodeTemplate] = useState<any>(null);
     const [boxNetWeight, setBoxNetWeight] = useState(0);
@@ -312,6 +315,18 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
             .catch(() => { /* best-effort */ });
     }, [printerConfig]);
 
+    // Live pack-printer status from main-process pushes. Needed because merged
+    // record-and-print dispatches the print in main (no per-print promise to .then).
+    useEffect(() => {
+        const remove = window.electron.on('printer-status-update', (u: any) => {
+            const packId = (printerConfig.packPrinter as any)?.id;
+            if (!packId || !u || u.id !== packId) return;
+            if (u.status === 'error') setPrinterStatus('unreachable');
+            else if (u.status === 'connected') setPrinterStatus('ready');
+        });
+        return () => remove();
+    }, [printerConfig]);
+
     // Pre-upload static backgrounds for the current templates so first print is a cache hit.
     useEffect(() => {
         if (labelDoc) {
@@ -334,21 +349,21 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
     // Fetch labels & barcodes
     useEffect(() => {
         const fetchLabelsAndBarcodes = async () => {
-            if (!selectedProduct) { setLabelDoc(null); setBoxLabelDoc(null); setPackBarcodeTemplate(null); setBoxBarcodeTemplate(null); return; }
+            if (!selectedProduct) { setLabelDoc(null); setLabelDocKey(null); setBoxLabelDoc(null); setBoxLabelDocKey(null); setPackBarcodeTemplate(null); setBoxBarcodeTemplate(null); return; }
             let pDoc = null;
             if (selectedProduct.templates_pack_label) {
                 try {
                     const doc = await window.electron.invoke('get-label', selectedProduct.templates_pack_label);
-                    if (doc?.structure) { pDoc = JSON.parse(doc.structure); setLabelDoc(pDoc); }
+                    if (doc?.structure) { pDoc = JSON.parse(doc.structure); setLabelDoc(pDoc); setLabelDocKey(computeDocKey(doc.structure)); }
                 } catch (err) { console.error(err); }
-            } else { setLabelDoc(null); }
+            } else { setLabelDoc(null); setLabelDocKey(null); }
             let bDoc = null;
             if (selectedProduct.templates_box_label) {
                 try {
                     const doc = await window.electron.invoke('get-label', selectedProduct.templates_box_label);
-                    if (doc?.structure) { bDoc = JSON.parse(doc.structure); setBoxLabelDoc(bDoc); }
+                    if (doc?.structure) { bDoc = JSON.parse(doc.structure); setBoxLabelDoc(bDoc); setBoxLabelDocKey(computeDocKey(doc.structure)); }
                 } catch (err) { console.error(err); }
-            } else { setBoxLabelDoc(null); }
+            } else { setBoxLabelDoc(null); setBoxLabelDocKey(null); }
             const fetchBarcode = async (doc: any, setFn: (t: any) => void) => {
                 if (!doc) return setFn(null);
                 const items = doc.elements || doc.objects;
@@ -423,14 +438,22 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
             }
             const expDatePack = new Date(labelingDate);
             expDatePack.setDate(labelingDate.getDate() + (selectedProduct?.exp_date || 0));
-            const recordResult = await window.electron.invoke('record-pack', {
-                number: predictedData.pack_number, box_number: predictedBoxNum,
-                nomenclature_id: selectedProduct.id,
-                weight_netto: parseFloat(predictedData.weight_netto_pack),
-                weight_brutto: parseFloat(predictedData.weight_brutto_pack),
-                barcode_value: packBarcode, station_number: stationNumber,
-                production_date: labelingDate.toISOString(),
-                expiration_date: expDatePack.toISOString(), batch: batchNumber || ''
+            // Merged record+print: DB transaction and print dispatch in one main-process
+            // turn — no second IPC round trip, no renderer event-loop requeue.
+            const recordResult = await window.electron.invoke('record-and-print', {
+                record: {
+                    number: predictedData.pack_number, box_number: predictedBoxNum,
+                    nomenclature_id: selectedProduct.id,
+                    weight_netto: parseFloat(predictedData.weight_netto_pack),
+                    weight_brutto: parseFloat(predictedData.weight_brutto_pack),
+                    barcode_value: packBarcode, station_number: stationNumber,
+                    production_date: labelingDate.toISOString(),
+                    expiration_date: expDatePack.toISOString(), batch: batchNumber || ''
+                },
+                labelDoc,
+                docKey: labelDocKey || undefined,
+                data: predictedData,
+                printerConfig: printerConfig.packPrinter || undefined
             });
             if (!recordResult.success) throw new Error('Database recording failed');
             const actualBoxNumber = recordResult.boxNumber;
@@ -439,21 +462,28 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
             setCurrentBoxId(actualBoxId);
             setCurrentBoxNumber(actualBoxNumber);
 
-            const finalPrintData = getLabelData();
-            finalPrintData.box_number = actualBoxNumber;
-            window.electron.invoke('print-label', {
-                silent: true, labelDoc, data: finalPrintData,
-                printerConfig: printerConfig.packPrinter || undefined
-            })
-                .then((ok: any) => {
-                    if (printerConfig.packPrinter) setPrinterStatus(ok === false ? 'unreachable' : 'ready');
-                    if (ok !== false) {
-                        const time = new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-                        setLastPrintInfo({ label: String(finalPrintData.pack_number || ''), time });
-                        if (!isAuto) showPrintToast(t('ws.printSentToast'));
-                    }
+            const finalPrintData = { ...predictedData, box_number: actualBoxNumber };
+            if (recordResult.printDispatched) {
+                // Print already queued in main; failures arrive via printer-status-update.
+                const time = new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+                setLastPrintInfo({ label: String(finalPrintData.pack_number || ''), time });
+                if (!isAuto) showPrintToast(t('ws.printSentToast'));
+            } else if (printerConfig.packPrinter) {
+                // Browser-protocol printer — worker-window path stays renderer-driven.
+                window.electron.invoke('print-label', {
+                    silent: true, labelDoc, data: finalPrintData,
+                    printerConfig: printerConfig.packPrinter
                 })
-                .catch((err: any) => { console.error(err); if (printerConfig.packPrinter) setPrinterStatus('unreachable'); });
+                    .then((ok: any) => {
+                        setPrinterStatus(ok === false ? 'unreachable' : 'ready');
+                        if (ok !== false) {
+                            const time = new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+                            setLastPrintInfo({ label: String(finalPrintData.pack_number || ''), time });
+                            if (!isAuto) showPrintToast(t('ws.printSentToast'));
+                        }
+                    })
+                    .catch((err: any) => { console.error(err); setPrinterStatus('unreachable'); });
+            }
             setLastPrinted({ doc: labelDoc, data: finalPrintData });
 
             const currentNetWeight = parseFloat(finalPrintData.weight_netto_pack);
@@ -501,7 +531,11 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
         const isDefaultZeros = !resolvedBarcode || /^0+$/.test(resolvedBarcode);
         const finalBarcode = isDefaultZeros ? ((baseData as any)['Код ШК'] || selectedProduct?.barcode || selectedProduct?.article || '0000000000000') : resolvedBarcode;
         const boxData = { ...baseData, is_box: true, count: boxLimit, pack_counter: String(finalUnitsInBox), weight_netto: finalBoxWeight.toFixed(3), barcode: finalBarcode };
-        await window.electron.invoke('print-label', { silent: true, labelDoc: boxLabelDoc, data: boxData, printerConfig: printerConfig.boxPrinter || undefined });
+        // Fire-and-forget: the box-label send (150ms TCP … seconds on serial) must not block
+        // the next stable-weight pack — the main-process queues preserve output order.
+        // close-box stays awaited: the next record-pack must see this box as closed.
+        window.electron.invoke('print-label', { silent: true, labelDoc: boxLabelDoc, docKey: boxLabelDocKey || undefined, data: boxData, printerConfig: printerConfig.boxPrinter || undefined })
+            .catch((err: any) => console.error('[printBoxLabel] print failed', err));
         const boxCont = containers.find(c => c.id === selectedProduct?.box_container_id);
         const brutBox = finalBoxWeight + (boxCont?.weight || 0) / 1000;
         await window.electron.invoke('close-box', { boxId, weightNetto: finalBoxWeight, weightBrutto: brutBox });
@@ -539,6 +573,12 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
         setCountCurrentPack(0);
 
         const fixedWeightKg = (selectedProduct.fixed_weight_grams || 0) / 1000;
+
+        // Pipeline depth 1: we await the PREVIOUS label's print, not the current one.
+        // The main process already pipelines gen(N+1) with send(N); awaiting the current
+        // print here used to keep exactly one label in flight and added a flat 200ms
+        // sleep — 2-3x slower batches. Depth 1 keeps cancel responsive (≤2 labels lag).
+        let prevPrint: Promise<any> = Promise.resolve();
 
         // Local counters — React state is batched and won't update mid-loop
         let localTotalUnits = totalUnits;
@@ -600,10 +640,20 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
 
                     const finalData = getLabelData(fixedWeightKg, false, undefined, overrides);
                     finalData.box_number = recordResult.boxNumber;
-                    await window.electron.invoke('print-label', {
-                        silent: true, labelDoc, data: finalData,
+                    // Wait for label N-1 (its send overlapped our record-pack), then
+                    // dispatch label N without awaiting it. Order is preserved by the
+                    // main-process queues; a failed print aborts the batch on the next lap.
+                    await prevPrint;
+                    if (cancelCountRef.current) break;
+                    prevPrint = window.electron.invoke('print-label', {
+                        silent: true, labelDoc, docKey: labelDocKey || undefined, data: finalData,
                         printerConfig: printerConfig.packPrinter || undefined
-                    });
+                    }).then((ok: any) => {
+                        if (ok === false) {
+                            cancelCountRef.current = true;
+                            if (printerConfig.packPrinter) setPrinterStatus('unreachable');
+                        }
+                    }).catch(() => { cancelCountRef.current = true; });
 
                     const netW = parseFloat(finalData.weight_netto_pack);
                     localTotalUnits++;
@@ -618,8 +668,10 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                     setCurrentBoxId(localCurrentBoxId);
                     setCurrentBoxNumber(localCurrentBoxNumber);
 
-                    // Auto print box label when pack count reached
+                    // Auto print box label when pack count reached. Drain the pack pipeline
+                    // first so the box label lands after its last pack on a shared printer.
                     if (boxPacksCompleted >= packsPerBoxInput) {
+                        await prevPrint;
                         await printBoxLabel(localBoxNetWeight, packsPerBoxInput, recordResult.boxNumber, recordResult.boxId);
                         localUnitsInBox = 0;
                         localBoxNetWeight = 0;
@@ -635,10 +687,12 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                     setAlertMessage(`${t('ws.errorPrefix')}: ${err instanceof Error ? err.message : String(err)}`);
                     cancelCountRef.current = true; break;
                 }
-                // Small delay between prints
-                await new Promise(r => setTimeout(r, 200));
+                // No artificial delay: record-pack/print awaits already yield the event
+                // loop each lap, and the printer paces itself via the send queue.
             }
         }
+        // Drain the pipeline so the last label's outcome lands before we finish.
+        await prevPrint.catch(() => { /* already handled via cancelCountRef */ });
         // Final sync of all local counters to React state
         setTotalUnits(localTotalUnits);
         setTotalBoxes(localTotalBoxes);

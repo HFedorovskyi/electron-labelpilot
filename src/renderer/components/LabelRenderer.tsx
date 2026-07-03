@@ -344,7 +344,12 @@ const BarcodeElement = ({ el, processText, style }: { el: any; processText: (t: 
 
         // bwip-js is the heaviest renderer dependency and is ONLY needed here (preview /
         // browser-print). Load it lazily so it isn't bundled into the main app chunk.
+        // The pending counter lets PrintView hold 'ready-to-print' until every barcode
+        // has actually drawn — a bare double-RAF raced this async chunk load on a cold
+        // worker window and could capture the page with blank barcodes.
+        (window as any).__pendingBarcodes = ((window as any).__pendingBarcodes || 0) + 1;
         (async () => {
+            try {
             let bwipjs: any;
             try {
                 bwipjs = (await import('bwip-js')).default;
@@ -384,6 +389,9 @@ const BarcodeElement = ({ el, processText, style }: { el: any; processText: (t: 
                 } catch {
                     try { render('code128', cleanValue, false); } catch (e) { console.error('Barcode render failed', e); }
                 }
+            }
+            } finally {
+                (window as any).__pendingBarcodes = Math.max(0, ((window as any).__pendingBarcodes || 1) - 1);
             }
         })();
 

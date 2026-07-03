@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { ClipboardList, Play, Printer, RefreshCw, Upload, CheckCircle2, Clock, Loader2, Trash2, Box, Hash, Calendar, AlertCircle, Layers, ArrowLeft } from 'lucide-react';
 import { printPalletSheet } from '../utils/palletPrint';
 import { generateBarcode, type BarcodeData } from '../utils/barcodeGenerator';
+import { computeDocKey } from '../utils/docKey';
 import { useTranslation } from '../i18n';
 import DatePickerModal from './DatePickerModal';
 import DeleteItemsModal from './DeleteItemsModal';
@@ -33,7 +34,9 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
     const [activeJob, setActiveJob] = useState<PrintJobData | null>(null);
     const [product, setProduct] = useState<any | null>(null);
     const [labelDoc, setLabelDoc] = useState<any>(null);
+    const [labelDocKey, setLabelDocKey] = useState<string | null>(null);
     const [boxLabelDoc, setBoxLabelDoc] = useState<any>(null);
+    const [boxLabelDocKey, setBoxLabelDocKey] = useState<string | null>(null);
     const [packBarcodeTemplate, setPackBarcodeTemplate] = useState<any>(null);
     const [boxBarcodeTemplate, setBoxBarcodeTemplate] = useState<any>(null);
     const [containers, setContainers] = useState<any[]>([]);
@@ -158,6 +161,18 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
             .catch(() => { /* best-effort */ });
     }, [printerConfig]);
 
+    // Live pack-printer status from main-process pushes. Needed because merged
+    // record-and-print dispatches the print in main (no per-print promise to .then).
+    useEffect(() => {
+        const remove = window.electron.on('printer-status-update', (u: any) => {
+            const packId = (printerConfig.packPrinter as any)?.id;
+            if (!packId || !u || u.id !== packId) return;
+            if (u.status === 'error') setPrinterStatus('unreachable');
+            else if (u.status === 'connected') setPrinterStatus('ready');
+        });
+        return () => remove();
+    }, [printerConfig]);
+
     // Pre-upload static backgrounds for the current templates so first print is a cache hit.
     useEffect(() => {
         if (labelDoc) {
@@ -204,7 +219,9 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
         const fetchLabels = async () => {
             if (!product) {
                 setLabelDoc(null);
+                setLabelDocKey(null);
                 setBoxLabelDoc(null);
+                setBoxLabelDocKey(null);
                 setPackBarcodeTemplate(null);
                 setBoxBarcodeTemplate(null);
                 return;
@@ -214,17 +231,17 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
             if (product.templates_pack_label) {
                 try {
                     const doc = await window.electron.invoke('get-label', product.templates_pack_label);
-                    if (doc?.structure) { pDoc = JSON.parse(doc.structure); setLabelDoc(pDoc); }
+                    if (doc?.structure) { pDoc = JSON.parse(doc.structure); setLabelDoc(pDoc); setLabelDocKey(computeDocKey(doc.structure)); }
                 } catch (e) { console.error(e); }
-            } else { setLabelDoc(null); }
+            } else { setLabelDoc(null); setLabelDocKey(null); }
 
             let bDoc = null;
             if (product.templates_box_label) {
                 try {
                     const doc = await window.electron.invoke('get-label', product.templates_box_label);
-                    if (doc?.structure) { bDoc = JSON.parse(doc.structure); setBoxLabelDoc(bDoc); }
+                    if (doc?.structure) { bDoc = JSON.parse(doc.structure); setBoxLabelDoc(bDoc); setBoxLabelDocKey(computeDocKey(doc.structure)); }
                 } catch (e) { console.error(e); }
-            } else { setBoxLabelDoc(null); }
+            } else { setBoxLabelDoc(null); setBoxLabelDocKey(null); }
 
             const fetchBarcode = async (doc: any, setFn: (t: any) => void) => {
                 if (!doc) return setFn(null);
@@ -407,7 +424,11 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
         const isDefaultZeros = !resolvedBarcode || /^0+$/.test(resolvedBarcode);
         const finalBarcode = isDefaultZeros ? ((baseData as any)['Код ШК'] || product?.barcode || product?.article || '0000000000000') : resolvedBarcode;
         const boxData = { ...baseData, is_box: true, count: boxLimit, pack_counter: String(finalUnitsInBox), weight_netto: finalBoxWeight.toFixed(3), barcode: finalBarcode };
-        await window.electron.invoke('print-label', { silent: true, labelDoc: boxLabelDoc, data: boxData, printerConfig: printerConfig.boxPrinter || undefined });
+        // Fire-and-forget: the box-label send (150ms TCP … seconds on serial) must not block
+        // the next pack — the main-process queues preserve output order.
+        // close-box stays awaited: the next record-pack must see this box as closed.
+        window.electron.invoke('print-label', { silent: true, labelDoc: boxLabelDoc, docKey: boxLabelDocKey || undefined, data: boxData, printerConfig: printerConfig.boxPrinter || undefined })
+            .catch((err: any) => console.error('[printBoxLabel] print failed', err));
         const boxCont = containers.find(c => c.id === product?.box_container_id);
         const brutBox = finalBoxWeight + (boxCont?.weight || 0) / 1000;
         await window.electron.invoke('close-box', { boxId, weightNetto: finalBoxWeight, weightBrutto: brutBox });
@@ -450,28 +471,36 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
         const expDatePack = new Date(labelingDate);
         expDatePack.setDate(labelingDate.getDate() + (product?.exp_date || 0));
 
-        const recordResult = await window.electron.invoke('record-pack', {
-            number: predictedData.pack_number, box_number: predictedBoxNum,
-            nomenclature_id: product.id,
-            weight_netto: parseFloat(predictedData.weight_netto_pack),
-            weight_brutto: parseFloat(predictedData.weight_brutto_pack),
-            barcode_value: packBarcode, station_number: stationNumber,
-            production_date: labelingDate.toISOString(),
-            expiration_date: expDatePack.toISOString(), batch: batchNumber
+        // Merged record+print: DB transaction and print dispatch in one main-process
+        // turn — no second IPC round trip, no renderer event-loop requeue.
+        const recordResult = await window.electron.invoke('record-and-print', {
+            record: {
+                number: predictedData.pack_number, box_number: predictedBoxNum,
+                nomenclature_id: product.id,
+                weight_netto: parseFloat(predictedData.weight_netto_pack),
+                weight_brutto: parseFloat(predictedData.weight_brutto_pack),
+                barcode_value: packBarcode, station_number: stationNumber,
+                production_date: labelingDate.toISOString(),
+                expiration_date: expDatePack.toISOString(), batch: batchNumber
+            },
+            labelDoc,
+            docKey: labelDocKey || undefined,
+            data: predictedData,
+            printerConfig: printerConfig.packPrinter || undefined
         });
 
         if (!recordResult.success) throw new Error('Database recording failed');
 
-        const finalData = getLabelData(packWeight, false, undefined, overrides);
-        finalData.box_number = recordResult.boxNumber;
-        // Fire-and-forget: UI doesn't depend on print success, and main-process queue preserves order.
-        // Lets this function return as soon as DB is recorded, shaving an IPC roundtrip off perceived latency.
-        window.electron.invoke('print-label', {
-            silent: true, labelDoc, data: finalData,
-            printerConfig: printerConfig.packPrinter || undefined
-        })
-            .then((ok: any) => { if (printerConfig.packPrinter) setPrinterStatus(ok === false ? 'unreachable' : 'ready'); })
-            .catch((e: any) => { console.error('[printSinglePack] print failed', e); if (printerConfig.packPrinter) setPrinterStatus('unreachable'); });
+        const finalData = { ...predictedData, box_number: recordResult.boxNumber };
+        if (!recordResult.printDispatched && printerConfig.packPrinter) {
+            // Browser-protocol printer — worker-window path stays renderer-driven.
+            window.electron.invoke('print-label', {
+                silent: true, labelDoc, data: finalData,
+                printerConfig: printerConfig.packPrinter
+            })
+                .then((ok: any) => { setPrinterStatus(ok === false ? 'unreachable' : 'ready'); })
+                .catch((e: any) => { console.error('[printSinglePack] print failed', e); setPrinterStatus('unreachable'); });
+        }
         setLastPrinted({ doc: labelDoc, data: finalData });
         const time = new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
         setLastPrintInfo({ label: String(finalData.pack_number || ''), time });

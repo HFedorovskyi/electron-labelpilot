@@ -1,6 +1,13 @@
 import { useEffect, useState } from 'react';
 import LabelRenderer from './LabelRenderer';
 
+// Warm the bwip-js chunk as soon as the print worker window boots. Barcode elements
+// lazy-import it, and on a cold worker the chunk fetch + parse would otherwise start
+// only when print-data arrives — pure added latency before the first label.
+if (typeof window !== 'undefined' && window.location.search.includes('print=true')) {
+    import('bwip-js').catch(() => { /* barcode elements will retry and log */ });
+}
+
 const PrintView = () => {
     const [printData, setPrintData] = useState<{ labelDoc: any; data: any } | null>(null);
 
@@ -14,14 +21,29 @@ const PrintView = () => {
     }, []);
 
     useEffect(() => {
-        if (printData) {
-            // Double RAF ensures the browser has painted the barcode and text
+        if (!printData) return;
+        let cancelled = false;
+        const startedAt = Date.now();
+        const MAX_WAIT_MS = 5000; // the main process keeps its own 15s backstop
+
+        // Wait until every barcode canvas finished its async render (bwip-js is lazy-
+        // loaded — a bare double RAF raced the chunk load on a cold worker window and
+        // could capture blank barcodes), then give the browser two frames to paint.
+        const check = () => {
+            if (cancelled) return;
+            const pending = (window as any).__pendingBarcodes || 0;
+            if (pending > 0 && Date.now() - startedAt < MAX_WAIT_MS) {
+                setTimeout(check, 16);
+                return;
+            }
             requestAnimationFrame(() => {
                 requestAnimationFrame(() => {
-                    window.electron.send('ready-to-print', {});
+                    if (!cancelled) window.electron.send('ready-to-print', {});
                 });
             });
-        }
+        };
+        check();
+        return () => { cancelled = true; };
     }, [printData]);
 
     if (!printData) return <div style={{ color: 'black' }}>Waiting for print data...</div>;

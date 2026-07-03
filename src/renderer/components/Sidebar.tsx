@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { Scale, Settings, Package, LogOut, ChevronLeft, Menu, Weight, ClipboardList, User, UserCog, KeyRound } from 'lucide-react';
 import clsx from 'clsx';
 import { useTranslation } from '../i18n';
@@ -20,6 +21,24 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, serverStatus
     const { t } = useTranslation();
     const { license } = useLicenseStatus(serverStatus);
     const { operator, isDemo, logout } = useSession();
+    // Reasons why the operator switch was refused (open box/pallet) — shown as a modal.
+    const [switchBlocked, setSwitchBlocked] = React.useState<string[] | null>(null);
+
+    // Operator switch is a clean-handover action: main refuses it while a box or
+    // pallet is still open, and we show the operator exactly what to close.
+    const handleSwitchOperator = async () => {
+        if (isDemo) return;
+        const res = await logout();
+        if (res.ok || res.reason !== 'open_entities') return;
+        const lines: string[] = [];
+        if ((res.openBoxCount ?? 0) > 0) {
+            lines.push(t('operator.switchBlockedBox', { num: res.openBoxNumber || '?' }));
+        }
+        if ((res.openPalletCount ?? 0) > 0) {
+            lines.push(t('operator.switchBlockedPallet'));
+        }
+        setSwitchBlocked(lines.length ? lines : [t('operator.switchBlockedGeneric')]);
+    };
 
     const menuItems = [
         { id: 'weighing', labelKey: 'sidebar.weighing', icon: Scale },
@@ -128,7 +147,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, serverStatus
                 {operator && (
                     isCollapsed ? (
                         <button
-                            onClick={() => { if (!isDemo) logout(); }}
+                            onClick={handleSwitchOperator}
                             title={`${operator.full_name}${isDemo ? '' : ' — ' + t('operator.switch')}`}
                             className={clsx(
                                 "flex items-center justify-center rounded-full border w-9 h-9 transition-colors",
@@ -149,7 +168,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, serverStatus
                             </div>
                             {!isDemo && (
                                 <button
-                                    onClick={() => logout()}
+                                    onClick={handleSwitchOperator}
                                     title={t('operator.switch')}
                                     className="flex items-center gap-1 shrink-0 px-2 py-1 rounded-lg bg-neutral-100 dark:bg-white/5 border border-neutral-200 dark:border-neutral-600 text-[10px] font-bold uppercase tracking-wider text-neutral-500 dark:text-neutral-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:border-emerald-300 dark:hover:border-emerald-500/40 transition-colors"
                                 >
@@ -176,6 +195,45 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, serverStatus
                     </div>
                 )}
             </div>
+
+            {/* Operator switch blocked — open box/pallet must be closed first.
+                Rendered via portal into <body>: the sidebar root has backdrop-blur,
+                and backdrop-filter on an ancestor turns it into the containing block
+                for position:fixed — without the portal the overlay gets trapped
+                inside the sidebar column instead of covering the screen.
+                Sized for 1366×768 touch kiosks: large type, big dismiss target. */}
+            {switchBlocked && createPortal(
+                <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setSwitchBlocked(null)}>
+                    <div
+                        className="mx-6 max-w-xl w-full rounded-3xl border-2 border-amber-400 dark:border-amber-500/60 bg-white dark:bg-neutral-900 p-8 shadow-2xl"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="flex items-center gap-4 mb-5">
+                            <div className="w-14 h-14 shrink-0 rounded-2xl bg-amber-100 dark:bg-amber-500/15 border border-amber-300 dark:border-amber-500/40 flex items-center justify-center">
+                                <UserCog className="w-8 h-8 text-amber-500" />
+                            </div>
+                            <h2 className="text-2xl font-bold text-neutral-900 dark:text-white leading-tight">{t('operator.switchBlockedTitle')}</h2>
+                        </div>
+                        <ul className="mb-7 space-y-3 text-lg text-neutral-700 dark:text-neutral-200">
+                            {switchBlocked.map((line, i) => (
+                                <li key={i} className="flex items-start gap-3">
+                                    <span className="mt-2 w-2.5 h-2.5 shrink-0 rounded-full bg-amber-500" />
+                                    <span>{line}</span>
+                                </li>
+                            ))}
+                        </ul>
+                        <div className="flex justify-end">
+                            <button
+                                onClick={() => setSwitchBlocked(null)}
+                                className="px-10 py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white text-lg font-bold transition-colors"
+                            >
+                                {t('operator.switchBlockedClose')}
+                            </button>
+                        </div>
+                    </div>
+                </div>,
+                document.body
+            )}
         </div>
     );
 };

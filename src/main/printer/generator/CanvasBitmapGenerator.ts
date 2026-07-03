@@ -12,19 +12,33 @@
  *   4. Lowered luminance threshold for crisper text on thermal printers
  */
 
-import log from '../../logger';
+import log from './glog';
 import path from 'path';
-import { app } from 'electron';
 import type { ILabelGenerator, LabelDoc, GeneratorOptions, LabelElement, TableColumn } from './types';
 import { createCanvas, type SKRSContext2D, GlobalFonts } from '@napi-rs/canvas';
 import { normalizeBarcodeType, shouldRasterizeBarcode, needsGs1Parse } from '../../../shared/barcodeTypes';
 
-// Register custom fonts
-try {
-    const isDev = !app.isPackaged;
-    const resourcesPath = isDev
-        ? path.join(process.cwd(), 'resources', 'fonts')
-        : path.join(process.resourcesPath, 'fonts');
+// ── Environment (worker-safe) ─────────────────────────────────────────
+// The generator runs both in the main process (fallback) and inside a worker_thread
+// (hot path), where the electron APIs are unavailable. Paths that used to come from
+// electron.app are injected instead: the main process auto-initializes below via
+// require('electron'); the worker entry calls initGeneratorEnvironment(workerData).
+export interface GeneratorEnvironment {
+    fontsDir: string;
+    logsDir: string;
+}
+
+let generatorEnv: GeneratorEnvironment = { fontsDir: '', logsDir: '' };
+let fontsRegistered = false;
+
+export function initGeneratorEnvironment(env: GeneratorEnvironment): void {
+    generatorEnv = env;
+    registerFontsOnce(env.fontsDir);
+}
+
+function registerFontsOnce(resourcesPath: string): void {
+    if (fontsRegistered || !resourcesPath) return;
+    fontsRegistered = true;
 
     const fonts = [
         { name: 'Inter', file: 'Inter-Regular.ttf', weight: 'normal' },
@@ -49,28 +63,45 @@ try {
 
     const fs = require('fs');
 
-    for (const font of fonts) {
-        // Try server_fonts subfolder first for 100% parity
-        const serverFontPath = path.join(resourcesPath, 'server_fonts', font.file);
-        const rootFontPath = path.join(resourcesPath, font.file);
+    try {
+        for (const font of fonts) {
+            // Try server_fonts subfolder first for 100% parity
+            const serverFontPath = path.join(resourcesPath, 'server_fonts', font.file);
+            const rootFontPath = path.join(resourcesPath, font.file);
 
-        const finalPath = fs.existsSync(serverFontPath) ? serverFontPath : rootFontPath;
+            const finalPath = fs.existsSync(serverFontPath) ? serverFontPath : rootFontPath;
 
-        if (fs.existsSync(finalPath)) {
-            // @ts-ignore
-            GlobalFonts.registerFromPath(finalPath, font.name);
-            log.info(`[CanvasBitmapGenerator] Registered font "${font.name}" (${font.weight}) from ${finalPath}`);
-        } else {
-            // Not bundled. On Windows/macOS @napi-rs/canvas resolves standard families
-            // (Arial, Times New Roman, Courier New, Georgia, Verdana) from system fonts,
-            // so this is benign there — only debug-level noise, not a real failure.
-            log.debug(`[CanvasBitmapGenerator] Font "${font.name}" not bundled; will use a system font if available (searched ${serverFontPath})`);
+            if (fs.existsSync(finalPath)) {
+                // @ts-ignore
+                GlobalFonts.registerFromPath(finalPath, font.name);
+                log.info(`[CanvasBitmapGenerator] Registered font "${font.name}" (${font.weight}) from ${finalPath}`);
+            } else {
+                // Not bundled. On Windows/macOS @napi-rs/canvas resolves standard families
+                // (Arial, Times New Roman, Courier New, Georgia, Verdana) from system fonts,
+                // so this is benign there — only debug-level noise, not a real failure.
+                log.debug(`[CanvasBitmapGenerator] Font "${font.name}" not bundled; will use a system font if available (searched ${serverFontPath})`);
+            }
         }
+    } catch (e) {
+        log.error(`[CanvasBitmapGenerator] Failed to register fonts:`, e);
     }
-
-} catch (e) {
-    log.error(`[CanvasBitmapGenerator] Failed to register fonts:`, e);
 }
+
+// Main-process auto-init (matches the old top-level behavior). Inside a worker_thread
+// require('electron') throws and the worker entry initializes with workerData instead.
+try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { app } = require('electron');
+    if (app) {
+        const isDev = !app.isPackaged;
+        initGeneratorEnvironment({
+            fontsDir: isDev
+                ? path.join(process.cwd(), 'resources', 'fonts')
+                : path.join(process.resourcesPath, 'fonts'),
+            logsDir: app.getPath('logs'),
+        });
+    }
+} catch { /* worker thread — initGeneratorEnvironment(workerData) runs from worker.ts */ }
 
 // Cached compressed static layer for the 'inline' path. Holds the already-RLE-encoded
 // hex string so we don't re-canvas the static layer on every print when the printer
@@ -128,22 +159,27 @@ export class CanvasBitmapGenerator implements ILabelGenerator {
     // Holds the compressed static-layer hex per cache key, so the inline path
     // doesn't re-render/compress the static layer on every print. The payload
     // still travels in every job — we just skip the canvas + RLE work.
-    private static get inlineStaticCache(): Map<string, Map<string, InlineStaticEntry>> {
+    // Shared across printers: the cacheKey derives from template content + dimensions
+    // only (bgName is a structural hash), so identical printers on two lines reuse
+    // one entry instead of each paying a full static render. Bounded — big labels
+    // reach ~100-300KB per entry; oldest evicted first.
+    private static readonly INLINE_CACHE_MAX = 40;
+    private static get inlineStaticCache(): Map<string, InlineStaticEntry> {
         const g = global as any;
-        if (!(g.zplInlineStaticCache instanceof Map)) {
-            g.zplInlineStaticCache = new Map<string, Map<string, InlineStaticEntry>>();
+        // V2: flat shared Map (legacy zplInlineStaticCache was nested per-printer).
+        if (!(g.zplInlineStaticCacheV2 instanceof Map)) {
+            g.zplInlineStaticCacheV2 = new Map<string, InlineStaticEntry>();
         }
-        return g.zplInlineStaticCache;
+        return g.zplInlineStaticCacheV2;
     }
 
-    private static getInlineCacheForPrinter(printerId: string): Map<string, InlineStaticEntry> {
-        const map = CanvasBitmapGenerator.inlineStaticCache;
-        let m = map.get(printerId);
-        if (!m) {
-            m = new Map<string, InlineStaticEntry>();
-            map.set(printerId, m);
+    private static cacheInlineStatic(key: string, entry: InlineStaticEntry): void {
+        const cache = CanvasBitmapGenerator.inlineStaticCache;
+        cache.set(key, entry);
+        if (cache.size > CanvasBitmapGenerator.INLINE_CACHE_MAX) {
+            const oldest = cache.keys().next().value;
+            if (oldest !== undefined) cache.delete(oldest);
         }
-        return m;
     }
 
     private static isCacheDisabled(): boolean {
@@ -212,25 +248,25 @@ export class CanvasBitmapGenerator implements ILabelGenerator {
     }
 
     /**
-     * Clear the background cache (both RAM tracking and inline static cache).
-     * - With no argument: clear all printers (call after data sync — templates may have changed).
-     * - With a printerId: clear only that printer (call on reconnect — printer may have rebooted
-     *   and lost its RAM-stored graphics, or its RAM-cache decision was invalidated).
+     * Clear the background cache.
+     * - With no argument: clear everything (call after data sync — templates may have changed).
+     * - With a printerId: clear only that printer's RAM-drive upload tracking (call on
+     *   reconnect — the printer may have rebooted and lost its RAM-stored ~DG graphics).
+     *   The inline static cache is deliberately NOT touched here: its entries are pure JS
+     *   artifacts of template content — no printer state can invalidate them, and wiping
+     *   them on every transient send failure forced a pointless 30-150ms re-render.
      */
     static clearBackgroundCache(printerId?: string): void {
         const ramMap = CanvasBitmapGenerator.uploadedBackgrounds;
         const inlineMap = CanvasBitmapGenerator.inlineStaticCache;
         if (printerId) {
             const ramSize = ramMap.get(printerId)?.size || 0;
-            const inlineSize = inlineMap.get(printerId)?.size || 0;
             ramMap.delete(printerId);
-            inlineMap.delete(printerId);
-            log.info(`[CanvasBitmapGenerator] BG cache cleared for printer "${printerId}" (ram=${ramSize}, inline=${inlineSize})`);
+            log.info(`[CanvasBitmapGenerator] RAM upload tracking cleared for printer "${printerId}" (ram=${ramSize})`);
         } else {
             let ramTotal = 0;
-            let inlineTotal = 0;
             for (const s of ramMap.values()) ramTotal += s.size;
-            for (const m of inlineMap.values()) inlineTotal += m.size;
+            const inlineTotal = inlineMap.size;
             ramMap.clear();
             inlineMap.clear();
             const bcSize = CanvasBitmapGenerator.barcodeGfaCache.size;
@@ -320,17 +356,20 @@ export class CanvasBitmapGenerator implements ILabelGenerator {
      * part is expensive, and it comes from cache after the first print of a template.
      */
     private prepareLayout(doc: LabelDoc, options: GeneratorOptions): StructuralLayout & {
-        cacheKey: string; printerId: string;
+        cacheKey: string; printerId: string; z64: boolean;
         cacheDisabled: boolean; printerCache: Set<string> | null; bgCached: boolean;
     } {
         const s = this.computeStructure(doc, options);
-        const cacheKey = `${s.bgName}_${s.totalBytes}`;
+        const z64 = !!options.z64;
+        // Encoding is part of the key: toggling Z64 must not reuse an entry (or an
+        // already-uploaded GRF tracking record) produced with the other encoding.
+        const cacheKey = `${s.bgName}_${s.totalBytes}${z64 ? '_z64' : ''}`;
         const printerId = options.printerId || '__default__';
         const cacheDisabled = CanvasBitmapGenerator.isCacheDisabled();
         const printerCache = cacheDisabled ? null : CanvasBitmapGenerator.getCacheForPrinter(printerId);
         const bgCached = !!printerCache && printerCache.has(cacheKey);
 
-        return { ...s, cacheKey, printerId, cacheDisabled, printerCache, bgCached };
+        return { ...s, cacheKey, printerId, z64, cacheDisabled, printerCache, bgCached };
     }
 
     /**
@@ -357,7 +396,31 @@ export class CanvasBitmapGenerator implements ILabelGenerator {
 
         const staticImageData = sctx.getImageData(0, 0, printWidth, labelLength);
         const staticMono = this.rgbaToMono(staticImageData.data, printWidth, labelLength, bytesPerRow);
+        if (layout.z64) return CanvasBitmapGenerator.encodeZ64(staticMono);
         return this.compressZplRLE(staticMono, bytesPerRow, labelLength);
+    }
+
+    /**
+     * Zebra :Z64: envelope — zlib deflate + base64 + CRC-16/CCITT (XMODEM) over the
+     * base64 characters. Drops in as the DATA field of both ~DG and ^GFA. Typically
+     * 2-4x smaller than hex RLE for text-heavy static layers — the difference between
+     * ~6-11s and ~2-3s of wire time per label on 9600-baud serial inline printers.
+     */
+    private static encodeZ64(mono: Uint8Array): string {
+        const zlib = require('zlib');
+        const b64 = zlib.deflateSync(Buffer.from(mono.buffer, mono.byteOffset, mono.byteLength)).toString('base64');
+        return `:Z64:${b64}:${CanvasBitmapGenerator.crc16ccitt(b64)}`;
+    }
+
+    private static crc16ccitt(s: string): string {
+        let crc = 0x0000; // XMODEM: poly 0x1021, init 0x0000
+        for (let i = 0; i < s.length; i++) {
+            crc ^= s.charCodeAt(i) << 8;
+            for (let b = 0; b < 8; b++) {
+                crc = (crc & 0x8000) ? ((crc << 1) ^ 0x1021) & 0xFFFF : (crc << 1) & 0xFFFF;
+            }
+        }
+        return crc.toString(16).toUpperCase().padStart(4, '0');
     }
 
     /**
@@ -385,14 +448,13 @@ export class CanvasBitmapGenerator implements ILabelGenerator {
         layout: ReturnType<CanvasBitmapGenerator['prepareLayout']>,
         data: Record<string, any>,
     ): Promise<{ entry: InlineStaticEntry; fromCache: boolean }> {
-        const { cacheKey, printerId, bytesPerRow, totalBytes, cacheDisabled } = layout;
-        const cache = cacheDisabled ? null : CanvasBitmapGenerator.getInlineCacheForPrinter(printerId);
-        const hit = cache?.get(cacheKey);
+        const { cacheKey, bytesPerRow, totalBytes, cacheDisabled } = layout;
+        const hit = cacheDisabled ? undefined : CanvasBitmapGenerator.inlineStaticCache.get(cacheKey);
         if (hit) return { entry: hit, fromCache: true };
 
         const compressed = await this.renderStaticCompressed(layout, data);
         const entry: InlineStaticEntry = { compressed, totalBytes, bytesPerRow };
-        if (cache) cache.set(cacheKey, entry);
+        if (!cacheDisabled) CanvasBitmapGenerator.cacheInlineStatic(cacheKey, entry);
         return { entry, fromCache: false };
     }
 
@@ -407,8 +469,22 @@ export class CanvasBitmapGenerator implements ILabelGenerator {
         if (layout.bgCached) return null;
 
         const { dg } = await this.renderStaticDgCommand(layout, {});
+        const prefix = CanvasBitmapGenerator.ramWipePrefix(layout.printerCache);
         if (layout.printerCache) layout.printerCache.add(layout.cacheKey);
-        return Buffer.from(dg, 'utf-8');
+        return Buffer.from(prefix + dg, 'utf-8');
+    }
+
+    /**
+     * Before the FIRST ~DG upload of a session for a printer, wipe stale BG*.GRF files
+     * from its R: drive. Old template revisions are never referenced again (bgName is a
+     * content hash), and printers powered for weeks would otherwise accumulate dead GRFs
+     * until R: fills and ~DG starts silently failing → blank backgrounds. The upload
+     * tracking set is per-process, so "set is empty" ⇔ nothing uploaded this session —
+     * the wipe can never delete a graphic we still expect to recall.
+     */
+    private static ramWipePrefix(printerCache: Set<string> | null): string {
+        const firstUpload = !printerCache || printerCache.size === 0;
+        return firstUpload ? '^XA^IDR:BG*.GRF^XZ\n' : '';
     }
 
     async generate(doc: LabelDoc, data: Record<string, any>, options: GeneratorOptions): Promise<Buffer> {
@@ -438,7 +514,7 @@ export class CanvasBitmapGenerator implements ILabelGenerator {
                 `^FO0,0^GFA,${entry.totalBytes},${entry.totalBytes},${entry.bytesPerRow},${entry.compressed}^FS\n`;
         } else if (!bgCached) {
             const result = await this.renderStaticDgCommand(layout, data);
-            staticDgCommand = result.dg;
+            staticDgCommand = CanvasBitmapGenerator.ramWipePrefix(printerCache) + result.dg;
             staticCompressedLen = result.compressedLen;
             if (printerCache) printerCache.add(layout.cacheKey);
         }
@@ -517,7 +593,8 @@ export class CanvasBitmapGenerator implements ILabelGenerator {
         if (process.env.LABELPILOT_DEBUG_ZPL === '1') {
             try {
                 const fs = require('fs');
-                const debugPath = path.join(app.getPath('logs'), `debug_label_${Date.now()}.zpl`);
+                const os = require('os');
+                const debugPath = path.join(generatorEnv.logsDir || os.tmpdir(), `debug_label_${Date.now()}.zpl`);
                 fs.promises.writeFile(debugPath, zpl).catch(() => { /* fire-and-forget */ });
             } catch (e) {
                 log.error(`[CanvasBitmapGenerator] DEBUG: Failed to dump ZPL`, e);
@@ -859,6 +936,18 @@ export class CanvasBitmapGenerator implements ILabelGenerator {
         const cached = CanvasBitmapGenerator.barcodeGfaCache.get(cacheKey);
         if (cached !== undefined) return cached;
 
+        // Fast path: BWIPP raw() → mono bits directly. Skips PNG encode → PNG decode →
+        // canvas → getImageData → per-pixel mono scan (~5-15ms per unique value on a weak
+        // CPU — and weigh-label GS1 values are unique per label, so this IS the hot path).
+        // Only when no human-readable line is needed (raw() emits no text) and no rotation.
+        if (!showText && rotation === 0) {
+            const fast = this.tryRenderBarcodeRawGfa(bcid, value, w, h, x, y);
+            if (fast) {
+                CanvasBitmapGenerator.cacheBarcodeGfa(cacheKey, fast);
+                return fast;
+            }
+        }
+
         try {
             const png = await this.rasterizeBarcodePng(bcid, value, showText);
             const { loadImage } = require('@napi-rs/canvas');
@@ -905,6 +994,86 @@ export class CanvasBitmapGenerator implements ILabelGenerator {
         } catch (e) {
             log.error(`[CanvasBitmapGenerator] barcode raster failed for bcid="${bcid}" value="${value}":`, e);
             return ''; // Never emit a wrong-but-scannable fallback — skip instead.
+        }
+    }
+
+    /**
+     * BWIPP raw() → ^GFA without the PNG/canvas roundtrip. The encoder already knows the
+     * 1-bit modules; we scale them into the element box with the same nearest-neighbor
+     * mapping drawImage used (imageSmoothingEnabled=false), so geometry matches the slow path.
+     * Handles: 2D matrix output (pixs/pixx/pixy — DataMatrix, QR, Aztec, PDF417) and
+     * uniform-height 1D (sbs — GS1-128 etc.). Anything else (stacked composites, per-bar
+     * heights like DataBar, encoder errors) returns null → caller falls back to the PNG
+     * path with its progressive-fallback chain.
+     */
+    private tryRenderBarcodeRawGfa(bcid: string, value: string, w: number, h: number, foX: number, foY: number): string | null {
+        try {
+            const bwip = CanvasBitmapGenerator.getBwip();
+            if (typeof bwip.raw !== 'function') return null;
+
+            const parse = needsGs1Parse(bcid, value);
+            const items = bwip.raw({ bcid, text: value, parse });
+            if (!Array.isArray(items) || items.length !== 1) return null; // composites → slow path
+
+            const item = items[0];
+            const bytesPerRow = Math.ceil(w / 8);
+            let mono: Uint8Array;
+
+            if (item.pixs && item.pixx > 0 && item.pixy > 0) {
+                // ── 2D matrix: nearest-neighbor scale pixx×pixy into w×h ──
+                const { pixs, pixx, pixy } = item;
+                mono = new Uint8Array(bytesPerRow * h);
+                for (let yy = 0; yy < h; yy++) {
+                    const sy = Math.min(pixy - 1, Math.floor(((yy + 0.5) * pixy) / h));
+                    const rowOff = yy * bytesPerRow;
+                    const srcOff = sy * pixx;
+                    for (let xx = 0; xx < w; xx++) {
+                        const sx = Math.min(pixx - 1, Math.floor(((xx + 0.5) * pixx) / w));
+                        if (pixs[srcOff + sx]) mono[rowOff + (xx >> 3)] |= (0x80 >> (xx & 7));
+                    }
+                }
+            } else if (Array.isArray(item.sbs) && item.sbs.length > 0) {
+                // ── 1D linear: only when all bars share height/baseline (GS1-128 does;
+                // DataBar-style variable bars go to the slow path). ──
+                if (item.bhs && new Set(item.bhs).size > 1) return null;
+                if (item.bbs && new Set(item.bbs).size > 1) return null;
+
+                const sbs: number[] = item.sbs;
+                let totalModules = 0;
+                for (const run of sbs) totalModules += run;
+                if (totalModules <= 0) return null;
+
+                // Module map: sbs alternates bar,space,… starting with a bar.
+                const mod = new Uint8Array(totalModules);
+                let pos = 0;
+                let isBar = true;
+                for (const run of sbs) {
+                    if (isBar) mod.fill(1, pos, pos + run);
+                    pos += run;
+                    isBar = !isBar;
+                }
+
+                // One row of target pixels; all h rows are identical (RLE collapses them
+                // to a single row + ':' repeats, so the payload is tiny too).
+                const rowBits = new Uint8Array(bytesPerRow);
+                for (let xx = 0; xx < w; xx++) {
+                    const sx = Math.min(totalModules - 1, Math.floor(((xx + 0.5) * totalModules) / w));
+                    if (mod[sx]) rowBits[xx >> 3] |= (0x80 >> (xx & 7));
+                }
+                mono = new Uint8Array(bytesPerRow * h);
+                for (let yy = 0; yy < h; yy++) mono.set(rowBits, yy * bytesPerRow);
+            } else {
+                return null;
+            }
+
+            const compressed = this.compressZplRLE(mono, bytesPerRow, h);
+            const totalBytes = bytesPerRow * h;
+            return `^FO${Math.max(0, foX)},${Math.max(0, foY)}^GFA,${totalBytes},${totalBytes},${bytesPerRow},${compressed}^FS\n`;
+        } catch (e) {
+            // Encoder rejected the value (bad checksum, unknown bcid, …) — let the PNG
+            // path run its progressive-fallback chain exactly as before.
+            log.debug(`[CanvasBitmapGenerator] raw() fast path unavailable for ${bcid}: ${e}`);
+            return null;
         }
     }
 
@@ -958,11 +1127,25 @@ export class CanvasBitmapGenerator implements ILabelGenerator {
     private rgbaToMono(rgba: Uint8ClampedArray, width: number, height: number, bytesPerRow: number): Uint8Array {
         const mono = new Uint8Array(bytesPerRow * height);
 
+        // Fast path: label bitmaps are overwhelmingly opaque white (canvases are
+        // fillRect'd #FFFFFF) or fully transparent. Both are endian-neutral as uint32
+        // (0xFFFFFFFF / 0x00000000), so one aligned 32-bit compare skips the 4 byte
+        // reads + luminance math for 80-95% of pixels — the dominant cost of miss-path
+        // renders and per-print table rasters on a weak CPU. Output bits identical.
+        const px32 = (rgba.byteOffset & 3) === 0
+            ? new Uint32Array(rgba.buffer, rgba.byteOffset, width * height)
+            : null;
+
         for (let row = 0; row < height; row++) {
             const rowOffset = row * bytesPerRow;
-            const rgbaRowOffset = row * width * 4;
+            const pxRowOffset = row * width;
+            const rgbaRowOffset = pxRowOffset * 4;
 
             for (let col = 0; col < width; col++) {
+                if (px32) {
+                    const px = px32[pxRowOffset + col];
+                    if (px === 0xFFFFFFFF || px === 0x00000000) continue; // opaque white / transparent
+                }
                 const idx = rgbaRowOffset + col * 4;
 
                 // Transparency check: if alpha is low, treat as white (ignore)
@@ -995,14 +1178,25 @@ export class CanvasBitmapGenerator implements ILabelGenerator {
         const mono = new Uint8Array(bytesPerRow * height);
         let minRow = height, maxRow = -1, minCol = width, maxCol = -1;
 
+        // Same endian-neutral uint32 fast path as rgbaToMono: text clips are dominated
+        // by fully transparent pixels (clearRect'd canvas), tables by opaque white.
+        const px32 = (rgba.byteOffset & 3) === 0
+            ? new Uint32Array(rgba.buffer, rgba.byteOffset, width * height)
+            : null;
+
         for (let row = 0; row < height; row++) {
             const rowOffset = row * bytesPerRow;
-            const rgbaRowOffset = row * width * 4;
+            const pxRowOffset = row * width;
+            const rgbaRowOffset = pxRowOffset * 4;
             let rowHadPixel = false;
             let rowMinCol = width;
             let rowMaxCol = -1;
 
             for (let col = 0; col < width; col++) {
+                if (px32) {
+                    const px = px32[pxRowOffset + col];
+                    if (px === 0xFFFFFFFF || px === 0x00000000) continue; // opaque white / transparent
+                }
                 const idx = rgbaRowOffset + col * 4;
 
                 if (rgba[idx + 3] < 128) continue;
