@@ -417,12 +417,19 @@ export function recordPack(data: {
 
 export function closeBox(boxId: number, weightNetto: number, weightBrutto: number) {
   const db = initDatabase();
-  db.prepare("UPDATE boxes SET status = 'Closed', weight_netto = ?, weight_brutto = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(
+  // Guard on status: only an Open box can be closed. Without it, a station holding a
+  // stale currentBoxId (e.g. the box was deleted in another window between the counter
+  // refresh and the close click) would resurrect a Deleted box as 'Closed' — a phantom
+  // empty box in reports.
+  const res = db.prepare("UPDATE boxes SET status = 'Closed', weight_netto = ?, weight_brutto = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'Open'").run(
     weightNetto,
     weightBrutto,
     boxId
   );
-  return { success: true };
+  if (res.changes === 0) {
+    console.warn(`Database: closeBox(${boxId}) was a no-op — box is not Open (deleted or already closed)`);
+  }
+  return { success: res.changes > 0 };
 }
 
 /**
