@@ -120,7 +120,13 @@ export class SpoolerStrategy implements IConnectionStrategy {
             console.warn('[RawPrint --server]', d.toString().trim());
         });
         const onGone = () => {
-            if (SpoolerStrategy.server === child) SpoolerStrategy.server = null;
+            // A killed child's 'close' fires LATE — by then a fresh server may already
+            // be running with new waiters in the shared FIFO. Rejecting those would
+            // double-print: send() falls back to the legacy spawn while the new resident
+            // server also executes the job. Only the CURRENT server's death may flush
+            // the queue; a stale child's waiter was already settled by its timeout.
+            if (SpoolerStrategy.server !== child) return;
+            SpoolerStrategy.server = null;
             const waiters = SpoolerStrategy.pending.splice(0);
             for (const w of waiters) w.reject(new Error('RawPrint server exited'));
         };

@@ -469,22 +469,32 @@ export class CanvasBitmapGenerator implements ILabelGenerator {
         if (layout.bgCached) return null;
 
         const { dg } = await this.renderStaticDgCommand(layout, {});
-        const prefix = CanvasBitmapGenerator.ramWipePrefix(layout.printerCache);
+        const prefix = CanvasBitmapGenerator.ramWipePrefix(layout.printerCache, options.physicalKey);
         if (layout.printerCache) layout.printerCache.add(layout.cacheKey);
         return Buffer.from(prefix + dg, 'utf-8');
     }
 
     /**
-     * Before the FIRST ~DG upload of a session for a printer, wipe stale BG*.GRF files
-     * from its R: drive. Old template revisions are never referenced again (bgName is a
-     * content hash), and printers powered for weeks would otherwise accumulate dead GRFs
-     * until R: fills and ~DG starts silently failing → blank backgrounds. The upload
-     * tracking set is per-process, so "set is empty" ⇔ nothing uploaded this session —
-     * the wipe can never delete a graphic we still expect to recall.
+     * Before the FIRST ~DG upload of a session for a PHYSICAL printer, wipe stale
+     * BG*.GRF files from its R: drive. Old template revisions are never referenced
+     * again (bgName is a content hash), and printers powered for weeks would otherwise
+     * accumulate dead GRFs until R: fills and ~DG starts silently failing.
+     *
+     * Scoped per physical DEVICE, not per config id: pack/box roles often share one
+     * printer, and a per-role wipe would let the box role's first upload delete the
+     * pack role's already-uploaded graphics. Tracked in a session-scoped set keyed by
+     * options.physicalKey (falls back to the config-scoped upload set when absent).
      */
-    private static ramWipePrefix(printerCache: Set<string> | null): string {
+    private static ramWipedPhysical: Set<string> = new Set();
+
+    private static ramWipePrefix(printerCache: Set<string> | null, physicalKey?: string): string {
         const firstUpload = !printerCache || printerCache.size === 0;
-        return firstUpload ? '^XA^IDR:BG*.GRF^XZ\n' : '';
+        if (!firstUpload) return '';
+        if (physicalKey) {
+            if (CanvasBitmapGenerator.ramWipedPhysical.has(physicalKey)) return '';
+            CanvasBitmapGenerator.ramWipedPhysical.add(physicalKey);
+        }
+        return '^XA^IDR:BG*.GRF^XZ\n';
     }
 
     async generate(doc: LabelDoc, data: Record<string, any>, options: GeneratorOptions): Promise<Buffer> {
@@ -514,7 +524,7 @@ export class CanvasBitmapGenerator implements ILabelGenerator {
                 `^FO0,0^GFA,${entry.totalBytes},${entry.totalBytes},${entry.bytesPerRow},${entry.compressed}^FS\n`;
         } else if (!bgCached) {
             const result = await this.renderStaticDgCommand(layout, data);
-            staticDgCommand = CanvasBitmapGenerator.ramWipePrefix(printerCache) + result.dg;
+            staticDgCommand = CanvasBitmapGenerator.ramWipePrefix(printerCache, options.physicalKey) + result.dg;
             staticCompressedLen = result.compressedLen;
             if (printerCache) printerCache.add(layout.cacheKey);
         }

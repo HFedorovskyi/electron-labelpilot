@@ -97,6 +97,20 @@ function toBuffer(r: any): Buffer {
     return Buffer.from(r.buffer, r.byteOffset, r.byteLength);
 }
 
+/**
+ * Identity of the PHYSICAL device behind a printer config. Roles (pack/box/pallet)
+ * have distinct config ids even when they point at the same printer — anything that
+ * must be unique per DEVICE (send ordering, R:-drive wipes) keys on this instead.
+ */
+export function physicalPrinterKey(config: PrinterDeviceConfig): string {
+    switch (config.connection) {
+        case 'tcp': return config.ip ? `tcp:${config.ip}:${config.port || 9100}` : `id:${config.id}`;
+        case 'serial': return config.serialPort ? `ser:${config.serialPort}` : `id:${config.id}`;
+        case 'windows_driver': return config.driverName ? `spl:${config.driverName}` : `id:${config.id}`;
+        default: return `id:${config.id || config.name || '__default__'}`;
+    }
+}
+
 class PrinterService {
     private strategies: Map<string, IConnectionStrategy> = new Map();
     private states: Map<string, PrinterState> = new Map();
@@ -156,7 +170,7 @@ class PrinterService {
         if (existing && sameType && existing.isConnected()) {
             const prev = this.states.get(config.id)?.config;
             const connKey = (c?: PrinterDeviceConfig) => c ? JSON.stringify(
-                [c.connection, c.ip, c.port, c.persistentConnection ?? false, c.serialPort, c.baudRate]
+                [c.connection, c.ip, c.port, c.persistentConnection ?? false, c.serialPort, c.baudRate, c.driverName]
             ) : '';
             if (connKey(prev) !== connKey(config)) {
                 log.info(`PrinterService: connection params changed for "${config.name}" — dropping open connection to re-apply`);
@@ -293,6 +307,7 @@ class PrinterService {
             printerId: config.id,
             cacheMode,
             z64: config.z64,
+            physicalKey: physicalPrinterKey(config),
         };
 
         let dgBuffer: Buffer | null = null;
@@ -334,6 +349,7 @@ class PrinterService {
             printerId: config.id,
             cacheMode,
             z64: config.z64,
+            physicalKey: physicalPrinterKey(config),
         };
 
         // With a docKey, ship the doc to the worker only once — repeats send the key
@@ -434,6 +450,13 @@ class PrinterService {
                 this.breakerTrippedAt.set(config.id, Date.now());
                 this.updateDeviceState(config.id, { config, status: 'error', lastError: msg });
                 try { await strategy.disconnect(); } catch { /* ignore */ }
+                // The label may have been generated with its BG marked "uploaded" while
+                // the printer was off (RAM drive wiped). Without clearing the tracking
+                // here, every later label recalls a graphic that no longer exists —
+                // the whole static layer silently vanishes until a sync. Same clearing
+                // the retry path below does.
+                this.clearGeneratorCaches(config.id);
+                ramCacheCoordinator.invalidate(config.id);
                 throw err;
             }
 

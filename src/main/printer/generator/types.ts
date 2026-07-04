@@ -88,6 +88,10 @@ export interface GeneratorOptions {
     // stuck on the inline path. Zebra ZPL II and most modern emulations support it, but
     // not all — off by default, enabled per printer in settings.
     z64?: boolean;
+    // Identity of the PHYSICAL device (roles share printers but have distinct ids).
+    // Used to make the once-per-session R:-drive wipe device-scoped: the box role's
+    // first upload must not delete the pack role's cached graphics on a shared printer.
+    physicalKey?: string;
 }
 
 export interface ILabelGenerator {

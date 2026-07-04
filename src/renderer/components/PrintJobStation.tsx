@@ -399,6 +399,13 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
 
     // --- BOX LABEL PRINT ---
     const printBoxLabel = async (finalBoxWeight: number, finalUnitsInBox: number, boxNumber: string, boxId: number) => {
+        // Close the box in DB FIRST — closing must not depend on a box-label template,
+        // or a template-less product leaves the box Open forever.
+        {
+            const boxCont = containers.find(c => c.id === product?.box_container_id);
+            const brutBox = finalBoxWeight + (boxCont?.weight || 0) / 1000;
+            await window.electron.invoke('close-box', { boxId, weightNetto: finalBoxWeight, weightBrutto: brutBox });
+        }
         if (!boxLabelDoc) return;
         const boxLimit = product?.close_box_counter || 0;
         const baseData = getLabelData(finalBoxWeight, true, finalUnitsInBox);
@@ -426,12 +433,8 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
         const boxData = { ...baseData, is_box: true, count: boxLimit, pack_counter: String(finalUnitsInBox), weight_netto: finalBoxWeight.toFixed(3), barcode: finalBarcode };
         // Fire-and-forget: the box-label send (150ms TCP … seconds on serial) must not block
         // the next pack — the main-process queues preserve output order.
-        // close-box stays awaited: the next record-pack must see this box as closed.
         window.electron.invoke('print-label', { silent: true, labelDoc: boxLabelDoc, docKey: boxLabelDocKey || undefined, data: boxData, printerConfig: printerConfig.boxPrinter || undefined })
             .catch((err: any) => console.error('[printBoxLabel] print failed', err));
-        const boxCont = containers.find(c => c.id === product?.box_container_id);
-        const brutBox = finalBoxWeight + (boxCont?.weight || 0) / 1000;
-        await window.electron.invoke('close-box', { boxId, weightNetto: finalBoxWeight, weightBrutto: brutBox });
         setLastPrinted({ doc: boxLabelDoc, data: boxData });
     };
 
@@ -499,7 +502,7 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
         const finalData = {
             ...predictedData,
             box_number: recordResult.boxNumber,
-            barcode: recordResult.barcodeValue ?? predictedData.barcode,
+            barcode: recordResult.barcodeValue || predictedData.barcode,
         };
         if (!recordResult.printDispatched && printerConfig.packPrinter) {
             // Browser-protocol printer — worker-window path stays renderer-driven.
@@ -646,9 +649,14 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
         if (unitsInBox === 0) { setAlertMessage(t('pj.emptyBox')); return; }
         const finalBoxWeight = boxNetWeight;
         const finalUnitsInBox = unitsInBox;
-        setUnitsInBox(0); setBoxNetWeight(0); setBoxesInPallet(prev => prev + 1); setTotalBoxes(prev => prev + 1);
+        // NOT setTotalBoxes(+1): the box was already counted when recordPack created it.
+        setUnitsInBox(0); setBoxNetWeight(0); setBoxesInPallet(prev => prev + 1);
         if (currentBoxId && currentBoxNumber) {
             await printBoxLabel(finalBoxWeight, finalUnitsInBox, currentBoxNumber, currentBoxId);
+        } else if (currentBoxId) {
+            const boxCont = containers.find(c => c.id === product?.box_container_id);
+            const brutBox = finalBoxWeight + (boxCont?.weight || 0) / 1000;
+            await window.electron.invoke('close-box', { boxId: currentBoxId, weightNetto: finalBoxWeight, weightBrutto: brutBox });
         }
         setCurrentBoxId(null); setCurrentBoxNumber(null);
     };

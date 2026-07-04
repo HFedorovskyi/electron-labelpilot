@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Save, RefreshCw, Settings as SettingsIcon, Printer, Languages, Moon, Sun, Monitor, ShieldCheck, ShieldAlert, LogOut, KeyRound } from 'lucide-react';
 import PrinterSettings from './PrinterSettings';
 import UpdateSettings from './UpdateSettings';
-import { useTranslation, type Lang } from '../i18n';
+import { useTranslation, getSavedLang, type Lang } from '../i18n';
 import { useTheme } from './ThemeProvider';
 import { useLicenseStatus } from '../hooks/useLicenseStatus';
 
@@ -175,8 +175,12 @@ const Settings = ({ onNavigate }: SettingsProps) => {
         const err = validateConfig();
         if (err) { showToast(err); return; }
         window.electron.send('save-scale-config', config);
-        window.electron.send('save-printer-config', printerConfig);
-        savedSnapshotRef.current = JSON.stringify({ config, printerConfig });
+        // Language is persisted separately (the language buttons write config.language to
+        // disk via saveLang). Carry the LIVE saved language so a printer-config save here
+        // doesn't revert it to the stale mount-time value.
+        const toSave = { ...printerConfig, language: getSavedLang() };
+        window.electron.send('save-printer-config', toSave);
+        savedSnapshotRef.current = JSON.stringify({ config, printerConfig: toSave });
         showToast(t('settings.saved'));
     };
 
@@ -188,8 +192,10 @@ const Settings = ({ onNavigate }: SettingsProps) => {
 
         setIsSyncing(true);
         try {
-            await window.electron.invoke('sync-data', printerConfig.serverIp);
-            showToast(t('settings.connectionSuccess'));
+            // sync-data resolves to info.online (false on timeout/wrong-server/no-uuid —
+            // it never rejects), so a bare await would report success for a dead server.
+            const online = await window.electron.invoke('sync-data', printerConfig.serverIp);
+            showToast(online ? t('settings.connectionSuccess') : t('settings.connectionFailed'));
         } catch (error) {
             console.error('Connection test failed:', error);
             showToast(`${t('settings.connectionFailed')}: ${error instanceof Error ? error.message : String(error)}`);
@@ -444,6 +450,11 @@ const Settings = ({ onNavigate }: SettingsProps) => {
                                 onClick={async () => {
                                     const res = await window.electron.invoke('offline-import');
                                     showToast(res.message);
+                                    // The import writes serverIp (and other fields) to the
+                                    // on-disk config behind this screen. Reload so a later
+                                    // 'Save All' doesn't clobber the just-imported values
+                                    // with the stale mount-time state.
+                                    await loadData();
                                 }}
                                 className="px-5 py-3 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-medium shadow-lg hover:shadow-purple-500/20 flex items-center gap-2 transition-all"
                             >

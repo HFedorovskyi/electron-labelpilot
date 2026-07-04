@@ -470,7 +470,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
             const finalPrintData = {
                 ...predictedData,
                 box_number: actualBoxNumber,
-                barcode: recordResult.barcodeValue ?? predictedData.barcode,
+                barcode: recordResult.barcodeValue || predictedData.barcode,
             };
             if (recordResult.printDispatched) {
                 // Print already queued in main; failures arrive via printer-status-update.
@@ -516,6 +516,14 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
 
     // --- BOX LABEL PRINT HELPER ---
     const printBoxLabel = async (finalBoxWeight: number, finalUnitsInBox: number, boxNumber: string, boxId: number) => {
+        // Close the box in DB FIRST — closing must not depend on a box-label template.
+        // Without this, a template-less product left the box Open forever and every later
+        // pack kept piling into it while the UI showed it closed.
+        {
+            const boxCont = containers.find(c => c.id === selectedProduct?.box_container_id);
+            const brutBox = finalBoxWeight + (boxCont?.weight || 0) / 1000;
+            await window.electron.invoke('close-box', { boxId, weightNetto: finalBoxWeight, weightBrutto: brutBox });
+        }
         if (!boxLabelDoc) return;
         const boxLimit = selectedProduct?.close_box_counter || 0;
         const baseData = getLabelData(finalBoxWeight, true, finalUnitsInBox);
@@ -542,12 +550,8 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
         const boxData = { ...baseData, is_box: true, count: boxLimit, pack_counter: String(finalUnitsInBox), weight_netto: finalBoxWeight.toFixed(3), barcode: finalBarcode };
         // Fire-and-forget: the box-label send (150ms TCP … seconds on serial) must not block
         // the next stable-weight pack — the main-process queues preserve output order.
-        // close-box stays awaited: the next record-pack must see this box as closed.
         window.electron.invoke('print-label', { silent: true, labelDoc: boxLabelDoc, docKey: boxLabelDocKey || undefined, data: boxData, printerConfig: printerConfig.boxPrinter || undefined })
             .catch((err: any) => console.error('[printBoxLabel] print failed', err));
-        const boxCont = containers.find(c => c.id === selectedProduct?.box_container_id);
-        const brutBox = finalBoxWeight + (boxCont?.weight || 0) / 1000;
-        await window.electron.invoke('close-box', { boxId, weightNetto: finalBoxWeight, weightBrutto: brutBox });
         setLastPrinted({ doc: boxLabelDoc, data: boxData });
     };
 
@@ -556,9 +560,16 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
         if (unitsInBox === 0) { setAlertMessage(t('ws.emptyBox')); return; }
         const finalBoxWeight = boxNetWeight;
         const finalUnitsInBox = unitsInBox;
-        setUnitsInBox(0); setBoxNetWeight(0); setBoxesInPallet(prev => prev + 1); setTotalBoxes(prev => prev + 1);
+        // NOT setTotalBoxes(+1): the box row was already counted when recordPack created
+        // it (COUNT(*) FROM boxes). The auto-close path doesn't increment either.
+        setUnitsInBox(0); setBoxNetWeight(0); setBoxesInPallet(prev => prev + 1);
         if (currentBoxId && currentBoxNumber) {
             await printBoxLabel(finalBoxWeight, finalUnitsInBox, currentBoxNumber, currentBoxId);
+        } else if (currentBoxId) {
+            // No box number (shouldn't happen) — still close the box in DB.
+            const boxCont = containers.find(c => c.id === selectedProduct?.box_container_id);
+            const brutBox = finalBoxWeight + (boxCont?.weight || 0) / 1000;
+            await window.electron.invoke('close-box', { boxId: currentBoxId, weightNetto: finalBoxWeight, weightBrutto: brutBox });
         }
         setCurrentBoxId(null); setCurrentBoxNumber(null);
     };
@@ -635,6 +646,13 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                 expDatePack.setDate(labelingDate.getDate() + (selectedProduct?.exp_date || 0));
 
                 try {
+                    // Throttle (depth-1 pipeline) and honor cancel BEFORE committing the
+                    // pack: once record-pack runs, the pack is in the DB and MUST be both
+                    // printed and counted, or the batch leaves a phantom recorded-but-
+                    // unprinted pack whose number the next print silently duplicates.
+                    await prevPrint;
+                    if (cancelCountRef.current) break;
+
                     const recordResult = await window.electron.invoke('record-pack', {
                         number: predictedData.pack_number, box_number: predictedBoxNum,
                         nomenclature_id: selectedProduct.id,
@@ -654,11 +672,8 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                     const finalData = getLabelData(fixedWeightKg, false, undefined, overrides);
                     finalData.box_number = recordResult.boxNumber;
                     if (recordResult.barcodeValue) finalData.barcode = recordResult.barcodeValue;
-                    // Wait for label N-1 (its send overlapped our record-pack), then
-                    // dispatch label N without awaiting it. Order is preserved by the
-                    // main-process queues; a failed print aborts the batch on the next lap.
-                    await prevPrint;
-                    if (cancelCountRef.current) break;
+                    // Dispatch fire-and-forget; a failed print aborts the batch on the
+                    // NEXT lap (this pack is already recorded, so it still gets counted).
                     prevPrint = window.electron.invoke('print-label', {
                         silent: true, labelDoc, docKey: labelDocKey || undefined, data: finalData,
                         printerConfig: printerConfig.packPrinter || undefined

@@ -688,11 +688,29 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
         const finalBoxWeight = boxNetWeight;
         const finalUnitsInBox = unitsInBox;
 
-        // Reset counters for next box
+        // Reset counters for next box.
+        // NOTE: totalBoxes is deliberately NOT incremented here — it mirrors
+        // COUNT(*) FROM boxes and the box row was already counted when recordPack
+        // created it (newBoxCreated). Incrementing again skipped every second box
+        // number and caused collision-renamed raw numbers after a counter refetch.
         setUnitsInBox(0);
         setBoxNetWeight(0);
         setBoxesInPallet(prev => prev + 1);
-        setTotalBoxes(prev => prev + 1);
+
+        // Persist Closed Box to DB FIRST — closing must not depend on having a box-label
+        // template: without this, a template-less product left the box Open forever (all
+        // later packs kept piling into it) while the UI showed it closed.
+        if (currentBoxId) {
+            const boxContainer = containers.find(c => c.id === selectedProduct?.box_container_id);
+            const brutBox = finalBoxWeight + (boxContainer?.weight || 0) / 1000;
+            await window.electron.invoke('close-box', {
+                boxId: currentBoxId,
+                weightNetto: finalBoxWeight,
+                weightBrutto: brutBox
+            });
+            setCurrentBoxId(null);
+            setCurrentBoxNumber(null);
+        }
 
         // Print Box Label
         if (boxLabelDoc) {
@@ -761,26 +779,13 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
                 printerConfig: printerConfig.boxPrinter
             });
 
-            // Persist Closed Box to DB
-            if (currentBoxId) {
-                const boxContainer = containers.find(c => c.id === selectedProduct?.box_container_id);
-                const brutBox = finalBoxWeight + (boxContainer?.weight || 0) / 1000;
-                await window.electron.invoke('close-box', {
-                    boxId: currentBoxId,
-                    weightNetto: finalBoxWeight,
-                    weightBrutto: brutBox
-                });
-                setCurrentBoxId(null);
-                setCurrentBoxNumber(null);
-            }
-
             const totalTime = performance.now() - startTime;
             console.log(`Performance: handleCloseBox total took ${totalTime.toFixed(2)}ms`);
 
             setLastPrinted({ doc: boxLabelDoc, data: boxData });
         } else {
-            console.warn('Close Box: No box label template found.');
-            setAlertMessage(t('ws.noBoxLabel'));
+            // Box already closed in DB above; no label template → nothing to print.
+            console.warn('Close Box: box closed in DB, but no box-label template to print.');
         }
     };
 
@@ -883,7 +888,7 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
             const finalPrintData = {
                 ...predictedData,
                 box_number: actualBoxNumber,
-                barcode: recordResult.barcodeValue ?? predictedData.barcode,
+                barcode: recordResult.barcodeValue || predictedData.barcode,
             };
 
             if (recordResult.printDispatched) {

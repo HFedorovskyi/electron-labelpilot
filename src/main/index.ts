@@ -111,6 +111,13 @@ function createWindow() {
     scaleManager.setMainWindow(mainWindow);
     discoveryManager.setMainWindow(mainWindow);
     serverStatusManager.setMainWindow(mainWindow);
+    // CRITICAL: without this, printer-status-update pushes are silently dropped —
+    // and since record-and-print dispatches prints fire-and-forget, a dead printer
+    // would look 'ready' forever while packs get recorded without physical labels.
+    {
+        const { printerService } = require('./printer/PrinterService');
+        printerService.setMainWindow(mainWindow);
+    }
 
     const devUrl = 'http://127.0.0.1:5173';
 
@@ -266,12 +273,15 @@ app.whenReady().then(() => {
     // ('record-and-print' — outcome reaches the UI via printer-status-update pushes).
     const enqueuePrint = async (printerConfig: any, labelDoc: any, data: any, docKey?: string): Promise<boolean> => {
         const startTime = Date.now();
-        const { printerService } = await import('./printer/PrinterService');
+        const { printerService, physicalPrinterKey } = await import('./printer/PrinterService');
 
         const myGen = genQueue.then(() => printerService.generateBuffer(printerConfig, labelDoc, data, docKey));
         genQueue = myGen.catch(() => undefined);
 
-        const queueKey = printerConfig.id || printerConfig.name || '__default__';
+        // Key by PHYSICAL device, not config id: pack/box roles often share one printer,
+        // and per-role queues would let the box label overtake its own last pack (or open
+        // a second concurrent connection to a single-connection printer).
+        const queueKey = physicalPrinterKey(printerConfig);
         const prevSend = sendQueues.get(queueKey) || Promise.resolve();
         const mySend = Promise.all([prevSend, myGen]).then(([, buf]) =>
             printerService.sendBuffer(printerConfig, buf as Buffer)
@@ -786,9 +796,28 @@ ipcMain.handle('session:logout', () => {
     // in reports), so switching is refused until they are closed.
     const { getOpenEntitiesSummary } = require('./database');
     const open = getOpenEntitiesSummary();
-    if (open.openBoxCount > 0 || open.openPalletCount > 0) {
-        log.info(`[session] logout blocked: openBoxes=${open.openBoxCount} (last №${open.openBoxNumber}), openPallets=${open.openPalletCount}`);
-        return { ok: false, reason: 'open_entities', ...open };
+
+    // Pallets can only be closed by printing a pallet sheet — that requires a configured
+    // pallet printer. On pack/box-only stations the auto-created pallet has NO reachable
+    // close path, so gating on it would permanently trap operator switching. Only gate on
+    // pallets where the station can actually close them.
+    let palletBlocks = false;
+    if (open.openPalletCount > 0) {
+        try {
+            const { loadPrinterConfig } = require('./config');
+            const p = loadPrinterConfig().palletPrinter;
+            const hasPalletTarget = !!p && (
+                p.connection === 'tcp' ? !!p.ip :
+                p.connection === 'serial' ? !!p.serialPort :
+                !!p.driverName
+            );
+            palletBlocks = hasPalletTarget;
+        } catch { /* no config → treat as no pallet workflow */ }
+    }
+
+    if (open.openBoxCount > 0 || palletBlocks) {
+        log.info(`[session] logout blocked: openBoxes=${open.openBoxCount} (last №${open.openBoxNumber}), openPallets=${open.openPalletCount}, palletBlocks=${palletBlocks}`);
+        return { ok: false, reason: 'open_entities', ...open, openPalletCount: palletBlocks ? open.openPalletCount : 0 };
     }
 
     const { logoutSession } = require('./session');

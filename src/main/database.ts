@@ -468,7 +468,15 @@ export function getOpenEntitiesSummary(): {
   const db = initDatabase();
   const boxes = db.prepare("SELECT COUNT(*) as count FROM boxes WHERE status = 'Open'").get() as { count: number };
   const lastOpenBox = db.prepare("SELECT number FROM boxes WHERE status = 'Open' ORDER BY id DESC LIMIT 1").get() as { number: string } | undefined;
-  const pallets = db.prepare("SELECT COUNT(*) as count FROM pallet WHERE status = 'Open'").get() as { count: number };
+  // Only count pallets that actually hold content (>=1 non-deleted box). A pallet is
+  // auto-created on the first pack even on stations that never print pallet sheets, and
+  // an all-deleted pallet can never be closed via the sheet flow — counting either as
+  // "open" would permanently dead-lock operator switching with no reachable close path.
+  const pallets = db.prepare(`
+    SELECT COUNT(*) as count FROM pallet p
+    WHERE p.status = 'Open'
+      AND EXISTS (SELECT 1 FROM boxes b WHERE b.pallete_id = p.id AND b.status != 'Deleted')
+  `).get() as { count: number };
   return {
     openBoxCount: boxes.count,
     openBoxNumber: lastOpenBox?.number ?? null,
