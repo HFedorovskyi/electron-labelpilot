@@ -1330,6 +1330,7 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
 
             <DeleteItemsModal
                 isOpen={isDeleteModalOpen}
+                nomenclatureId={selectedProduct?.id ?? null}
                 onClose={() => setIsDeleteModalOpen(false)}
                 onDeleted={async () => {
                     // Refresh counters

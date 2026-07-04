@@ -6,9 +6,13 @@ interface DeleteItemsModalProps {
     isOpen: boolean;
     onClose: () => void;
     onDeleted: () => void; // Callback to refresh parent state
+    // The station's current product — scopes 'current box' to THIS product's open box.
+    // Without it the modal shows the most-recent open box of ANY product, so an operator
+    // could delete a pack from a different product's box.
+    nomenclatureId?: number | null;
 }
 
-const DeleteItemsModal: React.FC<DeleteItemsModalProps> = ({ isOpen, onClose, onDeleted }) => {
+const DeleteItemsModal: React.FC<DeleteItemsModalProps> = ({ isOpen, onClose, onDeleted, nomenclatureId }) => {
     const { t } = useTranslation();
     const [activeTab, setActiveTab] = useState<'packs' | 'boxes'>('packs');
     const [data, setData] = useState<any>(null);
@@ -32,7 +36,7 @@ const DeleteItemsModal: React.FC<DeleteItemsModalProps> = ({ isOpen, onClose, on
         setLoading(true);
         setError(null);
         try {
-            const content = await window.electron.invoke('get-open-pallet-content');
+            const content = await window.electron.invoke('get-open-pallet-content', nomenclatureId ?? undefined);
             setData(content);
         } catch (err: any) {
             console.error("Error loading deletion data:", err);
@@ -50,7 +54,7 @@ const DeleteItemsModal: React.FC<DeleteItemsModalProps> = ({ isOpen, onClose, on
         if (isOpen) {
             loadData();
         }
-    }, [isOpen]);
+    }, [isOpen, nomenclatureId]);
 
     const handleDeletePackClick = (packId: number) => {
         setConfirmModal({

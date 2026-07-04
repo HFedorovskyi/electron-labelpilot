@@ -1103,6 +1103,7 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
             {isDeleteModalOpen && (
                 <DeleteItemsModal
                     isOpen={isDeleteModalOpen}
+                    nomenclatureId={product?.id ?? null}
                     onClose={() => setIsDeleteModalOpen(false)}
                     onDeleted={async () => {
                         const latest = await window.electron.invoke('get-latest-counters', product?.id);

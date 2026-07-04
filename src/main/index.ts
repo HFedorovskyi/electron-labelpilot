@@ -694,9 +694,9 @@ ipcMain.handle('close-box', async (_, { boxId, weightNetto, weightBrutto }) => {
     return res;
 });
 
-ipcMain.handle('get-open-pallet-content', async () => {
+ipcMain.handle('get-open-pallet-content', async (_, nomenclatureId?: number) => {
     const { getOpenPalletContent } = await import('./database');
-    return getOpenPalletContent();
+    return getOpenPalletContent(nomenclatureId);
 });
 
 // Aggregated render-data for the pallet sheet (current open pallet). Returns null if no

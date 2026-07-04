@@ -17,7 +17,7 @@ import path from 'path';
 import { app } from 'electron';
 import { processSyncData } from './processor';
 import { setDemoFlag } from './demo_flag';
-import { savePrintJob, clearAllPrintJobs } from './database';
+import { savePrintJob, clearAllPrintJobs, clearOperationalData } from './database';
 import type { LabelDoc } from './printer/generator/types';
 
 // Entering demo overwrites the local DB (incl. the station identity) with a synthetic
@@ -415,6 +415,10 @@ const DEMO_PRINT_JOBS = [
 export async function seedDemoData(): Promise<{ success: boolean; message: string }> {
     // Snapshot the real station identity FIRST so exitDemo() can restore it later.
     backupRealIdentity();
+    // Clear real production data: importFullDump replaces only master tables, so a real
+    // Open box/pallet would otherwise survive into demo — orphaned (its product wiped)
+    // and unclosable, blocking the demo pallet flow and operator-switch gate.
+    try { clearOperationalData(); } catch (e) { console.error('[demo_seed] clearOperationalData failed:', e); }
     const dataset = buildDemoDataset();
     const result = await processSyncData(dataset);
     // The station is now in demo: persist the DURABLE flag so demo mode survives

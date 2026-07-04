@@ -842,6 +842,21 @@ export function getExportData(opts: { sincePackId?: number; sinceErrorId?: numbe
   };
 }
 
+/**
+ * Clear operational (production) data: packs, boxes, pallets. Used when entering demo
+ * mode — importFullDump replaces only master tables (nomenclature/labels/…), so without
+ * this a real Open box/pallet survives into demo, orphaned (its product wiped) and unable
+ * to be closed from any station, blocking the demo pallet flow and the logout gate.
+ */
+export function clearOperationalData(): void {
+  const db = initDatabase();
+  db.transaction(() => {
+    db.prepare('DELETE FROM pack').run();
+    db.prepare('DELETE FROM boxes').run();
+    db.prepare('DELETE FROM pallet').run();
+  })();
+}
+
 /** Record a marking/print error locally; it ships to the server in the next report. */
 export function recordPrintError(message: string, level: 'ERROR' | 'WARNING' | 'INFO' = 'ERROR'): void {
   try {
@@ -855,15 +870,19 @@ export function recordPrintError(message: string, level: 'ERROR' | 'WARNING' | '
 
 // --- Deletion Logic ---
 
-export function getOpenPalletContent() {
+export function getOpenPalletContent(nomenclatureId?: number) {
   const db = initDatabase();
 
   // 1. Get Open Pallet
   const pallet = db.prepare("SELECT * FROM pallet WHERE status = 'Open' ORDER BY id DESC LIMIT 1").get() as any;
   if (!pallet) return null;
 
-  // 2. Get Open Box (if any)
-  const openBox = db.prepare("SELECT * FROM boxes WHERE pallete_id = ? AND status = 'Open' ORDER BY id DESC LIMIT 1").get(pallet.id) as any;
+  // 2. Get Open Box. When a nomenclatureId is given (the station's current product),
+  //    scope to THAT product's open box — otherwise the modal would show the most-recent
+  //    open box of any product and let the operator delete the wrong box's packs.
+  const openBox = (nomenclatureId != null
+    ? db.prepare("SELECT * FROM boxes WHERE pallete_id = ? AND status = 'Open' AND nomenclature_id = ? ORDER BY id DESC LIMIT 1").get(pallet.id, nomenclatureId)
+    : db.prepare("SELECT * FROM boxes WHERE pallete_id = ? AND status = 'Open' ORDER BY id DESC LIMIT 1").get(pallet.id)) as any;
 
   // 3. Get All Boxes in Pallet (for list view)
   const boxes = db.prepare("SELECT * FROM boxes WHERE pallete_id = ? ORDER BY id DESC").all(pallet.id);
@@ -1010,13 +1029,27 @@ export function closeCurrentPallet() {
     // Close any leftover EMPTY open boxes on this pallet (boxes with no non-deleted packs).
     // If they stayed 'Open', recordPack would reuse them (it matches by status+nomenclature,
     // not by pallet) and new packs would land on this now-closed pallet, orphaning them.
-    // Boxes that still hold content are left untouched (the print guard prevents reaching here
-    // with a non-empty open box), so no packed box is ever silently closed.
     db.prepare(`
       UPDATE boxes SET status = 'Closed', updated_at = CURRENT_TIMESTAMP
       WHERE pallete_id = ? AND status = 'Open'
         AND NOT EXISTS (SELECT 1 FROM pack p WHERE p.box_id = boxes.id AND p.status != 'Deleted')
     `).run(pallet.id);
+
+    // Any NON-EMPTY open box still on this pallet was created AFTER the sheet snapshot —
+    // a pack recorded while the sheet was printing (auto-print / hidden-tab count batch),
+    // since the print guard ensured no open box existed at print start. Its packs are NOT
+    // on the printed sheet, so it belongs to the NEXT pallet: re-home it to a fresh open
+    // pallet instead of orphaning it (Open box on a Closed pallet, invisible to every
+    // pallet view and undeletable).
+    const strays = db.prepare("SELECT id FROM boxes WHERE pallete_id = ? AND status = 'Open'").all(pallet.id) as { id: number }[];
+    if (strays.length > 0) {
+      const res = db.prepare("INSERT INTO pallet (number, status) VALUES (?, 'Open')").run(`P${Date.now()}`);
+      const newPalletId = res.lastInsertRowid as number;
+      const move = db.prepare("UPDATE boxes SET pallete_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
+      for (const s of strays) move.run(newPalletId, s.id);
+      log.info(`[closeCurrentPallet] re-homed ${strays.length} in-progress box(es) from pallet ${pallet.id} to new pallet ${newPalletId}`);
+    }
+
     db.prepare("UPDATE pallet SET status = 'Closed', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(pallet.id);
     return { success: true as const, palletId: pallet.id };
   })();

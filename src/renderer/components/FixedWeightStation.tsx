@@ -133,7 +133,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
     };
 
     // --- HELPER: getLabelData (reuse pattern from WeighingStation) ---
-    const getLabelData = (overrideWeight?: number, isBoxLabel = false, overrideUnits?: number, overrides?: { totalUnits?: number; totalBoxes?: number; unitsInBox?: number; boxNetWeight?: number }) => {
+    const getLabelData = (overrideWeight?: number, isBoxLabel = false, overrideUnits?: number, overrides?: { totalUnits?: number; totalBoxes?: number; unitsInBox?: number; boxNetWeight?: number; boxesInPallet?: number }) => {
         const currentWeightVal = overrideWeight !== undefined ? overrideWeight : parseFloat(weight);
         const now = labelingDate;
         const expDays = selectedProduct?.exp_date || 0;
@@ -158,6 +158,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
         const effectiveTotalBoxes = overrides?.totalBoxes ?? totalBoxes;
         const effectiveUnitsInBox = overrides?.unitsInBox ?? unitsInBox;
         const effectiveBoxNetWeight = overrides?.boxNetWeight ?? boxNetWeight;
+        const effectiveBoxesInPallet = overrides?.boxesInPallet ?? boxesInPallet;
 
         const weightBruttoPack = currentWeightVal;
         const portionContainer = containers.find(c => String(c.id) === String(selectedProduct?.portion_container_id));
@@ -169,7 +170,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
         const tareBoxGrams = boxContainer?.weight || 0;
         let packsInThisBox = isBoxLabel ? (overrideUnits !== undefined ? overrideUnits : effectiveUnitsInBox) : (effectiveUnitsInBox + 1);
         const weightBruttoBox = effectiveBoxNet + (packsInThisBox * tarePackGrams / 1000) + (tareBoxGrams / 1000);
-        const weightNettoPallet = effectiveBoxNet * (boxesInPallet + 1);
+        const weightNettoPallet = effectiveBoxNet * (effectiveBoxesInPallet + 1);
         const weightBruttoPallet = weightNettoPallet + 20;
         const currentUnits = overrideUnits !== undefined ? overrideUnits : effectiveUnitsInBox;
 
@@ -216,7 +217,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
             batch_number: batchNumber || extra.batch_number || '',
             pack_count: String(currentUnits + (isBoxLabel ? 0 : 1)),
             pack_counter: String(currentUnits + (isBoxLabel ? 0 : 1)),
-            box_count: String(boxesInPallet + 1),
+            box_count: String(effectiveBoxesInPallet + 1),
             close_box_counter: String(currentUnits + (isBoxLabel ? 0 : 1)),
             box_limit: selectedProduct?.close_box_counter?.toString() || '',
             _raw_weight_netto_pack: weightNettoPack, _raw_weight_brutto_pack: weightBruttoPack,
@@ -618,7 +619,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                 if (cancelCountRef.current) break;
                 setCountCurrentPack(pack + 1);
 
-                const overrides = { totalUnits: localTotalUnits, totalBoxes: localTotalBoxes, unitsInBox: localUnitsInBox, boxNetWeight: localBoxNetWeight };
+                const overrides = { totalUnits: localTotalUnits, totalBoxes: localTotalBoxes, unitsInBox: localUnitsInBox, boxNetWeight: localBoxNetWeight, boxesInPallet: localBoxesInPallet };
                 const predictedData = getLabelData(fixedWeightKg, false, undefined, overrides);
                 const predictedBoxNum = localCurrentBoxNumber || predictedData.box_number;
 
@@ -1029,7 +1030,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
             {isDatePickerOpen && <DatePickerModal value={labelingDate} onUpdate={setLabelingDate} onClose={() => setIsDatePickerOpen(false)} title={t('ws.dateModalTitle')} />}
             {showPacksKeypad && <NumericKeypad value={String(packsPerBoxInput)} onUpdate={(v) => setPacksPerBoxInput(parseInt(v) || 0)} onClose={() => setShowPacksKeypad(false)} title={t('fw.packsPerBox')} />}
             {showBoxesKeypad && <NumericKeypad value={String(totalBoxesInput)} onUpdate={(v) => setTotalBoxesInput(parseInt(v) || 0)} onClose={() => setShowBoxesKeypad(false)} title={t('fw.totalBoxes')} />}
-            <DeleteItemsModal isOpen={isDeleteModalOpen} onClose={() => setIsDeleteModalOpen(false)}
+            <DeleteItemsModal isOpen={isDeleteModalOpen} nomenclatureId={selectedProduct?.id ?? null} onClose={() => setIsDeleteModalOpen(false)}
                 onDeleted={async () => {
                     const latest = await window.electron.invoke('get-latest-counters', selectedProduct?.id);
                     if (latest) {
