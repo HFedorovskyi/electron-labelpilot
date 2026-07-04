@@ -811,6 +811,7 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
             const predictedBoxNum = currentBoxNumber || predictedData.box_number;
 
             let packBarcode = '';
+            let packBarcodeSpec: { fields: any[]; data: Record<string, any> } | null = null;
             if (packBarcodeTemplate) {
                 try {
                     const fields = JSON.parse(packBarcodeTemplate.structure).fields;
@@ -829,6 +830,9 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
                     } as any;
 
                     packBarcode = generateBarcode(fields, genData);
+                    // Recipe for recordPack to REBUILD the barcode with the ACTUAL box
+                    // number inside its transaction (box-number collisions rename the box).
+                    packBarcodeSpec = { fields, data: genData };
                 } catch (err) {
                     console.error('Error generating preliminary pack barcode:', err);
                 }
@@ -849,6 +853,7 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
                     weight_netto: parseFloat(predictedData.weight_netto_pack),
                     weight_brutto: parseFloat(predictedData.weight_brutto_pack),
                     barcode_value: packBarcode,
+                    barcode_spec: packBarcodeSpec || undefined,
                     station_number: stationNumber,
                     production_date: labelingDate.toISOString(),
                     expiration_date: expDatePack.toISOString(),
@@ -872,9 +877,14 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
             setCurrentBoxId(actualBoxId);
             setCurrentBoxNumber(actualBoxNumber);
 
-            // Final label data = predicted data with the ACTUAL box number (verified:
-            // nothing else can differ — state is unchanged between the two computations).
-            const finalPrintData = { ...predictedData, box_number: actualBoxNumber };
+            // Final label data = predicted data with the ACTUAL box number and the
+            // barcode regenerated with it (matters for reprint/lastPrinted and the
+            // browser-protocol fallback below; the dispatched print got it in main).
+            const finalPrintData = {
+                ...predictedData,
+                box_number: actualBoxNumber,
+                barcode: recordResult.barcodeValue ?? predictedData.barcode,
+            };
 
             if (recordResult.printDispatched) {
                 // Print already queued in main. Failures surface via the

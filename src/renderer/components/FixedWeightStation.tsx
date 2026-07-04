@@ -421,19 +421,23 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
             const predictedData = getLabelData();
             const predictedBoxNum = currentBoxNumber || predictedData.box_number;
             let packBarcode = '';
+            let packBarcodeSpec: { fields: any[]; data: Record<string, any> } | null = null;
             if (packBarcodeTemplate) {
                 try {
                     const fields = JSON.parse(packBarcodeTemplate.structure).fields;
                     const expDatePack = new Date(labelingDate);
                     expDatePack.setDate(labelingDate.getDate() + (selectedProduct?.exp_date || 0));
-                    packBarcode = generateBarcode(fields, {
+                    const genData = {
                         weight_netto_pack: parseFloat(predictedData.weight_netto_pack),
                         weight_brutto_pack: parseFloat(predictedData.weight_brutto_pack),
                         production_date: labelingDate, exp_date: expDatePack,
                         article: (selectedProduct?.article || '').padStart(14, '0'),
                         pack_number: predictedData.pack_number, box_number: predictedBoxNum,
                         batch_number: batchNumber || ''
-                    } as any);
+                    } as any;
+                    packBarcode = generateBarcode(fields, genData);
+                    // Recipe for recordPack to REBUILD the barcode with the ACTUAL box number.
+                    packBarcodeSpec = { fields, data: genData };
                 } catch (err) { console.error(err); }
             }
             const expDatePack = new Date(labelingDate);
@@ -446,7 +450,8 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                     nomenclature_id: selectedProduct.id,
                     weight_netto: parseFloat(predictedData.weight_netto_pack),
                     weight_brutto: parseFloat(predictedData.weight_brutto_pack),
-                    barcode_value: packBarcode, station_number: stationNumber,
+                    barcode_value: packBarcode, barcode_spec: packBarcodeSpec || undefined,
+                    station_number: stationNumber,
                     production_date: labelingDate.toISOString(),
                     expiration_date: expDatePack.toISOString(), batch: batchNumber || ''
                 },
@@ -462,7 +467,11 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
             setCurrentBoxId(actualBoxId);
             setCurrentBoxNumber(actualBoxNumber);
 
-            const finalPrintData = { ...predictedData, box_number: actualBoxNumber };
+            const finalPrintData = {
+                ...predictedData,
+                box_number: actualBoxNumber,
+                barcode: recordResult.barcodeValue ?? predictedData.barcode,
+            };
             if (recordResult.printDispatched) {
                 // Print already queued in main; failures arrive via printer-status-update.
                 const time = new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
@@ -603,19 +612,22 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                 const predictedBoxNum = localCurrentBoxNumber || predictedData.box_number;
 
                 let packBarcode = '';
+                let packBarcodeSpec: { fields: any[]; data: Record<string, any> } | null = null;
                 if (packBarcodeTemplate) {
                     try {
                         const fields = JSON.parse(packBarcodeTemplate.structure).fields;
                         const expDatePack = new Date(labelingDate);
                         expDatePack.setDate(labelingDate.getDate() + (selectedProduct?.exp_date || 0));
-                        packBarcode = generateBarcode(fields, {
+                        const genData = {
                             weight_netto_pack: parseFloat(predictedData.weight_netto_pack),
                             weight_brutto_pack: parseFloat(predictedData.weight_brutto_pack),
                             production_date: labelingDate, exp_date: expDatePack,
                             article: (selectedProduct?.article || '').padStart(14, '0'),
                             pack_number: predictedData.pack_number, box_number: predictedBoxNum,
                             batch_number: batchNumber || ''
-                        } as any);
+                        } as any;
+                        packBarcode = generateBarcode(fields, genData);
+                        packBarcodeSpec = { fields, data: genData };
                     } catch (err) { console.error(err); }
                 }
 
@@ -628,7 +640,8 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                         nomenclature_id: selectedProduct.id,
                         weight_netto: parseFloat(predictedData.weight_netto_pack),
                         weight_brutto: parseFloat(predictedData.weight_brutto_pack),
-                        barcode_value: packBarcode, station_number: stationNumber,
+                        barcode_value: packBarcode, barcode_spec: packBarcodeSpec || undefined,
+                        station_number: stationNumber,
                         production_date: labelingDate.toISOString(),
                         expiration_date: expDatePack.toISOString(), batch: batchNumber || ''
                     });
@@ -640,6 +653,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
 
                     const finalData = getLabelData(fixedWeightKg, false, undefined, overrides);
                     finalData.box_number = recordResult.boxNumber;
+                    if (recordResult.barcodeValue) finalData.barcode = recordResult.barcodeValue;
                     // Wait for label N-1 (its send overlapped our record-pack), then
                     // dispatch label N without awaiting it. Order is preserved by the
                     // main-process queues; a failed print aborts the batch on the next lap.

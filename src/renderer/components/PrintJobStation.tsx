@@ -452,19 +452,23 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
         const batchNumber = activeJob.batch_number || '';
 
         let packBarcode = '';
+        let packBarcodeSpec: { fields: any[]; data: Record<string, any> } | null = null;
         if (packBarcodeTemplate) {
             try {
                 const fields = JSON.parse(packBarcodeTemplate.structure).fields;
                 const expDatePack = new Date(labelingDate);
                 expDatePack.setDate(labelingDate.getDate() + (product?.exp_date || 0));
-                packBarcode = generateBarcode(fields, {
+                const genData = {
                     weight_netto_pack: parseFloat(predictedData.weight_netto_pack),
                     weight_brutto_pack: parseFloat(predictedData.weight_brutto_pack),
                     production_date: labelingDate, exp_date: expDatePack,
                     article: (product?.article || '').padStart(14, '0'),
                     pack_number: predictedData.pack_number, box_number: predictedBoxNum,
                     batch_number: batchNumber
-                } as any);
+                } as any;
+                packBarcode = generateBarcode(fields, genData);
+                // Recipe for recordPack to REBUILD the barcode with the ACTUAL box number.
+                packBarcodeSpec = { fields, data: genData };
             } catch (err) { console.error(err); }
         }
 
@@ -479,7 +483,8 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
                 nomenclature_id: product.id,
                 weight_netto: parseFloat(predictedData.weight_netto_pack),
                 weight_brutto: parseFloat(predictedData.weight_brutto_pack),
-                barcode_value: packBarcode, station_number: stationNumber,
+                barcode_value: packBarcode, barcode_spec: packBarcodeSpec || undefined,
+                station_number: stationNumber,
                 production_date: labelingDate.toISOString(),
                 expiration_date: expDatePack.toISOString(), batch: batchNumber
             },
@@ -491,7 +496,11 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
 
         if (!recordResult.success) throw new Error('Database recording failed');
 
-        const finalData = { ...predictedData, box_number: recordResult.boxNumber };
+        const finalData = {
+            ...predictedData,
+            box_number: recordResult.boxNumber,
+            barcode: recordResult.barcodeValue ?? predictedData.barcode,
+        };
         if (!recordResult.printDispatched && printerConfig.packPrinter) {
             // Browser-protocol printer — worker-window path stays renderer-driven.
             window.electron.invoke('print-label', {

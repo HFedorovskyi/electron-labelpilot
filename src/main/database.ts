@@ -4,6 +4,10 @@ import { randomUUID } from 'crypto';
 import { app } from 'electron';
 import { runMigrations } from './migrations';
 import log from './logger';
+// Static import (NOT require): tsconfig.electron only includes src/main+src/preload, so
+// shared modules reach dist-electron ONLY via the static import graph — a runtime
+// require('../shared/…') would compile fine and then fail to resolve in production.
+import { generateBarcode } from '../shared/barcodeGenerator';
 
 let db: Database.Database | null = null;
 
@@ -328,6 +332,13 @@ export function recordPack(data: {
   production_date?: string;
   expiration_date?: string;
   batch?: string;
+  // Optional recipe to REGENERATE the barcode once the ACTUAL box number is known.
+  // The renderer generates barcode_value with the PREDICTED box number; when the box
+  // number collides and gets renamed inside this transaction, a barcode encoding
+  // box_number would silently keep the stale number (label text gets patched, the
+  // scannable code doesn't). With the spec we rebuild it here — deterministic, so
+  // when the prediction was right the value is identical.
+  barcode_spec?: { fields: any[]; data: Record<string, any> };
 }) {
   const startTime = Date.now();
   const db = initDatabase();
@@ -378,7 +389,20 @@ export function recordPack(data: {
       if (!box) throw new Error('Could not find a unique box number after 50 attempts');
     }
 
-    // 2. Insert the pack
+    // 2. Regenerate the barcode with the ACTUAL box number (see barcode_spec docs above).
+    let barcodeValue = data.barcode_value;
+    if (data.barcode_spec?.fields?.length) {
+      try {
+        barcodeValue = generateBarcode(data.barcode_spec.fields, {
+          ...data.barcode_spec.data,
+          box_number: box.number,
+        });
+      } catch (e) {
+        console.error('Database: barcode regeneration failed — keeping the pre-generated value', e);
+      }
+    }
+
+    // 3. Insert the pack
     // ADDITIVE attribution: stamp the current operator (PIN-login layer) onto the pack row.
     // Reading the session must NEVER block a print — if anything throws or no operator is
     // logged in, we store null/'' and continue. This does not alter any weighing/print logic.
@@ -400,7 +424,7 @@ export function recordPack(data: {
       data.nomenclature_id,
       data.weight_netto,
       data.weight_brutto,
-      data.barcode_value,
+      barcodeValue,
       data.station_number || null,
       data.production_date || null,
       data.expiration_date || null,
@@ -411,7 +435,7 @@ export function recordPack(data: {
 
     const duration = Date.now() - startTime;
     console.log(`Database: recordPack completed in ${duration}ms (New box: ${newBoxCreated}, Box Number: ${box.number})`);
-    return { success: true, boxId: box.id, boxNumber: box.number, newBoxCreated };
+    return { success: true, boxId: box.id, boxNumber: box.number, newBoxCreated, barcodeValue };
   })();
 }
 

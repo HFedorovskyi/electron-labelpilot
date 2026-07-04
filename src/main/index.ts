@@ -383,7 +383,14 @@ app.whenReady().then(() => {
 
         let printDispatched = false;
         if (labelDoc && printerConfig && typeof printerConfig === 'object' && printerConfig.protocol !== 'browser') {
-            const printData = { ...data, box_number: recordResult.boxNumber };
+            // Patch in the ACTUAL box number and the barcode regenerated with it
+            // (recordPack rebuilds barcode_value when a barcode_spec is provided —
+            // otherwise the renderer's pre-generated value is kept).
+            const printData = {
+                ...data,
+                box_number: recordResult.boxNumber,
+                ...(recordResult.barcodeValue ? { barcode: recordResult.barcodeValue } : {}),
+            };
             void enqueuePrint(printerConfig, labelDoc, printData, docKey);
             printDispatched = true;
         }
