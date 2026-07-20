@@ -158,6 +158,14 @@ export function decrypt(buffer: Buffer): any {
     }
 
     // Legacy / unencrypted fallback: plain JSON (older files, or pre-LPI2 transition).
+    // Once a station is bound to a real license token, refuse plaintext — a cracked
+    // server must still produce a valid LPI2 blob (signed license + matching key).
+    // Unprovisioned / demo stations still accept plain JSON for first-run convenience.
+    if (loadToken()) {
+        throw new Error(
+            'Станция лицензирована: принимаются только зашифрованные файлы LPI2 (.lpi/.lps/.lpr).',
+        );
+    }
     try {
         const s = buffer.toString('utf-8').replace(/^﻿/, '').trim();
         return JSON.parse(s);
