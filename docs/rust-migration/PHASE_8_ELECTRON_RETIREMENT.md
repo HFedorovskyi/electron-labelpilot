@@ -20,6 +20,10 @@ Removed production surfaces:
 
 The application now has one renderer page, `index.html`, and one bridge, `window.desktopBridge`. Fallback label rasterization runs inside the Tauri renderer and is named `renderer-bitmap`.
 
+## One-time Electron update bridge
+
+Release packaging publishes two manifests for the same NSIS installer. Deployed 1.3.x clients read `latest.yml` through `electron-updater`; Tauri 2.x clients read the signed `latest.json` through `tauri-plugin-updater`. Both channels verify the exact installer bytes (`SHA-512` for Electron and the detached Tauri updater signature for Tauri). The Windows identifier and `%APPDATA%/electron-labelpilot` data directory remain unchanged, so the transition reuses the existing database, identity, license, printer profiles and outbox.
+
 ## Compatibility identifiers retained
 
 The following strings remain intentionally unchanged and do not load Electron code:

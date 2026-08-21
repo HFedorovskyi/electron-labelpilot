@@ -78,6 +78,11 @@ jobs:
             }
           }
           $manifest | ConvertTo-Json -Depth 8 | Set-Content "$output/latest.json" -Encoding utf8
+          ./scripts/new-legacy-electron-manifest.ps1 `
+            -InstallerPath $installer.FullName `
+            -Version $version `
+            -OutputPath "$output/latest.yml" `
+            -ReleaseDate $manifest.pub_date
           Get-ChildItem $output -File | Sort-Object Name | ForEach-Object {
             "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())  $($_.Name)"
           } | Set-Content "$output/SHA256SUMS.txt" -Encoding ascii

@@ -128,6 +128,15 @@ $latest = [ordered]@{
 $latestJson = $latest | ConvertTo-Json -Depth 8
 [System.IO.File]::WriteAllText((Join-Path $artifactPath "latest.json"), $latestJson, [System.Text.UTF8Encoding]::new($false))
 
+$legacyManifest = Join-Path $artifactPath "latest.yml"
+Invoke-Verified "legacy-electron-manifest" {
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repo "scripts/new-legacy-electron-manifest.ps1") `
+        -InstallerPath $installerOut `
+        -Version $version `
+        -OutputPath $legacyManifest `
+        -ReleaseDate $latest.pub_date
+}
+
 $hashRows = Get-ChildItem -LiteralPath $artifactPath -File |
     Where-Object Name -NotIn @("SHA256SUMS.txt", "verification.log") |
     Sort-Object Name |
@@ -141,6 +150,7 @@ $verification.Add("VERSION=$version")
 $verification.Add("INSTALLER=$installerOut")
 $verification.Add("SIGNATURE=$signatureOut")
 $verification.Add("LATEST_JSON=$(Join-Path $artifactPath 'latest.json')")
+$verification.Add("LATEST_YML=$legacyManifest")
 $verification.Add("INSTALLER_SHA256=$(Get-Sha256 $installerOut)")
 $verification.Add("RESULT=PASS")
 [System.IO.File]::WriteAllLines((Join-Path $artifactPath "verification.log"), $verification, [System.Text.UTF8Encoding]::new($false))
