@@ -42,10 +42,17 @@ jobs:
       - name: Run Rust tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
 
+      - name: Report external signing mode
+        if: env.TAURI_SIGNING_PRIVATE_KEY == ''
+        shell: pwsh
+        run: Write-Host 'Signing secret is not configured; CI verifies source and locally signed assets are published separately.'
+
       - name: Build signed NSIS bundle
+        if: env.TAURI_SIGNING_PRIVATE_KEY != ''
         run: npm run tauri:build
 
       - name: Create updater manifest and checksums
+        if: env.TAURI_SIGNING_PRIVATE_KEY != ''
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -76,13 +83,14 @@ jobs:
           } | Set-Content "$output/SHA256SUMS.txt" -Encoding ascii
 
       - name: Upload workflow artifact
+        if: env.TAURI_SIGNING_PRIVATE_KEY != ''
         uses: actions/upload-artifact@v4
         with:
           name: labelpilot-tauri-${{ github.ref_name }}
           path: release-tauri/*
 
       - name: Publish GitHub release assets
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') && env.TAURI_SIGNING_PRIVATE_KEY != ''
         uses: softprops/action-gh-release@v2
         with:
           files: release-tauri/*
