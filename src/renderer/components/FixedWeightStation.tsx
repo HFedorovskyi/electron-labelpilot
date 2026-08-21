@@ -1,14 +1,15 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback, lazy, Suspense } from 'react';
 import { Printer, RefreshCw, Box, AlertCircle, X, Hash, Calendar, Search, Scale, Package, Play, Square, CheckCircle2, Layers, Trash2 } from 'lucide-react';
 import { generateBarcode, type BarcodeData } from '../utils/barcodeGenerator';
 import { computeDocKey } from '../utils/docKey';
 import { printPalletSheet } from '../utils/palletPrint';
 import { useTranslation } from '../i18n';
-import NumericKeypad from './NumericKeypad';
-import DeleteItemsModal from './DeleteItemsModal';
-import DatePickerModal from './DatePickerModal';
-import ProductSelectionModal from './ProductSelectionModal';
+import NumericKeypad from './LazyNumericKeypad';
+import DeleteItemsModal from './LazyDeleteItemsModal';
 import { useSession } from './SessionProvider';
+
+const DatePickerModal = lazy(() => import('./DatePickerModal'));
+const ProductSelectionModal = lazy(() => import('./ProductSelectionModal'));
 
 type SubMode = 'scale' | 'count';
 
@@ -94,7 +95,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
     useEffect(() => {
         const loadStationInfo = async () => {
             try {
-                const info = await window.electron.invoke('get-station-info');
+                const info = await window.desktopBridge.invoke('get-station-info');
                 if (info?.station_number) setStationNumber(info.station_number);
             } catch (e) { console.error('Failed to load station info', e); }
         };
@@ -106,7 +107,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
     useEffect(() => {
         const syncCounters = async () => {
             try {
-                const latest = await window.electron.invoke('get-latest-counters', selectedProduct?.id);
+                const latest = await window.desktopBridge.invoke('get-latest-counters', selectedProduct?.id);
                 if (latest) {
                     if (latest.totalUnits !== undefined) setTotalUnits(latest.totalUnits);
                     if (latest.totalBoxes !== undefined) setTotalBoxes(latest.totalBoxes);
@@ -251,14 +252,14 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
 
     const loadProducts = async (query = '') => {
         try {
-            const list = await window.electron.invoke('get-fixed-weight-products', query);
+            const list = await window.desktopBridge.invoke('get-fixed-weight-products', query);
             setProducts(list);
         } catch (err) { console.error(err); }
     };
 
     // --- EFFECTS ---
     useEffect(() => {
-        const removeReadingListener = window.electron.on('scale-reading', (data: any) => {
+        const removeReadingListener = window.desktopBridge.on('scale-reading', (data: any) => {
             if (activeTabRef.current !== 'fixedWeight') return; // skip while hidden
             if (data && typeof data === 'object' && 'weight' in data) {
                 const w = typeof data.weight === 'number' ? data.weight : parseFloat(String(data.weight));
@@ -272,15 +273,15 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
             const match = ws.match(/(\d+\.\d+)/);
             if (match) { setWeight(match[1]); weightRef.current = match[1]; }
         });
-        const removeStatusListener = window.electron.on('scale-status', (s: any) => setStatus(s));
-        const removeErrorListener = window.electron.on('scale-error', (msg: string) => {
+        const removeStatusListener = window.desktopBridge.on('scale-status', (s: any) => setStatus(s));
+        const removeErrorListener = window.desktopBridge.on('scale-error', (msg: string) => {
             setAlertMessage(`${t('ws.errorPrefix')}: ${msg}`);
         });
-        window.electron.invoke('get-scale-status').then((s: string) => { if (s) setStatus(s); });
-        const removeUpdateListener = window.electron.on('data-updated', () => {
+        window.desktopBridge.invoke('get-scale-status').then((s: string) => { if (s) setStatus(s); });
+        const removeUpdateListener = window.desktopBridge.on('data-updated', () => {
             loadProducts();
             setSyncVersion(prev => prev + 1);
-            window.electron.invoke('get-containers').then((cnts: any) => setContainers(cnts)).catch(console.error);
+            window.desktopBridge.invoke('get-containers').then((cnts: any) => setContainers(cnts)).catch(console.error);
         });
         return () => { removeReadingListener(); removeStatusListener(); removeErrorListener(); removeUpdateListener(); };
     }, []);
@@ -302,8 +303,8 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
     }, [selectedProduct]);
 
     useEffect(() => {
-        window.electron.invoke('get-printer-config').then((cfg: any) => { if (cfg) setPrinterConfig(cfg); });
-        const rm = window.electron.on('printer-config-updated', (c: any) => setPrinterConfig(c));
+        window.desktopBridge.invoke('get-printer-config').then((cfg: any) => { if (cfg) setPrinterConfig(cfg); });
+        const rm = window.desktopBridge.on('printer-config-updated', (c: any) => setPrinterConfig(c));
         return () => rm();
     }, []);
 
@@ -311,7 +312,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
     // Re-runs when printerConfig changes (new IP, new connection type).
     useEffect(() => {
         if (!printerConfig.packPrinter && !printerConfig.boxPrinter) { setPrinterStatus('unconfigured'); return; }
-        window.electron.invoke('printer:warmup', { printerIds: ['pack', 'box'] })
+        window.desktopBridge.invoke('printer:warmup', { printerIds: ['pack', 'box'] })
             .then((res: any) => { if (res?.results?.pack) setPrinterStatus(res.results.pack); })
             .catch(() => { /* best-effort */ });
     }, [printerConfig]);
@@ -319,7 +320,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
     // Live pack-printer status from main-process pushes. Needed because merged
     // record-and-print dispatches the print in main (no per-print promise to .then).
     useEffect(() => {
-        const remove = window.electron.on('printer-status-update', (u: any) => {
+        const remove = window.desktopBridge.on('printer-status-update', (u: any) => {
             const packId = (printerConfig.packPrinter as any)?.id;
             if (!packId || !u || u.id !== packId) return;
             if (u.status === 'error') setPrinterStatus('unreachable');
@@ -331,19 +332,19 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
     // Pre-upload static backgrounds for the current templates so first print is a cache hit.
     useEffect(() => {
         if (labelDoc) {
-            window.electron.invoke('printer:warmup-bg', { labelDoc, role: 'pack' }).catch(() => { /* best-effort */ });
+            window.desktopBridge.invoke('printer:warmup-bg', { labelDoc, role: 'pack' }).catch(() => { /* best-effort */ });
         }
         if (boxLabelDoc) {
-            window.electron.invoke('printer:warmup-bg', { labelDoc: boxLabelDoc, role: 'box' }).catch(() => { /* best-effort */ });
+            window.desktopBridge.invoke('printer:warmup-bg', { labelDoc: boxLabelDoc, role: 'box' }).catch(() => { /* best-effort */ });
         }
     }, [labelDoc, boxLabelDoc]);
 
     useEffect(() => {
-        window.electron.invoke('get-containers').then(setContainers).catch(console.error);
+        window.desktopBridge.invoke('get-containers').then(setContainers).catch(console.error);
     }, []);
 
     useEffect(() => {
-        window.electron.invoke('get-numbering-config').then((cfg: any) => setNumberingConfig(cfg)).catch(console.error);
+        window.desktopBridge.invoke('get-numbering-config').then((cfg: any) => setNumberingConfig(cfg)).catch(console.error);
         loadProducts();
     }, []);
 
@@ -354,14 +355,14 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
             let pDoc = null;
             if (selectedProduct.templates_pack_label) {
                 try {
-                    const doc = await window.electron.invoke('get-label', selectedProduct.templates_pack_label);
+                    const doc = await window.desktopBridge.invoke('get-label', selectedProduct.templates_pack_label);
                     if (doc?.structure) { pDoc = JSON.parse(doc.structure); setLabelDoc(pDoc); setLabelDocKey(computeDocKey(doc.structure)); }
                 } catch (err) { console.error(err); }
             } else { setLabelDoc(null); setLabelDocKey(null); }
             let bDoc = null;
             if (selectedProduct.templates_box_label) {
                 try {
-                    const doc = await window.electron.invoke('get-label', selectedProduct.templates_box_label);
+                    const doc = await window.desktopBridge.invoke('get-label', selectedProduct.templates_box_label);
                     if (doc?.structure) { bDoc = JSON.parse(doc.structure); setBoxLabelDoc(bDoc); setBoxLabelDocKey(computeDocKey(doc.structure)); }
                 } catch (err) { console.error(err); }
             } else { setBoxLabelDoc(null); setBoxLabelDocKey(null); }
@@ -371,7 +372,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                 if (!items) return setFn(null);
                 const bc = items.find((o: any) => o.type === 'barcode');
                 if (bc?.templateId) {
-                    try { setFn(await window.electron.invoke('get-barcode-template', bc.templateId)); }
+                    try { setFn(await window.desktopBridge.invoke('get-barcode-template', bc.templateId)); }
                     catch { setFn(null); }
                 } else { setFn(null); }
             };
@@ -429,6 +430,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                     const expDatePack = new Date(labelingDate);
                     expDatePack.setDate(labelingDate.getDate() + (selectedProduct?.exp_date || 0));
                     const genData = {
+                        ...predictedData,
                         weight_netto_pack: parseFloat(predictedData.weight_netto_pack),
                         weight_brutto_pack: parseFloat(predictedData.weight_brutto_pack),
                         production_date: labelingDate, exp_date: expDatePack,
@@ -445,7 +447,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
             expDatePack.setDate(labelingDate.getDate() + (selectedProduct?.exp_date || 0));
             // Merged record+print: DB transaction and print dispatch in one main-process
             // turn — no second IPC round trip, no renderer event-loop requeue.
-            const recordResult = await window.electron.invoke('record-and-print', {
+            const recordResult = await window.desktopBridge.invoke('record-and-print', {
                 record: {
                     number: predictedData.pack_number, box_number: predictedBoxNum,
                     nomenclature_id: selectedProduct.id,
@@ -480,7 +482,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                 if (!isAuto) showPrintToast(t('ws.printSentToast'));
             } else if (printerConfig.packPrinter) {
                 // Browser-protocol printer — worker-window path stays renderer-driven.
-                window.electron.invoke('print-label', {
+                window.desktopBridge.invoke('print-label', {
                     silent: true, labelDoc, data: finalPrintData,
                     printerConfig: printerConfig.packPrinter
                 })
@@ -523,7 +525,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
         {
             const boxCont = containers.find(c => c.id === selectedProduct?.box_container_id);
             const brutBox = finalBoxWeight + (boxCont?.weight || 0) / 1000;
-            await window.electron.invoke('close-box', { boxId, weightNetto: finalBoxWeight, weightBrutto: brutBox });
+            await window.desktopBridge.invoke('close-box', { boxId, weightNetto: finalBoxWeight, weightBrutto: brutBox });
         }
         if (!boxLabelDoc) return;
         const boxLimit = selectedProduct?.close_box_counter || 0;
@@ -538,6 +540,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                 const expDateBox = new Date(labelingDate);
                 expDateBox.setDate(labelingDate.getDate() + (selectedProduct?.exp_date || 0));
                 boxBarcode = generateBarcode(fields, {
+                    ...baseData,
                     weight_netto_box: finalBoxWeight, weight_brutto_box: brutBox,
                     production_date: labelingDate, exp_date: expDateBox,
                     article: (selectedProduct?.article || '').padStart(14, '0'),
@@ -551,7 +554,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
         const boxData = { ...baseData, is_box: true, count: boxLimit, pack_counter: String(finalUnitsInBox), weight_netto: finalBoxWeight.toFixed(3), barcode: finalBarcode };
         // Fire-and-forget: the box-label send (150ms TCP … seconds on serial) must not block
         // the next stable-weight pack — the main-process queues preserve output order.
-        window.electron.invoke('print-label', { silent: true, labelDoc: boxLabelDoc, docKey: boxLabelDocKey || undefined, data: boxData, printerConfig: printerConfig.boxPrinter || undefined })
+        window.desktopBridge.invoke('print-label', { silent: true, labelDoc: boxLabelDoc, docKey: boxLabelDocKey || undefined, data: boxData, printerConfig: printerConfig.boxPrinter || undefined })
             .catch((err: any) => console.error('[printBoxLabel] print failed', err));
         setLastPrinted({ doc: boxLabelDoc, data: boxData });
     };
@@ -570,7 +573,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
             // No box number (shouldn't happen) — still close the box in DB.
             const boxCont = containers.find(c => c.id === selectedProduct?.box_container_id);
             const brutBox = finalBoxWeight + (boxCont?.weight || 0) / 1000;
-            await window.electron.invoke('close-box', { boxId: currentBoxId, weightNetto: finalBoxWeight, weightBrutto: brutBox });
+            await window.desktopBridge.invoke('close-box', { boxId: currentBoxId, weightNetto: finalBoxWeight, weightBrutto: brutBox });
         }
         setCurrentBoxId(null); setCurrentBoxNumber(null);
     };
@@ -578,7 +581,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
     // --- REPEAT ---
     const handleRepeat = async () => {
         if (!lastPrinted) { setAlertMessage(t('ws.noReprintData')); return; }
-        await window.electron.invoke('print-label', { silent: true, labelDoc: lastPrinted.doc, data: lastPrinted.data, printerConfig: printerConfig.packPrinter });
+        await window.desktopBridge.invoke('print-label', { silent: true, labelDoc: lastPrinted.doc, data: lastPrinted.data, printerConfig: printerConfig.packPrinter });
     };
 
     // --- COUNT MODE: Batch print ---
@@ -631,6 +634,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                         const expDatePack = new Date(labelingDate);
                         expDatePack.setDate(labelingDate.getDate() + (selectedProduct?.exp_date || 0));
                         const genData = {
+                            ...predictedData,
                             weight_netto_pack: parseFloat(predictedData.weight_netto_pack),
                             weight_brutto_pack: parseFloat(predictedData.weight_brutto_pack),
                             production_date: labelingDate, exp_date: expDatePack,
@@ -654,7 +658,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                     await prevPrint;
                     if (cancelCountRef.current) break;
 
-                    const recordResult = await window.electron.invoke('record-pack', {
+                    const recordResult = await window.desktopBridge.invoke('record-pack', {
                         number: predictedData.pack_number, box_number: predictedBoxNum,
                         nomenclature_id: selectedProduct.id,
                         weight_netto: parseFloat(predictedData.weight_netto_pack),
@@ -675,7 +679,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                     if (recordResult.barcodeValue) finalData.barcode = recordResult.barcodeValue;
                     // Dispatch fire-and-forget; a failed print aborts the batch on the
                     // NEXT lap (this pack is already recorded, so it still gets counted).
-                    prevPrint = window.electron.invoke('print-label', {
+                    prevPrint = window.desktopBridge.invoke('print-label', {
                         silent: true, labelDoc, docKey: labelDocKey || undefined, data: finalData,
                         printerConfig: printerConfig.packPrinter || undefined
                     }).then((ok: any) => {
@@ -1027,12 +1031,12 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
             )}
 
             {isKeypadOpen && <NumericKeypad value={batchNumber} onUpdate={setBatchNumber} onClose={() => setIsKeypadOpen(false)} title={t('ws.batchModalTitle')} />}
-            {isDatePickerOpen && <DatePickerModal value={labelingDate} onUpdate={setLabelingDate} onClose={() => setIsDatePickerOpen(false)} title={t('ws.dateModalTitle')} />}
+            {isDatePickerOpen && <Suspense fallback={null}><DatePickerModal value={labelingDate} onUpdate={setLabelingDate} onClose={() => setIsDatePickerOpen(false)} title={t('ws.dateModalTitle')} /></Suspense>}
             {showPacksKeypad && <NumericKeypad value={String(packsPerBoxInput)} onUpdate={(v) => setPacksPerBoxInput(parseInt(v) || 0)} onClose={() => setShowPacksKeypad(false)} title={t('fw.packsPerBox')} />}
             {showBoxesKeypad && <NumericKeypad value={String(totalBoxesInput)} onUpdate={(v) => setTotalBoxesInput(parseInt(v) || 0)} onClose={() => setShowBoxesKeypad(false)} title={t('fw.totalBoxes')} />}
             <DeleteItemsModal isOpen={isDeleteModalOpen} nomenclatureId={selectedProduct?.id ?? null} onClose={() => setIsDeleteModalOpen(false)}
                 onDeleted={async () => {
-                    const latest = await window.electron.invoke('get-latest-counters', selectedProduct?.id);
+                    const latest = await window.desktopBridge.invoke('get-latest-counters', selectedProduct?.id);
                     if (latest) {
                         setTotalUnits(latest.totalUnits); setTotalBoxes(latest.totalBoxes);
                         setUnitsInBox(latest.unitsInBox); setBoxesInPallet(latest.boxesInPallet);
@@ -1040,7 +1044,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                         setBoxNetWeight(latest.boxNetWeight || 0);
                     }
                 }} />
-            {isProductModalOpen && <ProductSelectionModal products={products} onSelect={handleSelectProduct} onClose={() => setIsProductModalOpen(false)} />}
+            {isProductModalOpen && <Suspense fallback={null}><ProductSelectionModal products={products} onSelect={handleSelectProduct} onClose={() => setIsProductModalOpen(false)} /></Suspense>}
         </div>
     );
 };

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { User, RefreshCw, ArrowRight, LogIn } from 'lucide-react';
 import { useTranslation } from '../i18n';
-import NumericKeypad from './NumericKeypad';
+import NumericKeypad from './LazyNumericKeypad';
 import { useSession } from './SessionProvider';
 
 interface OperatorTile {
@@ -37,7 +37,7 @@ const OperatorLoginScreen: React.FC<OperatorLoginScreenProps> = ({ onLoggedIn })
     const loadOperators = async () => {
         setLoading(true);
         try {
-            const res = await window.electron.invoke('operators:list');
+            const res = await window.desktopBridge.invoke('operators:list');
             setOperators(res?.operators || []);
             setLastUuid(res?.lastOperatorUuid || null);
         } catch (e) {
@@ -50,7 +50,7 @@ const OperatorLoginScreen: React.FC<OperatorLoginScreenProps> = ({ onLoggedIn })
     useEffect(() => {
         loadOperators();
         // Refresh tiles when a sync completes (operators may have just arrived).
-        const remove = window.electron.on('data-updated', () => loadOperators());
+        const remove = window.desktopBridge.on('data-updated', () => loadOperators());
         return () => remove();
     }, []);
 
@@ -58,7 +58,7 @@ const OperatorLoginScreen: React.FC<OperatorLoginScreenProps> = ({ onLoggedIn })
         setBusy(true);
         setError(null);
         try {
-            const res = await window.electron.invoke('session:set', { uuid, pin: enteredPin });
+            const res = await window.desktopBridge.invoke('session:set', { uuid, pin: enteredPin });
             if (res?.ok) {
                 await refresh();
                 // Deliberately NOT calling onLoggedIn() here: the gate closes via the
@@ -93,7 +93,7 @@ const OperatorLoginScreen: React.FC<OperatorLoginScreenProps> = ({ onLoggedIn })
         setError(null);
         try {
             // Reuse the existing offline import flow (prompts for a .lps bundle).
-            await window.electron.invoke('offline-import');
+            await window.desktopBridge.invoke('offline-import');
         } catch (e) {
             /* ignore — user may have cancelled */
         } finally {

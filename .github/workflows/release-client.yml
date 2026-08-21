@@ -3,19 +3,18 @@ name: Build & Release Client
 on:
   push:
     tags:
-      - 'v*'    # срабатывает на git tag v1.2.0
+      - 'v*'
   workflow_dispatch:
     inputs:
       version:
-        description: 'Версия клиента (например: 1.2.0)'
+        description: 'Версия клиента (например: 2.0.0)'
         required: true
 
 jobs:
   build:
-    runs-on: windows-2022    # pinned: windows-latest moved to VS18/Python3.14 which node-gyp can't use to build better-sqlite3
+    runs-on: windows-2022
     permissions:
       contents: write
-
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -28,47 +27,58 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: npm
 
-      - name: Setup Python (node-gyp native builds, e.g. better-sqlite3)
-        uses: actions/setup-python@v5
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          python-version: '3.11'
+          toolchain: stable
 
-      - name: Get version
-        id: get_version
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Resolve release version
+        id: version
+        shell: pwsh
         run: |
-          if ("${{ inputs.version }}" -ne "") {
-            echo "VERSION=${{ inputs.version }}" >> $env:GITHUB_OUTPUT
-          } else {
-            $tag = "${{ github.ref_name }}"
-            $version = $tag -replace '^v', ''
-            echo "VERSION=$version" >> $env:GITHUB_OUTPUT
+          $requested = '${{ inputs.version }}'
+          $version = if ($requested) { $requested } else { '${{ github.ref_name }}' -replace '^v', '' }
+          $packageVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $tauriVersion = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          if ($version -ne $packageVersion -or $version -ne $tauriVersion) {
+            throw "Release version $version differs from package=$packageVersion or tauri=$tauriVersion"
           }
+          "VERSION=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Run Tauri migration contracts
+        run: npm run test:migration
+
+      - name: Run Rust tests
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml
+
+      - name: Build signed Tauri release
         shell: pwsh
-
-      - name: Install dependencies
-        run: npm install
-
-      - name: Build renderer (Vite)
-        run: npm run build
-
-      - name: Build Electron main process
-        run: npm run electron:build
-
-      - name: List intermediate artifacts
+        env:
+          LABELPILOT_TAURI_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          LABELPILOT_TAURI_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          ls -R dist/
-          ls -R dist-electron/
-        shell: pwsh
+          if (-not $env:LABELPILOT_TAURI_PRIVATE_KEY) { throw 'TAURI_SIGNING_PRIVATE_KEY secret is empty' }
+          $keyPath = Join-Path $env:RUNNER_TEMP 'labelpilot-updater.key'
+          [IO.File]::WriteAllText($keyPath, $env:LABELPILOT_TAURI_PRIVATE_KEY, [Text.UTF8Encoding]::new($false))
+          $publicKey = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).plugins.updater.pubkey
+          [IO.File]::WriteAllText("$keyPath.pub", $publicKey, [Text.UTF8Encoding]::new($false))
+          ./scripts/build-tauri-release.ps1 `
+            -ArtifactDirectory 'artifacts/ci-release' `
+            -SigningKeyPath $keyPath `
+            -SigningKeyPassword $env:LABELPILOT_TAURI_KEY_PASSWORD `
+            -SkipTests
 
-      - name: Build & Package
-        run: npx electron-builder --win --publish never
-
-      - name: List final artifacts
-        run: ls -R dist-build/
-        shell: pwsh
-
-      - name: Create Release & Upload Assets
+      - name: Upload release assets
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
@@ -77,13 +87,8 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            dist-build/*.exe
-            dist-build/latest.yml
-            dist-build/*.blockmap
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      # NOTE: the installer is NOT mirrored to Supabase Storage (a ~117 MB .exe exceeds the
-      # Free-plan 50 MB file limit). The sales site serves downloads via the "download-client"
-      # Edge Function, which streams the latest GitHub release asset server-side (GitHub origin
-      # hidden). Nothing extra to publish here.
+            artifacts/ci-release/*.exe
+            artifacts/ci-release/*.sig
+            artifacts/ci-release/latest.json
+            artifacts/ci-release/SHA256SUMS.txt
+            artifacts/ci-release/verification.log

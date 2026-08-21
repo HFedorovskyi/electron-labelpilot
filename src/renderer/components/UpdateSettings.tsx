@@ -50,17 +50,17 @@ const UpdateSettings = () => {
     const [rollbackMsg, setRollbackMsg] = useState<string>('');
 
     useEffect(() => {
-        window.electron.invoke('updater:get-version').then(setCurrentVersion).catch(() => { });
+        window.desktopBridge.invoke('updater:get-version').then(setCurrentVersion).catch(() => { });
         loadBackups();
 
         // Listen for updater events from main process
-        const removeProgress = window.electron.on('updater:progress', (data: any) => {
+        const removeProgress = window.desktopBridge.on('updater:progress', (data: any) => {
             setProgress(Math.round(data.percent));
         });
-        const removeDownloaded = window.electron.on('updater:downloaded', () => {
+        const removeDownloaded = window.desktopBridge.on('updater:downloaded', () => {
             setPhase('ready');
         });
-        const removeError = window.electron.on('updater:error', (data: any) => {
+        const removeError = window.desktopBridge.on('updater:error', (data: any) => {
             setPhase('error');
             setErrorMsg(data.message);
         });
@@ -75,7 +75,7 @@ const UpdateSettings = () => {
     const loadBackups = async () => {
         setLoadingBackups(true);
         try {
-            const list = await window.electron.invoke('updater:list-backups');
+            const list = await window.desktopBridge.invoke('updater:list-backups');
             setBackups(list || []);
         } catch {
             setBackups([]);
@@ -88,7 +88,7 @@ const UpdateSettings = () => {
         setPhase('checking');
         setErrorMsg('');
         try {
-            const result: UpdateCheckResult = await window.electron.invoke('updater:check');
+            const result: UpdateCheckResult = await window.desktopBridge.invoke('updater:check');
             setUpdateInfo(result);
             if (!result.available) {
                 setPhase('up-to-date');
@@ -107,7 +107,7 @@ const UpdateSettings = () => {
         setPhase('downloading');
         setProgress(0);
         try {
-            await window.electron.invoke('updater:download');
+            await window.desktopBridge.invoke('updater:download');
         } catch (err: any) {
             setPhase('error');
             setErrorMsg(err.message || t('updates.downloadError'));
@@ -115,11 +115,11 @@ const UpdateSettings = () => {
     };
 
     const handleInstall = async () => {
-        await window.electron.invoke('updater:install');
+        await window.desktopBridge.invoke('updater:install');
     };
 
     const handleOfflineInstall = async () => {
-        const res = await window.electron.invoke('updater:install-offline');
+        const res = await window.desktopBridge.invoke('updater:install-offline');
         if (!res.success) {
             setPhase('error');
             setErrorMsg(res.message);
@@ -131,7 +131,7 @@ const UpdateSettings = () => {
         setRollingBack(true);
         setRollbackMsg('');
         try {
-            const res = await window.electron.invoke('updater:rollback', rollbackId);
+            const res = await window.desktopBridge.invoke('updater:rollback', rollbackId);
             setRollbackMsg(res.message);
             if (res.success) loadBackups();
         } catch (err: any) {

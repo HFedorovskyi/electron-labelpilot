@@ -12,11 +12,11 @@ export function saveLang(lang: Lang): void {
     localStorage.setItem(LANG_KEY, lang);
     // Sync to main process config as well
     try {
-        if (window.electron) {
-            window.electron.invoke('get-printer-config').then((config: any) => {
+        if (window.desktopBridge) {
+            window.desktopBridge.invoke('get-printer-config').then((config: any) => {
                 if (config) {
                     config.language = lang;
-                    window.electron.send('save-printer-config', config);
+                    window.desktopBridge.send('save-printer-config', config);
                 }
             });
         }

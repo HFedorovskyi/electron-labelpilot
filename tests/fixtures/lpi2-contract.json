@@ -1,0 +1,26 @@
+{
+  "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+  "token": "eyJjdXN0b21lciI6IkZpeHR1cmUgRmFjdG9yeSIsImxpY2Vuc2VfaWQiOiJmaXh0dXJlLWxpY2Vuc2UtMjAyNiIsImtleV92ZXJzaW9uIjozLCJlZGl0aW9uIjoidGVzdCIsImZlYXR1cmVzIjpbInN5bmMiLCJwcmludGluZyJdfQ.d_VtTFvlPmkZHZGV6AwJE9vgbCOSWOj_yLiA3eaT8kZ-hFekGVBnhJ_wUY2kpIicFztj2S5CcPUIE1cGsHlnAQ",
+  "iv_hex": "000102030405060708090a0b0c0d0e0f",
+  "blob_base64": "TFBJMgpleUpqZFhOMGIyMWxjaUk2SWtacGVIUjFjbVVnUm1GamRHOXllU0lzSW14cFkyVnVjMlZmYVdRaU9pSm1hWGgwZFhKbExXeHBZMlZ1YzJVdE1qQXlOaUlzSW10bGVWOTJaWEp6YVc5dUlqb3pMQ0psWkdsMGFXOXVJam9pZEdWemRDSXNJbVpsWVhSMWNtVnpJanBiSW5ONWJtTWlMQ0p3Y21sdWRHbHVaeUpkZlEuZF9WdFRGdmxQbWtaSFpHVjZBd0pFOXZnYkNPU1dPal95TGlBM2VhVDhrWi1oRmVrR1ZCbmhKX3dVWTJrcElpY0Z6dGoyUzVDY1BVSUUxY0dzSGxuQVEKAAECAwQFBgcICQoLDA0ODxAip2h7DuhIL8YsDGrERxrT5QjMsFMT1jInmB7Si5Yv0udk4Km0BWjb9SYDTo21ko/mPYXc5KaQiZnW4cIv2dnuF3zoxNcsWb1ilrhGV7xmpnuxRhRlwgB/N4ND4D2phrJygm1Bof41XK2r4CP0K+nEYLpVjxymyyNmhdaOCsCISZK1rqTO901mw4uzPhmEBlbupOv8KhkS85KD0LgyhDPQ35TsCoBt+xa5BdrTV8HB6wMTkDcVlFf/aV5dhzWWgYEot5qiAoyo3KE3hRlWmxdBAmjSWWoM9mFES1+MdodBlvYr6fy+5V6MN7UuhO+B1D0jbhuyXrL7zLoSg6IJ80FR1JZF0zwpZrCy5PauQEPC64TlPcZTO/0GkKX0Rz+weH6MwO1AoIdlTQGvV0KW8yc=",
+  "plaintext": {
+    "station": {
+      "uuid": "fixture-station",
+      "number": 7,
+      "name": "Fixture station",
+      "server_url": "http://192.0.2.25:8000"
+    },
+    "payload": {
+      "nomenclature": [],
+      "containers": [],
+      "barcodes": [],
+      "labels": [],
+      "operators": []
+    },
+    "meta": {
+      "type": "FULL_SYNC",
+      "generated_at": "2026-08-13T20:00:00Z",
+      "min_client_version": "1.3.0"
+    }
+  }
+}

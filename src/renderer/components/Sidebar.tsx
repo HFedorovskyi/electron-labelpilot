@@ -1,6 +1,6 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
-import { Scale, Settings, Package, LogOut, ChevronLeft, Menu, Weight, ClipboardList, User, UserCog, KeyRound } from 'lucide-react';
+import { Scale, Settings, Package, LogOut, ChevronLeft, Menu, Weight, ClipboardList, User, UserCog, KeyRound, ListRestart, Stethoscope } from 'lucide-react';
 import clsx from 'clsx';
 import { useTranslation } from '../i18n';
 import { useLicenseStatus } from '../hooks/useLicenseStatus';
@@ -44,13 +44,15 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, serverStatus
         { id: 'weighing', labelKey: 'sidebar.weighing', icon: Scale },
         { id: 'fixedWeight', labelKey: 'sidebar.fixedWeight', icon: Weight },
         { id: 'printJob', labelKey: 'sidebar.printJob', icon: ClipboardList },
+        { id: 'printQueue', labelKey: 'sidebar.printQueue', icon: ListRestart },
+        { id: 'printerDiagnostics', labelKey: 'sidebar.printerDiagnostics', icon: Stethoscope },
         { id: 'products', labelKey: 'sidebar.products', icon: Package },
         { id: 'license', labelKey: 'license.title', icon: KeyRound },
         { id: 'settings', labelKey: 'sidebar.settings', icon: Settings },
     ];
 
     const handleExit = () => {
-        window.electron.send('quit-app', {});
+        window.desktopBridge.send('quit-app', {});
     };
 
     return (
@@ -58,30 +60,31 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, serverStatus
             "bg-white/50 dark:bg-neutral-900/50 backdrop-blur border-r border-neutral-200 dark:border-neutral-600 flex flex-col transition-all duration-300",
             isCollapsed ? "w-[4.5rem] p-3" : "w-64 p-4"
         )}>
-            <div className={clsx("flex items-center gap-1.5 py-6 mb-6", isCollapsed ? "justify-center" : "justify-between")}>
+            <div className={clsx("flex items-center py-6 mb-6", isCollapsed ? "justify-center" : "gap-2")}>
                 {isCollapsed ? (
                     <button onClick={toggleCollapse} className="p-2 hover:bg-neutral-100 dark:hover:bg-white/5 rounded-xl transition-colors">
                         <Menu className="w-6 h-6 text-neutral-500 dark:text-neutral-400" />
                     </button>
                 ) : (
                     <>
-                        <div className="flex items-center gap-1.5 overflow-hidden">
+                        <div className="flex min-w-0 flex-1 items-center gap-2">
                             <div className="flex items-center justify-center shrink-0">
-                                <img src="./sidebar-logo.svg" alt="LabelPilot Logo" className="w-10 h-10" />
+                                <img src="./sidebar-logo.svg" alt="LabelPilot Logo" className="w-9 h-9" />
                             </div>
-                            <h1 className="text-2xl font-black tracking-tighter whitespace-nowrap text-neutral-800 dark:text-white" style={{ fontFamily: "'Outfit', sans-serif", textShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>LabelPilot</h1>
+                            <h1 className="shrink-0 whitespace-nowrap text-[1.35rem] leading-none font-black tracking-[-0.035em] text-neutral-800 dark:text-white" style={{ fontFamily: "'Outfit', sans-serif", textShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>LabelPilot</h1>
                         </div>
-                        <button onClick={toggleCollapse} className="p-1.5 hover:bg-neutral-100 dark:hover:bg-white/5 rounded-lg transition-colors shrink-0 outline-none">
+                        <button onClick={toggleCollapse} aria-label={t('sidebar.collapse')} className="p-1.5 hover:bg-neutral-100 dark:hover:bg-white/5 rounded-lg transition-colors shrink-0 outline-none">
                             <ChevronLeft className="w-5 h-5 text-neutral-500 dark:text-neutral-400" />
                         </button>
                     </>
                 )}
             </div>
 
-            <div className="space-y-2 flex-1">
+            <div className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain pr-1">
                 {menuItems.map((item) => (
                     <button
                         key={item.id}
+                        data-tab-id={item.id}
                         onClick={() => setActiveTab(item.id)}
                         title={isCollapsed ? t(item.labelKey) : undefined}
                         className={clsx(

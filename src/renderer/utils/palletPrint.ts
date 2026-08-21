@@ -30,7 +30,7 @@ export async function printPalletSheet(args: PalletPrintArgs): Promise<void> {
         // caused a false "pallet printer not configured".
         let cfg: any = args.printerConfig;
         try {
-            const fresh = await window.electron.invoke('get-printer-config');
+            const fresh = await window.desktopBridge.invoke('get-printer-config');
             if (fresh) cfg = fresh;
         } catch { /* fall back to passed config */ }
 
@@ -43,11 +43,11 @@ export async function printPalletSheet(args: PalletPrintArgs): Promise<void> {
         //    fall back to any label whose canvas.labelType === 'pallet'.
         let palletDoc: any = null;
         if (selectedProduct?.templates_pallet_label) {
-            const doc = await window.electron.invoke('get-label', selectedProduct.templates_pallet_label);
+            const doc = await window.desktopBridge.invoke('get-label', selectedProduct.templates_pallet_label);
             if (doc?.structure) { try { palletDoc = JSON.parse(doc.structure); } catch { /* ignore */ } }
         }
         if (!palletDoc) {
-            const all = await window.electron.invoke('get-all-labels');
+            const all = await window.desktopBridge.invoke('get-all-labels');
             const found = (all || []).find((l: any) => {
                 try { return JSON.parse(l.structure)?.canvas?.labelType === 'pallet'; } catch { return false; }
             });
@@ -56,18 +56,29 @@ export async function printPalletSheet(args: PalletPrintArgs): Promise<void> {
         if (!palletDoc) { setAlert(t('pallet.errNoTemplate')); return; }
 
         // 2. Aggregated pallet render-data (current open pallet) from the main process.
-        const data = await window.electron.invoke('get-pallet-render-data', { operator_name: operatorName ?? '' });
+        const data = await window.desktopBridge.invoke('get-pallet-render-data', { operator_name: operatorName ?? '' });
         if (!data) { setAlert(t('pallet.errNoOpenPallet')); return; }
         // Printing the pallet sheet closes the pallet — all boxes must be closed first.
         if (data.hasOpenBox) { setAlert(t('pallet.errOpenBox')); return; }
         if (!Array.isArray(data.items) || data.items.length === 0) { setAlert(t('pallet.errEmptyPallet')); return; }
 
         // 3. Print to the pallet printer (role-agnostic print-label IPC).
-        const printed = await window.electron.invoke('print-label', {
+        const officePage = palletPrinter.connection === 'windows_driver';
+        const palletPrintConfig = officePage
+            ? {
+                ...palletPrinter,
+                protocol: 'browser',
+                printTarget: 'page-sheet',
+                pageFit: palletPrinter.pageFit || 'fit-printable',
+                pageMarginsMm: palletPrinter.pageMarginsMm || { top: 0, right: 0, bottom: 0, left: 0 },
+                documentName: `LabelPilot pallet ${String(data.pallet_number || '')}`.trim(),
+            }
+            : { ...palletPrinter, printTarget: palletPrinter.printTarget || 'label-roll' };
+        const printed = await window.desktopBridge.invoke('print-label', {
             silent: true,
             labelDoc: palletDoc,
             data,
-            printerConfig: palletPrinter,
+            printerConfig: palletPrintConfig,
         });
         if (printed === false) { setAlert(t('pallet.errPrintFailed')); return; }
 
@@ -75,7 +86,7 @@ export async function printPalletSheet(args: PalletPrintArgs): Promise<void> {
         //    failure must NEVER be reported as a print failure, or the user reprints and we get
         //    a duplicate pallet sheet. So swallow/ log any close error and still report success.
         try {
-            const closeRes: any = await window.electron.invoke('close-pallet');
+            const closeRes: any = await window.desktopBridge.invoke('close-pallet');
             if (!closeRes?.success) console.warn('close-pallet did not close a pallet', closeRes);
         } catch (closeErr) {
             console.error('close-pallet failed after a successful print', closeErr);

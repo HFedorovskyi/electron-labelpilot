@@ -1,0 +1,37 @@
+{
+  "snapshotDate": "2026-08-20",
+  "source": "synced LabelPilot client_data.db labels table",
+  "serverAllowedBarcodeTypes": [
+    "ean13",
+    "code128",
+    "qrcode",
+    "databarexpandedstacked",
+    "gs1qrcode"
+  ],
+  "templates": [
+    {
+      "id": 5,
+      "labelType": "pack",
+      "canvas": { "width": 886, "height": 1417, "widthCm": 7.5, "heightCm": 12, "dpi": 300 },
+      "barcode": { "x": 574.2454325219803, "y": 137.48886080151885, "w": 380, "h": 181.46120164305546, "rotation": 270, "barcodeType": "ean13", "showText": true }
+    },
+    {
+      "id": 8,
+      "labelType": "box",
+      "canvas": { "width": 886, "height": 1417, "widthCm": 7.5, "heightCm": 12, "dpi": 300 },
+      "barcode": { "x": 574.2454325219803, "y": 137.48886080151885, "w": 380, "h": 181.46120164305546, "rotation": 270, "barcodeType": "ean13", "showText": true }
+    },
+    {
+      "id": 10,
+      "labelType": "pack",
+      "canvas": { "width": 1276, "height": 1335, "widthCm": 10.8, "heightCm": 11.3, "dpi": 300 },
+      "barcode": { "x": 827.7703652675394, "y": 1138.2190370515614, "w": 380, "h": 132.74515934326956, "rotation": 0, "barcodeType": "ean13", "showText": true }
+    },
+    {
+      "id": 11,
+      "labelType": "box",
+      "canvas": { "width": 1276, "height": 1335, "widthCm": 10.8, "heightCm": 11.3, "dpi": 300 },
+      "barcode": { "x": 850, "y": 1162, "w": 380, "h": 126, "rotation": 0, "barcodeType": "ean13", "showText": true }
+    }
+  ]
+}

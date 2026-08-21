@@ -1,0 +1,77 @@
+{
+    "$schema":  "https://schema.tauri.app/config/2",
+    "productName":  "LabelPilot",
+    "version": "2.0.0",
+    "identifier":  "com.labelpilot.electron",
+    "build":  {
+                  "beforeDevCommand":  "npm run dev",
+                  "devUrl":  "http://127.0.0.1:5173",
+                  "beforeBuildCommand":  "npm run build",
+                  "frontendDist":  "../dist"
+              },
+    "app":  {
+                "windows":  [
+                                {
+                                    "label":  "main",
+                                    "title":  "LabelPilot",
+                                    "url":  "index.html",
+                                    "width":  1366,
+                                    "height":  768,
+                                    "minWidth":  1024,
+                                    "minHeight":  640,
+                                    "resizable":  true,
+                                    "fullscreen":  true,
+                                    "additionalBrowserArgs":  "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-background-networking --disable-component-update --disable-default-apps --disable-extensions --disable-sync --metrics-recording-only --no-first-run --no-default-browser-check",
+                                    "maximized":  true
+                                }
+                            ],
+                "security":  {
+                                 "csp":  "default-src \u0027self\u0027; connect-src ipc: http://ipc.localhost; img-src \u0027self\u0027 asset: http://asset.localhost data: blob:; style-src \u0027self\u0027 \u0027unsafe-inline\u0027"
+                             }
+            },
+    "bundle":  {
+                   "active":  true,
+                   "targets":  [
+                                   "nsis"
+                               ],
+                   "icon":  [
+                                "../build/icon.ico"
+                            ],
+                   "createUpdaterArtifacts":  true,
+                   "publisher":  "LabelPilot",
+                   "copyright":  "Copyright (c) 2026 LabelPilot",
+                   "resources":  {
+                                     "../resources/fonts/":  "fonts/",
+                                     "../resources/printer/":  "printer/"
+                                 },
+                   "windows":  {
+                                   "webviewInstallMode":  {
+                                                              "type":  "downloadBootstrapper",
+                                                              "silent":  true
+                                                          },
+                                   "nsis":  {
+                                                "installerIcon":  "../build/icon.ico",
+                                                "uninstallerIcon":  "../build/icon.ico",
+                                                "sidebarImage":  "../build/installerSidebar.bmp",
+                                                "installMode":  "currentUser",
+                                                "languages":  [
+                                                                  "Russian",
+                                                                  "English"
+                                                              ],
+                                                "displayLanguageSelector":  false,
+                                                "compression":  "lzma"
+                                            }
+                               }
+               },
+    "plugins":  {
+                    "updater":  {
+                                    "pubkey":  "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDg1NTlEMjU2ODgwQ0M4QkMKUldTOHlBeUlWdEpaaFhUeEhpZDJpL253THkxdy8xN29hSmFTUXIrV2kyejNtWTRDQytST0x6TFkK",
+                                    "endpoints":  [
+                                                      "https://github.com/HFedorovskyi/electron-labelpilot/releases/latest/download/latest.json"
+                                                  ],
+                                    "windows":  {
+                                                    "installMode":  "passive"
+                                                }
+                                }
+                }
+}

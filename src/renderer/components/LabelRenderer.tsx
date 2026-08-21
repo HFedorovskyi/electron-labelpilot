@@ -1,5 +1,6 @@
 import { useRef, useEffect } from 'react';
 import { normalizeBarcodeType } from '../../shared/barcodeTypes';
+import { labelFontStack } from '../../shared/labelFonts';
 
 // Resolve a {{key}} cell against one table row.
 const resolveCell = (text: string, row: Record<string, any>): string =>
@@ -44,7 +45,7 @@ const drawPalletTable = (ctx: CanvasRenderingContext2D, el: any, data: Record<st
     const fontSize = el.fontSize || 10;
     const showHeaders = el.showHeaders !== false;
     const showBorders = el.showBorders !== false;
-    const fontFamily = el.fontFamily || 'Inter';
+    const fontFamily = labelFontStack(el.fontFamily);
     const italic = el.fontStyle === 'italic' ? 'italic ' : '';
     const padding = 4;
     const rowHeight = fontSize * 1.5;
@@ -284,7 +285,7 @@ const LabelElement = ({ el, processText }: { el: any; processText: (t: string) =
                 style={{
                     ...commonStyle,
                     height: `${el.h}px`, // Fixed height needed for vertical centering
-                    fontFamily: el.fontFamily || 'Inter, sans-serif',
+                    fontFamily: labelFontStack(el.fontFamily),
                     fontSize: `${el.fontSize}px`,
                     color: el.color || '#000000',
                     fontWeight: el.fontWeight || 400,
@@ -344,7 +345,7 @@ const BarcodeElement = ({ el, processText, style }: { el: any; processText: (t: 
 
         // bwip-js is the heaviest renderer dependency and is ONLY needed here (preview /
         // browser-print). Load it lazily so it isn't bundled into the main app chunk.
-        // The pending counter lets PrintView hold 'ready-to-print' until every barcode
+        // The pending counter lets the renderer wait until every barcode
         // has actually drawn — a bare double-RAF raced this async chunk load on a cold
         // worker window and could capture the page with blank barcodes.
         (window as any).__pendingBarcodes = ((window as any).__pendingBarcodes || 0) + 1;

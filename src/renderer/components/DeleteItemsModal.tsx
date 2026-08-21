@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { X, Trash2, Box, Layers, RefreshCw } from 'lucide-react';
 import { useTranslation } from '../i18n';
 
-interface DeleteItemsModalProps {
+export interface DeleteItemsModalProps {
     isOpen: boolean;
     onClose: () => void;
     onDeleted: () => void; // Callback to refresh parent state
@@ -36,7 +36,7 @@ const DeleteItemsModal: React.FC<DeleteItemsModalProps> = ({ isOpen, onClose, on
         setLoading(true);
         setError(null);
         try {
-            const content = await window.electron.invoke('get-open-pallet-content', nomenclatureId ?? undefined);
+            const content = await window.desktopBridge.invoke('get-open-pallet-content', nomenclatureId ?? undefined);
             setData(content);
         } catch (err: any) {
             console.error("Error loading deletion data:", err);
@@ -79,9 +79,9 @@ const DeleteItemsModal: React.FC<DeleteItemsModalProps> = ({ isOpen, onClose, on
 
         try {
             if (confirmModal.type === 'pack') {
-                await window.electron.invoke('delete-pack', confirmModal.id);
+                await window.desktopBridge.invoke('delete-pack', confirmModal.id);
             } else {
-                await window.electron.invoke('delete-box', confirmModal.id);
+                await window.desktopBridge.invoke('delete-box', confirmModal.id);
             }
             await loadData();
             onDeleted();

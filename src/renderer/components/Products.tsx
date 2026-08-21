@@ -16,8 +16,8 @@ const Products: React.FC = () => {
     const loadData = async () => {
         try {
             const [prods, conts] = await Promise.all([
-                window.electron.invoke('get-products', ''),
-                window.electron.invoke('get-containers'),
+                window.desktopBridge.invoke('get-products', ''),
+                window.desktopBridge.invoke('get-containers'),
             ]);
             setProducts(prods || []);
             setContainers(conts || []);

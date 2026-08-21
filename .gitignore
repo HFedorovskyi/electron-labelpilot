@@ -30,3 +30,7 @@ scripts/i18n_chunks/
 
 # Scratch UI screenshots produced by scripts/drive-screenshot.cjs
 tmp-shots/
+
+# Local verification and release evidence
+artifacts/
+supabase/.temp/

@@ -36,7 +36,7 @@ const Settings = ({ onNavigate }: SettingsProps) => {
     // Durable local-demo state (the seeded demo), independent of the server license mode.
     const [isDemo, setIsDemo] = useState(false);
     useEffect(() => {
-        window.electron.invoke('demo:status').then((r: any) => setIsDemo(!!r?.isDemo)).catch(() => { });
+        window.desktopBridge.invoke('demo:status').then((r: any) => setIsDemo(!!r?.isDemo)).catch(() => { });
     }, []);
     const [ports, setPorts] = useState<SerialPortInfo[]>([]);
     const [protocols, setProtocols] = useState<ProtocolInfo[]>([]);
@@ -52,6 +52,9 @@ const Settings = ({ onNavigate }: SettingsProps) => {
     });
 
     const [printers, setPrinters] = useState<PrinterInfo[]>([]);
+    // Accordion layout: at 1366x768 all three printer roles remain visible, while
+    // only the role being edited consumes vertical space.
+    const [expandedPrinterId, setExpandedPrinterId] = useState<string | null>(null);
     const [printerConfig, setPrinterConfig] = useState<any>({
         packPrinter: {
             id: 'pack_default',
@@ -110,15 +113,15 @@ const Settings = ({ onNavigate }: SettingsProps) => {
 
     const loadData = async () => {
         try {
-            const portsList = await window.electron.invoke('get-serial-ports');
-            const protocolsList = await window.electron.invoke('get-protocols');
-            const savedConfig = await window.electron.invoke('get-scale-config');
+            const portsList = await window.desktopBridge.invoke('get-serial-ports');
+            const protocolsList = await window.desktopBridge.invoke('get-protocols');
+            const savedConfig = await window.desktopBridge.invoke('get-scale-config');
 
-            const printersList = await window.electron.invoke('get-printers');
-            const savedPrinterConfig = await window.electron.invoke('get-printer-config');
+            const printersList = await window.desktopBridge.invoke('get-printers');
+            const savedPrinterConfig = await window.desktopBridge.invoke('get-printer-config');
 
             try {
-                setIdentity(await window.electron.invoke('get-identity'));
+                setIdentity(await window.desktopBridge.invoke('get-identity'));
             } catch {
                 setIdentity(null);
             }
@@ -174,12 +177,12 @@ const Settings = ({ onNavigate }: SettingsProps) => {
     const handleSave = () => {
         const err = validateConfig();
         if (err) { showToast(err); return; }
-        window.electron.send('save-scale-config', config);
+        window.desktopBridge.send('save-scale-config', config);
         // Language is persisted separately (the language buttons write config.language to
         // disk via saveLang). Carry the LIVE saved language so a printer-config save here
         // doesn't revert it to the stale mount-time value.
         const toSave = { ...printerConfig, language: getSavedLang() };
-        window.electron.send('save-printer-config', toSave);
+        window.desktopBridge.send('save-printer-config', toSave);
         savedSnapshotRef.current = JSON.stringify({ config, printerConfig: toSave });
         showToast(t('settings.saved'));
     };
@@ -194,7 +197,7 @@ const Settings = ({ onNavigate }: SettingsProps) => {
         try {
             // sync-data resolves to info.online (false on timeout/wrong-server/no-uuid —
             // it never rejects), so a bare await would report success for a dead server.
-            const online = await window.electron.invoke('sync-data', printerConfig.serverIp);
+            const online = await window.desktopBridge.invoke('sync-data', printerConfig.serverIp);
             showToast(online ? t('settings.connectionSuccess') : t('settings.connectionFailed'));
         } catch (error) {
             console.error('Connection test failed:', error);
@@ -207,7 +210,7 @@ const Settings = ({ onNavigate }: SettingsProps) => {
     const handleReset = async () => {
         setIsResetting(true);
         try {
-            const res = await window.electron.invoke('reset-database');
+            const res = await window.desktopBridge.invoke('reset-database');
             if (res.success) {
                 showToast(t('settings.resetSuccess') || 'Database Reset Successfully');
                 // Reload data to reflect empty state
@@ -227,7 +230,7 @@ const Settings = ({ onNavigate }: SettingsProps) => {
     const isDirty = savedSnapshotRef.current !== '' && JSON.stringify({ config, printerConfig }) !== savedSnapshotRef.current;
 
     return (
-        <div className="bg-transparent min-h-screen text-neutral-900 dark:text-white p-8 relative pb-28">
+        <div className="bg-transparent min-h-screen text-neutral-900 dark:text-white p-4 md:p-5 xl:p-6 relative pb-28">
             {/* Toast Notification */}
             {toastMessage && (
                 <div className="fixed bottom-8 right-8 bg-emerald-600 text-white px-6 py-3 rounded-xl shadow-2xl flex items-center gap-3 animate-bounce z-50">
@@ -236,7 +239,7 @@ const Settings = ({ onNavigate }: SettingsProps) => {
                 </div>
             )}
 
-            <h1 className="text-3xl font-bold mb-8 flex items-center gap-3 text-neutral-900 dark:text-white">
+            <h1 className="text-2xl lg:text-3xl font-bold mb-6 flex items-center gap-3 text-neutral-900 dark:text-white">
                 <SettingsIcon className="w-8 h-8 text-emerald-500" />
                 {t('settings.title')}
             </h1>
@@ -258,7 +261,7 @@ const Settings = ({ onNavigate }: SettingsProps) => {
                 </div>
             )}
 
-            <div className="space-y-8 max-w-7xl">
+            <div className="space-y-6 max-w-7xl">
                 {/* ── Theme Configuration ── */}
                 <div className="p-6 bg-white dark:bg-white/5 border border-neutral-200 dark:border-neutral-600 rounded-2xl shadow-sm dark:shadow-none">
                     <h2 className="text-xl font-semibold mb-6 flex items-center gap-3 text-neutral-800 dark:text-emerald-400">
@@ -390,7 +393,7 @@ const Settings = ({ onNavigate }: SettingsProps) => {
                         <div className="flex gap-3 flex-wrap">
                             <button
                                 onClick={async () => {
-                                    const res = await window.electron.invoke('import-identity-file');
+                                    const res = await window.desktopBridge.invoke('import-identity-file');
                                     if (res.success) {
                                         showToast(t('settings.identityImported') || 'Identity Imported');
                                     } else {
@@ -415,7 +418,7 @@ const Settings = ({ onNavigate }: SettingsProps) => {
                                         ? `${t('demo.seedWipeProvisioned')}\n\n${t('demo.seedHint')}`
                                         : `${t('demo.seedWipe')}\n\n${t('demo.seedHint')}`;
                                     if (!window.confirm(warning)) return;
-                                    const res = await window.electron.invoke('seed-demo-data');
+                                    const res = await window.desktopBridge.invoke('seed-demo-data');
                                     if (res.success) {
                                         // Mirror handleReset: reload so the UI reflects the
                                         // freshly seeded local data.
@@ -433,7 +436,7 @@ const Settings = ({ onNavigate }: SettingsProps) => {
                                 <button
                                     onClick={async () => {
                                         if (!window.confirm(t('demo.exitConfirm'))) return;
-                                        const res = await window.electron.invoke('exit-demo');
+                                        const res = await window.desktopBridge.invoke('exit-demo');
                                         if (res?.success) {
                                             window.location.reload();
                                         } else {
@@ -448,7 +451,7 @@ const Settings = ({ onNavigate }: SettingsProps) => {
                             )}
                             <button
                                 onClick={async () => {
-                                    const res = await window.electron.invoke('offline-import');
+                                    const res = await window.desktopBridge.invoke('offline-import');
                                     showToast(res.message);
                                     // The import writes serverIp (and other fields) to the
                                     // on-disk config behind this screen. Reload so a later
@@ -463,7 +466,7 @@ const Settings = ({ onNavigate }: SettingsProps) => {
                             </button>
                             <button
                                 onClick={async () => {
-                                    const res = await window.electron.invoke('offline-export');
+                                    const res = await window.desktopBridge.invoke('offline-export');
                                     showToast(res.message);
                                 }}
                                 className="px-5 py-3 rounded-xl bg-orange-600 hover:bg-orange-500 text-white font-medium shadow-lg hover:shadow-orange-500/20 flex items-center gap-2 transition-all"
@@ -480,13 +483,13 @@ const Settings = ({ onNavigate }: SettingsProps) => {
                 </div>
 
                 {/* ── Printer Configuration ── */}
-                <div className="p-6 bg-white dark:bg-white/5 border border-neutral-200 dark:border-neutral-600 rounded-2xl shadow-sm dark:shadow-none">
-                    <h2 className="text-xl font-semibold mb-6 flex items-center gap-3 text-amber-600 dark:text-amber-400">
+                <div className="p-4 sm:p-5 bg-white dark:bg-white/5 border border-neutral-200 dark:border-neutral-600 rounded-2xl shadow-sm dark:shadow-none">
+                    <h2 className="text-xl font-semibold mb-4 flex items-center gap-3 text-amber-600 dark:text-amber-400">
                         <Printer className="w-6 h-6" />
                         {t('settings.printer')}
                     </h2>
 
-                    <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+                    <div className="flex flex-col gap-3">
                         {/* Pack Label Printer */}
                         <PrinterSettings
                             title={t('settings.packPrinter')}
@@ -497,6 +500,8 @@ const Settings = ({ onNavigate }: SettingsProps) => {
                             systemPrinters={printers}
                             serialPorts={ports}
                             onToast={showToast}
+                            expanded={expandedPrinterId === 'pack'}
+                            onToggle={() => setExpandedPrinterId((current) => current === 'pack' ? null : 'pack')}
                         />
 
                         {/* Box Label Printer */}
@@ -509,6 +514,8 @@ const Settings = ({ onNavigate }: SettingsProps) => {
                             systemPrinters={printers}
                             serialPorts={ports}
                             onToast={showToast}
+                            expanded={expandedPrinterId === 'box'}
+                            onToggle={() => setExpandedPrinterId((current) => current === 'box' ? null : 'box')}
                         />
 
                         {/* Pallet Sheet Printer */}
@@ -521,12 +528,14 @@ const Settings = ({ onNavigate }: SettingsProps) => {
                             systemPrinters={printers}
                             serialPorts={ports}
                             onToast={showToast}
+                            expanded={expandedPrinterId === 'pallet'}
+                            onToggle={() => setExpandedPrinterId((current) => current === 'pallet' ? null : 'pallet')}
                         />
                     </div>
 
-                    <div className="flex items-center gap-3 mt-6">
-                        <button onClick={loadData} className="text-xs text-amber-400 hover:text-amber-300 flex items-center gap-1">
-                            <RefreshCw size={12} /> {t('settings.refreshPrinters')}
+                    <div className="flex items-center gap-3 mt-4">
+                        <button onClick={loadData} className="min-h-11 px-3 text-sm text-amber-600 dark:text-amber-400 hover:text-amber-500 dark:hover:text-amber-300 flex items-center gap-2 rounded-lg touch-manipulation">
+                            <RefreshCw size={16} /> {t('settings.refreshPrinters')}
                         </button>
                     </div>
 
@@ -747,7 +756,7 @@ const Settings = ({ onNavigate }: SettingsProps) => {
                             {t('settings.resetWarning') || 'Resetting the database will permanently delete all local data, including labels, products, and logs. This action cannot be undone.'}
                         </p>
                         <button
-                            onClick={() => window.electron.send('open-logs-folder', {})}
+                            onClick={() => window.desktopBridge.send('open-logs-folder', {})}
                             className="w-fit px-6 py-3 bg-neutral-100 dark:bg-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-700 border border-neutral-300 dark:border-neutral-600 hover:border-neutral-400 dark:hover:border-white/10 text-neutral-900 dark:text-white font-medium rounded-xl transition-all flex items-center gap-2"
                         >
                             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">

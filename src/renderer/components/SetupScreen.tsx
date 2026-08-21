@@ -14,7 +14,7 @@ const SetupScreen: React.FC<SetupScreenProps> = ({ onIdentityLoaded }) => {
         setImporting(true);
         setError(null);
         try {
-            const result = await window.electron.invoke('import-identity-file');
+            const result = await window.desktopBridge.invoke('import-identity-file');
             if (result.success && result.identity) {
                 onIdentityLoaded(result.identity);
             } else {

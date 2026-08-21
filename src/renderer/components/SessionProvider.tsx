@@ -45,7 +45,7 @@ export function SessionProvider({ children, demoOperator = null }: SessionProvid
             return;
         }
         try {
-            const op = await window.electron.invoke('session:get');
+            const op = await window.desktopBridge.invoke('session:get');
             setOperator(op ?? null);
         } catch {
             setOperator(null);
@@ -55,7 +55,7 @@ export function SessionProvider({ children, demoOperator = null }: SessionProvid
     const logout = useCallback(async (): Promise<LogoutResult> => {
         if (demoOperator) return { ok: false, reason: 'demo' }; // demo session is not logged out
         try {
-            const res: LogoutResult = await window.electron.invoke('session:logout');
+            const res: LogoutResult = await window.desktopBridge.invoke('session:logout');
             // Only clear on success — main refuses the logout while a box/pallet is
             // still open (the caller shows the reason to the user).
             if (res?.ok) setOperator(null);
@@ -74,7 +74,7 @@ export function SessionProvider({ children, demoOperator = null }: SessionProvid
             return;
         }
         refresh();
-        const remove = window.electron.on('session-changed', (op: CurrentOperator | null) => {
+        const remove = window.desktopBridge.on('session-changed', (op: CurrentOperator | null) => {
             setOperator(op ?? null);
         });
         return () => remove();

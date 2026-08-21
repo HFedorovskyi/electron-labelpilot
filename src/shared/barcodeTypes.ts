@@ -8,7 +8,7 @@
  * Keeping the mapping here (instead of duplicated inline in each path) guarantees the
  * preview and the printed label agree on which symbology a template's `barcodeType` means.
  *
- * Pure TS — no Node/Electron/DOM imports — so both Vite and tsc can compile it.
+ * Pure TS — no runtime or DOM imports — so both Vite and contract tests can compile it.
  */
 
 /** A bwip-js barcode id (bcid), e.g. 'ean13', 'code128', 'gs1-128', 'qrcode'. */

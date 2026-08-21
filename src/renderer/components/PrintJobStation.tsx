@@ -1,12 +1,13 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback, lazy, Suspense } from 'react';
 import { ClipboardList, Play, Printer, RefreshCw, Upload, CheckCircle2, Clock, Loader2, Trash2, Box, Hash, Calendar, AlertCircle, Layers, ArrowLeft } from 'lucide-react';
 import { printPalletSheet } from '../utils/palletPrint';
 import { generateBarcode, type BarcodeData } from '../utils/barcodeGenerator';
 import { computeDocKey } from '../utils/docKey';
 import { useTranslation } from '../i18n';
-import DatePickerModal from './DatePickerModal';
-import DeleteItemsModal from './DeleteItemsModal';
+import DeleteItemsModal from './LazyDeleteItemsModal';
 import { useSession } from './SessionProvider';
+
+const DatePickerModal = lazy(() => import('./DatePickerModal'));
 
 interface PrintJobData {
     id: number;
@@ -85,7 +86,7 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
     // --- LOAD JOBS ---
     const loadJobs = useCallback(async () => {
         try {
-            const list = await window.electron.invoke('get-print-jobs');
+            const list = await window.desktopBridge.invoke('get-print-jobs');
             setJobs(list);
         } catch (e) {
             console.error('Failed to load print jobs:', e);
@@ -96,22 +97,22 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
     useEffect(() => {
         const loadInit = async () => {
             try {
-                const info = await window.electron.invoke('get-station-info');
+                const info = await window.desktopBridge.invoke('get-station-info');
                 if (info?.station_number) setStationNumber(info.station_number);
             } catch (e) { console.error('Failed to load station info', e); }
 
             try {
-                const cfg = await window.electron.invoke('get-printer-config');
+                const cfg = await window.desktopBridge.invoke('get-printer-config');
                 if (cfg) setPrinterConfig(cfg);
             } catch (e) { console.error(e); }
 
             try {
-                const cfg = await window.electron.invoke('get-numbering-config');
+                const cfg = await window.desktopBridge.invoke('get-numbering-config');
                 if (cfg) setNumberingConfig(cfg);
             } catch (e) { console.error(e); }
 
             try {
-                const cnts = await window.electron.invoke('get-containers');
+                const cnts = await window.desktopBridge.invoke('get-containers');
                 if (cnts) setContainers(cnts);
             } catch (e) { console.error(e); }
         };
@@ -120,18 +121,18 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
         loadJobs();
 
         // Listeners
-        const removeJobsListener = window.electron.on('print-jobs-updated', () => {
+        const removeJobsListener = window.desktopBridge.on('print-jobs-updated', () => {
             loadJobs();
         });
-        const removeDataListener = window.electron.on('data-updated', () => {
+        const removeDataListener = window.desktopBridge.on('data-updated', () => {
             loadJobs();
-            window.electron.invoke('get-containers').then((c: any) => setContainers(c)).catch(console.error);
+            window.desktopBridge.invoke('get-containers').then((c: any) => setContainers(c)).catch(console.error);
             setSyncVersion(v => v + 1);
         });
-        const removePrinterListener = window.electron.on('printer-config-updated', (c: any) => setPrinterConfig(c));
+        const removePrinterListener = window.desktopBridge.on('printer-config-updated', (c: any) => setPrinterConfig(c));
 
         // Scale listeners
-        const removeScaleReading = window.electron.on('scale-reading', (data: any) => {
+        const removeScaleReading = window.desktopBridge.on('scale-reading', (data: any) => {
             if (activeTabRef.current !== 'printJob') return; // skip while hidden
             if (data && typeof data === 'object' && 'weight' in data) {
                 const w = typeof data.weight === 'number' ? data.weight : parseFloat(String(data.weight));
@@ -141,8 +142,8 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
                 if (w < 0.010) autoPrintFiredRef.current = false;
             }
         });
-        const removeScaleStatus = window.electron.on('scale-status', (s: any) => setScaleStatus(s));
-        window.electron.invoke('get-scale-status').then((s: string) => { if (s) setScaleStatus(s); });
+        const removeScaleStatus = window.desktopBridge.on('scale-status', (s: any) => setScaleStatus(s));
+        window.desktopBridge.invoke('get-scale-status').then((s: string) => { if (s) setScaleStatus(s); });
 
         return () => {
             removeJobsListener();
@@ -156,7 +157,7 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
     // Eagerly open TCP/Serial to configured printers so first label doesn't pay the handshake.
     useEffect(() => {
         if (!printerConfig.packPrinter && !printerConfig.boxPrinter) { setPrinterStatus('unconfigured'); return; }
-        window.electron.invoke('printer:warmup', { printerIds: ['pack', 'box'] })
+        window.desktopBridge.invoke('printer:warmup', { printerIds: ['pack', 'box'] })
             .then((res: any) => { if (res?.results?.pack) setPrinterStatus(res.results.pack); })
             .catch(() => { /* best-effort */ });
     }, [printerConfig]);
@@ -164,7 +165,7 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
     // Live pack-printer status from main-process pushes. Needed because merged
     // record-and-print dispatches the print in main (no per-print promise to .then).
     useEffect(() => {
-        const remove = window.electron.on('printer-status-update', (u: any) => {
+        const remove = window.desktopBridge.on('printer-status-update', (u: any) => {
             const packId = (printerConfig.packPrinter as any)?.id;
             if (!packId || !u || u.id !== packId) return;
             if (u.status === 'error') setPrinterStatus('unreachable');
@@ -176,10 +177,10 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
     // Pre-upload static backgrounds for the current templates so first print is a cache hit.
     useEffect(() => {
         if (labelDoc) {
-            window.electron.invoke('printer:warmup-bg', { labelDoc, role: 'pack' }).catch(() => { /* best-effort */ });
+            window.desktopBridge.invoke('printer:warmup-bg', { labelDoc, role: 'pack' }).catch(() => { /* best-effort */ });
         }
         if (boxLabelDoc) {
-            window.electron.invoke('printer:warmup-bg', { labelDoc: boxLabelDoc, role: 'box' }).catch(() => { /* best-effort */ });
+            window.desktopBridge.invoke('printer:warmup-bg', { labelDoc: boxLabelDoc, role: 'box' }).catch(() => { /* best-effort */ });
         }
     }, [labelDoc, boxLabelDoc]);
 
@@ -205,7 +206,7 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
 
         // Load product data from nomenclature
         try {
-            const products = await window.electron.invoke('get-products', job.nomenclature_article || job.nomenclature_name);
+            const products = await window.desktopBridge.invoke('get-products', job.nomenclature_article || job.nomenclature_name);
             const found = products.find((p: any) => p.id === job.nomenclature_id) || products[0];
             setProduct(found || null);
         } catch (e) {
@@ -230,7 +231,7 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
             let pDoc = null;
             if (product.templates_pack_label) {
                 try {
-                    const doc = await window.electron.invoke('get-label', product.templates_pack_label);
+                    const doc = await window.desktopBridge.invoke('get-label', product.templates_pack_label);
                     if (doc?.structure) { pDoc = JSON.parse(doc.structure); setLabelDoc(pDoc); setLabelDocKey(computeDocKey(doc.structure)); }
                 } catch (e) { console.error(e); }
             } else { setLabelDoc(null); setLabelDocKey(null); }
@@ -238,7 +239,7 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
             let bDoc = null;
             if (product.templates_box_label) {
                 try {
-                    const doc = await window.electron.invoke('get-label', product.templates_box_label);
+                    const doc = await window.desktopBridge.invoke('get-label', product.templates_box_label);
                     if (doc?.structure) { bDoc = JSON.parse(doc.structure); setBoxLabelDoc(bDoc); setBoxLabelDocKey(computeDocKey(doc.structure)); }
                 } catch (e) { console.error(e); }
             } else { setBoxLabelDoc(null); setBoxLabelDocKey(null); }
@@ -249,7 +250,7 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
                 if (!items) return setFn(null);
                 const bc = items.find((o: any) => o.type === 'barcode');
                 if (bc?.templateId) {
-                    try { setFn(await window.electron.invoke('get-barcode-template', bc.templateId)); }
+                    try { setFn(await window.desktopBridge.invoke('get-barcode-template', bc.templateId)); }
                     catch { setFn(null); }
                 } else { setFn(null); }
             };
@@ -263,7 +264,7 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
     useEffect(() => {
         const syncCounters = async () => {
             try {
-                const latest = await window.electron.invoke('get-latest-counters', product?.id);
+                const latest = await window.desktopBridge.invoke('get-latest-counters', product?.id);
                 if (latest) {
                     setTotalUnits(latest.totalUnits ?? 0);
                     setTotalBoxes(latest.totalBoxes ?? 0);
@@ -404,7 +405,7 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
         {
             const boxCont = containers.find(c => c.id === product?.box_container_id);
             const brutBox = finalBoxWeight + (boxCont?.weight || 0) / 1000;
-            await window.electron.invoke('close-box', { boxId, weightNetto: finalBoxWeight, weightBrutto: brutBox });
+            await window.desktopBridge.invoke('close-box', { boxId, weightNetto: finalBoxWeight, weightBrutto: brutBox });
         }
         if (!boxLabelDoc) return;
         const boxLimit = product?.close_box_counter || 0;
@@ -420,6 +421,7 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
                 const expDateBox = new Date(labelingDate);
                 expDateBox.setDate(labelingDate.getDate() + (product?.exp_date || 0));
                 boxBarcode = generateBarcode(fields, {
+                    ...baseData,
                     weight_netto_box: finalBoxWeight, weight_brutto_box: brutBox,
                     production_date: labelingDate, exp_date: expDateBox,
                     article: (product?.article || '').padStart(14, '0'),
@@ -433,7 +435,7 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
         const boxData = { ...baseData, is_box: true, count: boxLimit, pack_counter: String(finalUnitsInBox), weight_netto: finalBoxWeight.toFixed(3), barcode: finalBarcode };
         // Fire-and-forget: the box-label send (150ms TCP … seconds on serial) must not block
         // the next pack — the main-process queues preserve output order.
-        window.electron.invoke('print-label', { silent: true, labelDoc: boxLabelDoc, docKey: boxLabelDocKey || undefined, data: boxData, printerConfig: printerConfig.boxPrinter || undefined })
+        window.desktopBridge.invoke('print-label', { silent: true, labelDoc: boxLabelDoc, docKey: boxLabelDocKey || undefined, data: boxData, printerConfig: printerConfig.boxPrinter || undefined })
             .catch((err: any) => console.error('[printBoxLabel] print failed', err));
         setLastPrinted({ doc: boxLabelDoc, data: boxData });
     };
@@ -462,6 +464,7 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
                 const expDatePack = new Date(labelingDate);
                 expDatePack.setDate(labelingDate.getDate() + (product?.exp_date || 0));
                 const genData = {
+                    ...predictedData,
                     weight_netto_pack: parseFloat(predictedData.weight_netto_pack),
                     weight_brutto_pack: parseFloat(predictedData.weight_brutto_pack),
                     production_date: labelingDate, exp_date: expDatePack,
@@ -480,7 +483,7 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
 
         // Merged record+print: DB transaction and print dispatch in one main-process
         // turn — no second IPC round trip, no renderer event-loop requeue.
-        const recordResult = await window.electron.invoke('record-and-print', {
+        const recordResult = await window.desktopBridge.invoke('record-and-print', {
             record: {
                 number: predictedData.pack_number, box_number: predictedBoxNum,
                 nomenclature_id: product.id,
@@ -506,7 +509,7 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
         };
         if (!recordResult.printDispatched && printerConfig.packPrinter) {
             // Browser-protocol printer — worker-window path stays renderer-driven.
-            window.electron.invoke('print-label', {
+            window.desktopBridge.invoke('print-label', {
                 silent: true, labelDoc, data: finalData,
                 printerConfig: printerConfig.packPrinter
             })
@@ -569,7 +572,7 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
             const newPrintedQty = kgPrintedQtyRef.current;
 
             // Update job progress
-            await window.electron.invoke('update-print-job-progress', { jobId: activeJob.job_id, printedQty: newPrintedQty });
+            await window.desktopBridge.invoke('update-print-job-progress', { jobId: activeJob.job_id, printedQty: newPrintedQty });
 
             if (newUnitsInBox >= boxLimit) {
                 await printBoxLabel(newBoxNetWeight, newUnitsInBox, result.recordResult.boxNumber, result.recordResult.boxId);
@@ -617,7 +620,7 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
             const newPrintedQty = kgPrintedQtyRef.current;
 
             // Update job progress (kg mode: accumulate weight)
-            await window.electron.invoke('update-print-job-progress', { jobId: activeJob.job_id, printedQty: newPrintedQty });
+            await window.desktopBridge.invoke('update-print-job-progress', { jobId: activeJob.job_id, printedQty: newPrintedQty });
 
             if (newUnitsInBox >= boxLimit) {
                 await printBoxLabel(newBoxNetWeight, newUnitsInBox, result.recordResult.boxNumber, result.recordResult.boxId);
@@ -656,7 +659,7 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
         } else if (currentBoxId) {
             const boxCont = containers.find(c => c.id === product?.box_container_id);
             const brutBox = finalBoxWeight + (boxCont?.weight || 0) / 1000;
-            await window.electron.invoke('close-box', { boxId: currentBoxId, weightNetto: finalBoxWeight, weightBrutto: brutBox });
+            await window.desktopBridge.invoke('close-box', { boxId: currentBoxId, weightNetto: finalBoxWeight, weightBrutto: brutBox });
         }
         setCurrentBoxId(null); setCurrentBoxNumber(null);
     };
@@ -664,7 +667,7 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
     // --- COMPLETE JOB (manual) ---
     const handleCompleteJob = async (jobId: number) => {
         try {
-            await window.electron.invoke('complete-print-job', jobId);
+            await window.desktopBridge.invoke('complete-print-job', jobId);
             if (activeJob?.job_id === jobId) setActiveJob(null);
             loadJobs();
         } catch (e) {
@@ -675,7 +678,7 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
     // --- DELETE JOB ---
     const handleDeleteJob = async (jobId: number) => {
         try {
-            await window.electron.invoke('delete-print-job', jobId);
+            await window.desktopBridge.invoke('delete-print-job', jobId);
             if (activeJob?.job_id === jobId) setActiveJob(null);
             loadJobs();
         } catch (e) {
@@ -686,7 +689,7 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
     // --- IMPORT FILE ---
     const handleImportFile = async () => {
         try {
-            const result = await window.electron.invoke('import-print-job-file');
+            const result = await window.desktopBridge.invoke('import-print-job-file');
             if (result.success) {
                 setAlertMessage(t('pj.importSuccess').replace('{count}', String(result.count || 0)));
                 loadJobs();
@@ -701,7 +704,7 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
     // --- REPEAT ---
     const handleRepeat = async () => {
         if (!lastPrinted) { setAlertMessage(t('pj.noReprintData')); return; }
-        await window.electron.invoke('print-label', { silent: true, labelDoc: lastPrinted.doc, data: lastPrinted.data, printerConfig: printerConfig.packPrinter });
+        await window.desktopBridge.invoke('print-label', { silent: true, labelDoc: lastPrinted.doc, data: lastPrinted.data, printerConfig: printerConfig.packPrinter });
     };
 
     // --- RENDER HELPERS ---
@@ -1092,11 +1095,13 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
 
             {/* Date Picker */}
             {isDatePickerOpen && (
-                <DatePickerModal
-                    value={labelingDate}
-                    onUpdate={(d: Date) => { setLabelingDate(d); setIsDatePickerOpen(false); }}
-                    onClose={() => setIsDatePickerOpen(false)}
-                />
+                <Suspense fallback={null}>
+                    <DatePickerModal
+                        value={labelingDate}
+                        onUpdate={(d: Date) => { setLabelingDate(d); setIsDatePickerOpen(false); }}
+                        onClose={() => setIsDatePickerOpen(false)}
+                    />
+                </Suspense>
             )}
 
             {/* Delete Modal */}
@@ -1106,7 +1111,7 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
                     nomenclatureId={product?.id ?? null}
                     onClose={() => setIsDeleteModalOpen(false)}
                     onDeleted={async () => {
-                        const latest = await window.electron.invoke('get-latest-counters', product?.id);
+                        const latest = await window.desktopBridge.invoke('get-latest-counters', product?.id);
                         if (latest) {
                             setTotalUnits(latest.totalUnits ?? 0);
                             setTotalBoxes(latest.totalBoxes ?? 0);

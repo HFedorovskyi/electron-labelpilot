@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 
-/** Mirror of the server's GET /api/v1/license/ payload (see src/main/license.ts). */
+/** Mirror of the server's GET /api/v1/license/ payload. */
 export interface LicenseStatus {
     licensed: boolean;
     mode: 'demo' | 'licensed';
@@ -38,7 +38,7 @@ export function useLicenseStatus(serverStatus?: string) {
 
     const refresh = useCallback(async () => {
         try {
-            const res: LicenseFetchResult = await window.electron.invoke('get-license-status');
+            const res: LicenseFetchResult = await window.desktopBridge.invoke('get-license-status');
             if (res && res.online && res.license) {
                 setLicense(res.license);
                 setOnline(true);
@@ -54,10 +54,10 @@ export function useLicenseStatus(serverStatus?: string) {
     useEffect(() => {
         refresh();
 
-        const removeStatus = window.electron.on('server-status-updated', (data: any) => {
+        const removeStatus = window.desktopBridge.on('server-status-updated', (data: any) => {
             if (data?.status === 'connected') refresh();
         });
-        const removeSync = window.electron.on('sync-complete', () => refresh());
+        const removeSync = window.desktopBridge.on('sync-complete', () => refresh());
 
         // Slow background refresh (60s) — license rarely changes; this just catches an
         // activation done on the server while the client is running.
