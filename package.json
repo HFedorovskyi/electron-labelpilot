@@ -1,7 +1,7 @@
 {
   "name": "labelpilot-client",
   "private": true,
-  "version": "2.0.0",
+  "version": "2.0.1",
   "repository": {
     "type": "git",
     "url": "https://github.com/HFedorovskyi/electron-labelpilot.git"
@@ -10,13 +10,16 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build --bundles nsis",
-    "tauri:build:binary": "tauri build --no-bundle",
+    "desktop:run:tauri": "cargo run --manifest-path src-tauri/Cargo.toml --bin labelpilot-tauri -- --ui-runtime=tauri",
+    "desktop:run:slint": "cargo build --manifest-path src-tauri/Cargo.toml --no-default-features --features slint-ui --bin labelpilot-slint && cargo run --manifest-path src-tauri/Cargo.toml --bin labelpilot-tauri -- --ui-runtime=slint",
+    "tauri:build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-dual-runtime.ps1 -Bundle nsis",
+    "tauri:build:binary": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-dual-runtime.ps1 -NoBundle",
     "tauri:release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-tauri-release.ps1",
-    "tauri:check": "cargo check --tests --manifest-path src-tauri/Cargo.toml",
+    "tauri:check": "cargo check --tests --manifest-path src-tauri/Cargo.toml && cargo check --tests --manifest-path src-tauri/Cargo.toml --no-default-features --features slint-ui",
+    "test:ui-runtime": "cargo test --manifest-path src-tauri/Cargo.toml runtime_selector::tests && cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --features slint-ui runtime_selector::tests",
     "test:tauri": "npm run build && npm run tauri:check && node scripts/test-tauri-runtime.cjs",
     "test:printer": "node scripts/test-printer-settings-layout.cjs && node scripts/test-printer-profiles.cjs && node scripts/test-universal-printer-backends.cjs && node scripts/test-raster-language-adapters.cjs && node scripts/test-barcode-print-matrix.cjs",
-    "test:migration": "npm run build && node scripts/test-desktop-bridge-contract.cjs && node scripts/test-server-contract.cjs && node scripts/test-rust-contract-parity.cjs && node scripts/test-persisted-contracts.cjs && node scripts/test-network-contracts.cjs && node scripts/test-ingress-contracts.cjs && node scripts/test-operational-contracts.cjs && node scripts/test-printer-transport-contracts.cjs && node scripts/test-universal-printer-backends.cjs && node scripts/test-raster-language-adapters.cjs && node scripts/test-public-print-routing.cjs && node scripts/test-barcode-print-matrix.cjs && node scripts/test-sidebar-layout.cjs && node scripts/test-tauri-bitmap-image-source.cjs && node scripts/test-label-font-parity.cjs && node scripts/test-barcode-extra-data-routing.cjs && node scripts/test-legacy-electron-updater-contract.cjs && npm run test:print-queue-monitor && npm run test:durable-printer && npm run test:printer-diagnostics && npm run test:runtime-qualification && npm run test:low-resource-ui && npm run test:production-telemetry",
+    "test:migration": "npm run build && node scripts/test-desktop-bridge-contract.cjs && node scripts/test-server-contract.cjs && node scripts/test-rust-contract-parity.cjs && node scripts/test-persisted-contracts.cjs && node scripts/test-network-contracts.cjs && node scripts/test-ingress-contracts.cjs && node scripts/test-operational-contracts.cjs && node scripts/test-printer-transport-contracts.cjs && node scripts/test-universal-printer-backends.cjs && node scripts/test-raster-language-adapters.cjs && node scripts/test-public-print-routing.cjs && node scripts/test-barcode-print-matrix.cjs && node scripts/test-sidebar-layout.cjs && node scripts/test-tauri-bitmap-image-source.cjs && node scripts/test-label-font-parity.cjs && node scripts/test-barcode-extra-data-routing.cjs && node scripts/test-legacy-electron-updater-contract.cjs && npm run test:print-queue-monitor && npm run test:durable-printer && npm run test:printer-diagnostics && npm run test:runtime-qualification && npm run test:low-resource-ui && npm run test:production-telemetry && npm run test:native-updater",
     "lint": "eslint .",
     "preview": "vite preview",
     "test:persistence": "node scripts/test-persisted-contracts.cjs && cargo test --manifest-path src-tauri/Cargo.toml persisted::tests",
@@ -46,7 +49,9 @@
     "test:low-resource-ui": "node scripts/test-low-resource-ui.cjs",
     "smoke:lazy-ui": "node scripts/smoke-tauri-lazy-ui.cjs src-tauri/target/release/labelpilot-tauri.exe",
     "test:production-telemetry": "node scripts/test-production-telemetry.cjs",
-    "benchmark:runtime": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/measure-tauri-runtime.ps1"
+    "benchmark:runtime": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/measure-tauri-runtime.ps1",
+    "test:native-updater": "node scripts/test-native-updater-contract.cjs && cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --features native-update native_update::tests",
+    "test:native-update-e2e": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-native-update-e2e.ps1"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",

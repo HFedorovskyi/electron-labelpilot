@@ -379,8 +379,18 @@ impl ParsedInput {
                     {
                         reasons.push(format!("{}:barcode-image", element.id));
                     }
+                    let value = interpolate(
+                        element
+                            .value
+                            .as_deref()
+                            .or(element.text.as_deref())
+                            .unwrap_or(""),
+                        &self.data,
+                    );
                     let barcode = normalize_barcode(element.barcode_type.as_ref());
-                    if !self.profile.native_barcodes.contains(&barcode.as_str()) {
+                    if !self.profile.native_barcodes.contains(&barcode.as_str())
+                        || needs_gs1_parse(&barcode, &value)
+                    {
                         reasons.push(format!("{}:barcode-{barcode}", element.id));
                     }
                 }

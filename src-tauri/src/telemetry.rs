@@ -823,7 +823,7 @@ fn load_cursor(path: &Path) -> Result<ReportCursor, String> {
     if !path.exists() {
         return Ok(ReportCursor::default());
     }
-    let bytes = read_bounded(&path, 64 * 1024)?;
+    let bytes = read_bounded(path, 64 * 1024)?;
     serde_json::from_slice(&bytes)
         .map_err(|error| format!("failed to parse report cursor {}: {error}", path.display()))
 }
@@ -831,7 +831,7 @@ fn load_cursor(path: &Path) -> Result<ReportCursor, String> {
 fn save_cursor(path: &Path, cursor: &ReportCursor) -> Result<(), String> {
     let bytes = serde_json::to_vec(cursor)
         .map_err(|error| format!("failed to serialize report cursor: {error}"))?;
-    atomic_write(&path, &bytes)
+    atomic_write(path, &bytes)
 }
 
 fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {

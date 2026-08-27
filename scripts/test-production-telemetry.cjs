@@ -9,6 +9,7 @@ const read = relative => fs.readFileSync(path.join(root, relative), 'utf8');
 const telemetry = read('src-tauri/src/telemetry.rs');
 const commands = read('src-tauri/src/commands.rs');
 const runtime = read('src-tauri/src/lib.rs');
+const runtimeEvents = read('src-tauri/src/runtime_events.rs');
 const cargo = read('src-tauri/Cargo.toml');
 const bridge = read('src/renderer/platform/tauriBridge.ts');
 const entry = read('src/main.tsx');
@@ -16,7 +17,7 @@ const packageJson = JSON.parse(read('package.json'));
 const tauriConfig = JSON.parse(read('src-tauri/tauri.conf.json'));
 const cargoVersion = cargo.match(/^version = "([^"]+)"/m)?.[1];
 
-assert.equal(packageJson.version, '2.0.0');
+assert.equal(packageJson.version, '2.0.1');
 assert.equal(tauriConfig.version, packageJson.version);
 assert.equal(cargoVersion, packageJson.version);
 
@@ -46,8 +47,10 @@ assert.match(bridge, /getTauriTelemetrySummary/);
 assert.match(bridge, /flushTauriTelemetry/);
 assert.match(entry, /unhandledrejection/);
 assert.match(entry, /renderer_error/);
-for (const component of ['printer', 'scale', 'ingress']) {
-    assert.match(read(`src-tauri/src/${component}.rs`), /record_subsystem_log/);
+for (const component of ['printer', 'scale']) {
+    assert.match(read(`src-tauri/src/${component}.rs`), /RuntimeEventSink/);
 }
+assert.match(runtimeEvents, /record_subsystem_log/);
+assert.match(read('src-tauri/src/ingress.rs'), /runtime\.events\.log\("ingress"/);
 
 console.log('Production telemetry: structured events, heartbeat, delta cursor, durable outbox, retry/upload and shutdown spool verified');

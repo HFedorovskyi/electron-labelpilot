@@ -258,3 +258,32 @@ fn extension_languages_plan_bounded_tauri_raster_adapters() {
         );
     }
 }
+
+#[test]
+fn advanced_zpl_routes_gs1_ai_values_to_fnc1_raster() {
+    let request = payload(
+        serde_json::json!({
+            "connection":"tcp",
+            "protocol":"zpl",
+            "dpi":300,
+            "compatibilityMode":"advanced"
+        }),
+        serde_json::json!({
+            "widthMm":60,
+            "heightMm":40,
+            "canvas":{"width":600,"height":400,"dpi":254},
+            "elements":[
+                {"id":"gs1-128","type":"barcode","x":10,"y":10,"w":580,"h":100,"barcodeType":"gs1-128","value":"{{ gs1 }}"},
+                {"id":"gs1-dm","type":"barcode","x":10,"y":130,"w":200,"h":200,"barcodeType":"gs1datamatrix","value":"{{ gs1 }}"}
+            ]
+        }),
+        serde_json::json!({"gs1":"(01)04870254930134(10)BATCH26"}),
+    );
+    let plan = GeneratorState::default().plan(&request).unwrap();
+    assert!(!plan.native_eligible);
+    assert_eq!(plan.effective_protocol, "image");
+    assert_eq!(
+        plan.reasons,
+        ["gs1-128:barcode-gs1-128", "gs1-dm:barcode-gs1datamatrix"]
+    );
+}

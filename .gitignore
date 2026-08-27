@@ -34,3 +34,7 @@ tmp-shots/
 # Local verification and release evidence
 artifacts/
 supabase/.temp/
+
+# Generated Tauri external binaries
+src-tauri/binaries/*.exe
+experiments/**/target/

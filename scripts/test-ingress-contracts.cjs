@@ -25,8 +25,11 @@ assert.match(ingress, /"\/api\/print_job"/);
 assert.match(ingress, /peer\.is_loopback\(\)/);
 assert.match(ingress, /Access-Control-Allow-Origin: \*/);
 assert.match(ingress, /"labelpilot-ingress"/);
-assert.match(ingress, /app\.emit\("data-updated"/);
-assert.match(ingress, /app\.emit\("print-jobs-updated"/);
+assert.match(ingress, /use crate::runtime_events::RuntimeEventSink/);
+assert.match(ingress, /pub\(crate\) fn start_with_sink/);
+assert.match(ingress, /runtime\.events\.emit\("data-updated"/);
+assert.match(ingress, /runtime\.events\.emit\("print-jobs-updated"/);
+assert.match(ingress, /"server-status-updated"/);
 
 assert.match(crypto, /const LPI2_MAGIC: &\[u8\] = b"LPI2\\n"/);
 assert.match(crypto, /LICENSE_PUBLIC_KEY: \[u8; 32\]/);
@@ -52,6 +55,6 @@ const nodeContract = spawnSync(process.execPath, [path.join(root, 'scripts', 'te
 });
 assert.equal(nodeContract.status, 0, nodeContract.stderr || nodeContract.stdout);
 
-console.log('Rust ingress contract: bounded :5556 listener, CORS, route caps and lifecycle verified');
+console.log('Rust ingress contract: bounded :5556 listener, shared event sink, CORS, route caps and lifecycle verified');
 console.log('Rust processor contract: transactional sync + progress-preserving print jobs verified');
 process.stdout.write(nodeContract.stdout);

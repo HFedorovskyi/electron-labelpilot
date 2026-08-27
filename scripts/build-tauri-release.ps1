@@ -30,7 +30,7 @@ $verification = [System.Collections.Generic.List[string]]::new()
 $verification.Add("LabelPilot Tauri 2.0 release verification")
 $verification.Add("timestamp=$([DateTimeOffset]::UtcNow.ToString('o'))")
 $verification.Add("BASELINE_COMMAND=npm run build")
-$verification.Add("MODIFIED_COMMAND=npm run test:migration; cargo test; tauri build --bundles nsis; tauri signer sign; signature verify")
+$verification.Add("MODIFIED_COMMAND=npm run test:migration; cargo test Tauri; cargo test Slint; dual-runtime NSIS build; tauri signer sign; signature verify")
 $verification.Add("INPUT=repository source, updater public key and local private signing key")
 
 function Get-Sha256 {
@@ -70,12 +70,15 @@ function Invoke-Verified {
 
 if (-not $SkipTests) {
     Invoke-Verified "migration-contracts" { & npm.cmd run test:migration }
-    Invoke-Verified "rust-tests" { & cargo.exe test --manifest-path src-tauri/Cargo.toml }
+    Invoke-Verified "rust-tests-tauri" { & cargo.exe test --manifest-path src-tauri/Cargo.toml }
+    Invoke-Verified "rust-tests-slint" { & cargo.exe test --manifest-path src-tauri/Cargo.toml --no-default-features --features slint-ui }
 }
 
 if (-not $SkipBuild) {
     $bundleOverride = 'src-tauri/tauri.local-release.conf.json'
-    Invoke-Verified "tauri-nsis" { & npx.cmd tauri build --bundles nsis --config $bundleOverride }
+    Invoke-Verified "tauri-nsis-dual-runtime" {
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repo "scripts/build-dual-runtime.ps1") -Bundle nsis -Config $bundleOverride
+    }
 }
 
 $config = Get-Content -LiteralPath "src-tauri/tauri.conf.json" -Raw | ConvertFrom-Json
@@ -111,12 +114,38 @@ $binary = Join-Path $repo "src-tauri/target/release/labelpilot-tauri.exe"
 if (Test-Path -LiteralPath $binary -PathType Leaf) {
     Copy-Item -LiteralPath $binary -Destination (Join-Path $artifactPath "LabelPilot.exe") -Force
 }
+$slintBinary = Join-Path $repo "src-tauri/target/release/labelpilot-slint.exe"
+if (Test-Path -LiteralPath $slintBinary -PathType Leaf) {
+    Copy-Item -LiteralPath $slintBinary -Destination (Join-Path $artifactPath "LabelPilot-Slint.exe") -Force
+}
+
+
+$maintenanceBinary = Join-Path $repo "src-tauri/target/release/labelpilot-maintenance.exe"
+if (-not (Test-Path -LiteralPath $maintenanceBinary -PathType Leaf)) {
+    throw "Maintenance helper was not produced: $maintenanceBinary"
+}
+Copy-Item -LiteralPath $maintenanceBinary -Destination (Join-Path $artifactPath "LabelPilot-Maintenance.exe") -Force
+Invoke-Verified "native-update-package" {
+    $nativePackageArguments = @{
+        SlintExecutable = $slintBinary
+        MaintenanceExecutable = $maintenanceBinary
+        Version = $version
+        OutputDirectory = $ArtifactDirectory
+        ReleaseBaseUrl = $ReleaseBaseUrl
+        SigningKeyPath = $key
+        PublicKeyPath = $publicKey
+    }
+    if (-not [string]::IsNullOrEmpty($SigningKeyPassword)) {
+        $nativePackageArguments.SigningKeyPassword = $SigningKeyPassword
+    }
+    & (Join-Path $repo "scripts/new-native-update-package.ps1") @nativePackageArguments
+}
 
 $signature = (Get-Content -LiteralPath $signatureOut -Raw).Trim()
 $encodedName = [Uri]::EscapeDataString($installer.Name)
 $latest = [ordered]@{
     version = $version
-    notes = "LabelPilot $version - Tauri desktop runtime"
+    notes = "LabelPilot $version - dual Tauri/Slint desktop runtime"
     pub_date = [DateTimeOffset]::UtcNow.ToString("o")
     platforms = [ordered]@{
         "windows-x86_64" = [ordered]@{
@@ -151,6 +180,8 @@ $verification.Add("INSTALLER=$installerOut")
 $verification.Add("SIGNATURE=$signatureOut")
 $verification.Add("LATEST_JSON=$(Join-Path $artifactPath 'latest.json')")
 $verification.Add("LATEST_YML=$legacyManifest")
+$verification.Add("NATIVE_MANIFEST=$(Join-Path $artifactPath 'native-latest.json')")
+$verification.Add("NATIVE_PACKAGE=$(Join-Path $artifactPath ('LabelPilot_' + $version + '_windows_x86_64.lpupdate'))")
 $verification.Add("INSTALLER_SHA256=$(Get-Sha256 $installerOut)")
 $verification.Add("RESULT=PASS")
 [System.IO.File]::WriteAllLines((Join-Path $artifactPath "verification.log"), $verification, [System.Text.UTF8Encoding]::new($false))

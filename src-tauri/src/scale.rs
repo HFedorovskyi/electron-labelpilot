@@ -1,5 +1,4 @@
-use crate::commands::RuntimeState;
-use crate::telemetry;
+use crate::runtime_events::RuntimeEventSink;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -11,7 +10,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Emitter, Manager};
+#[cfg(feature = "desktop")]
+use tauri::AppHandle;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 const IO_TIMEOUT: Duration = Duration::from_millis(100);
@@ -145,6 +145,24 @@ pub struct ProtocolInfo {
     pub id: &'static str,
     pub name: &'static str,
     pub description: &'static str,
+    pub polling_required: bool,
+    pub default_baud_rate: u32,
+    pub serial_format: String,
+}
+
+#[cfg(feature = "native-ui")]
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScaleProbeResult {
+    pub connection_type: String,
+    pub protocol_id: String,
+    pub endpoint: String,
+    pub reachable: bool,
+    pub valid_frame: bool,
+    pub details: String,
+    pub elapsed_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reading: Option<ScaleReading>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -221,7 +239,16 @@ impl ScaleState {
         }
     }
 
+    #[cfg(feature = "desktop")]
     pub fn connect(&self, app: AppHandle, payload: Value) -> Result<(), String> {
+        self.connect_with_sink(RuntimeEventSink::tauri(app), payload)
+    }
+
+    pub(crate) fn connect_with_sink(
+        &self,
+        app: RuntimeEventSink,
+        payload: Value,
+    ) -> Result<(), String> {
         let config = ScaleConfig::from_value(payload)?;
         self.stop_worker();
         reset_stats(&self.inner.stats);
@@ -237,7 +264,7 @@ impl ScaleState {
             runtime.stop = Some(Arc::clone(&stop));
             runtime.status = ScaleStatus::Reconnecting;
         }
-        let _ = app.emit("scale-status", ScaleStatus::Reconnecting.as_str());
+        app.emit("scale-status", ScaleStatus::Reconnecting.as_str());
         let inner = Arc::clone(&self.inner);
         let worker_app = app.clone();
         let worker = match thread::Builder::new()
@@ -250,7 +277,7 @@ impl ScaleState {
                     runtime.stop.take();
                     runtime.status = ScaleStatus::Disconnected;
                 }
-                let _ = app.emit("scale-status", ScaleStatus::Disconnected.as_str());
+                app.emit("scale-status", ScaleStatus::Disconnected.as_str());
                 return Err(format!("failed to start scale worker: {error}"));
             }
         };
@@ -263,7 +290,12 @@ impl ScaleState {
         Ok(())
     }
 
+    #[cfg(feature = "desktop")]
     pub fn disconnect(&self, app: &AppHandle) {
+        self.disconnect_with_sink(&RuntimeEventSink::tauri(app.clone()));
+    }
+
+    pub(crate) fn disconnect_with_sink(&self, app: &RuntimeEventSink) {
         self.stop_worker();
         set_status(
             &self.inner,
@@ -308,6 +340,40 @@ impl ScaleState {
             max_frame_buffer: MAX_FRAME_BUFFER,
             reading_throttle_ms: READING_THROTTLE.as_millis() as u64,
         }
+    }
+
+    #[cfg(feature = "native-ui")]
+    pub(crate) fn test_config_with_sink(
+        &self,
+        app: &RuntimeEventSink,
+        payload: Value,
+    ) -> Result<ScaleProbeResult, String> {
+        let candidate = ScaleConfig::from_value(payload)?;
+        let previous = self
+            .inner
+            .runtime
+            .lock()
+            .map_err(|_| "scale runtime lock is poisoned")?
+            .config
+            .clone();
+        self.stop_worker();
+        let outcome = probe_scale_config(&candidate, Duration::from_millis(3_500));
+        let restore = previous.map(|config| {
+            serde_json::to_value(config)
+                .map_err(|error| format!("serialize previous scale config: {error}"))
+                .and_then(|value| self.connect_with_sink(app.clone(), value))
+        });
+        if let Some(Err(error)) = restore {
+            return match outcome {
+                Ok(_) => Err(format!(
+                    "проверка завершена, но рабочее подключение весов не восстановлено: {error}"
+                )),
+                Err(probe_error) => Err(format!(
+                    "{probe_error}; рабочее подключение весов не восстановлено: {error}"
+                )),
+            };
+        }
+        outcome
     }
 
     fn stop_worker(&self) {
@@ -381,6 +447,9 @@ pub fn protocol_catalog() -> Vec<ProtocolInfo> {
             id: protocol.id,
             name: protocol.name,
             description: protocol.description,
+            polling_required: protocol.polling_required,
+            default_baud_rate: protocol.default_baud_rate,
+            serial_format: protocol.serial_format(),
         })
         .collect()
 }
@@ -685,6 +754,15 @@ fn protocol_by_id(id: &str) -> &'static Protocol {
 }
 
 impl Protocol {
+    fn serial_format(self) -> String {
+        let parity = match self.parity {
+            ProtocolParity::None => "N",
+            ProtocolParity::Even => "E",
+            ProtocolParity::Odd => "O",
+        };
+        format!("{}{}{}", self.data_bits, parity, self.stop_bits)
+    }
+
     fn weight_command(self) -> Option<Vec<u8>> {
         match self.parser {
             ParserKind::Cas => Some(b"W".to_vec()),
@@ -1276,9 +1354,172 @@ fn reset_stats(stats: &ScaleStats) {
     stats.reconnect_attempts.store(0, Ordering::Release);
 }
 
+#[cfg(feature = "native-ui")]
+fn probe_scale_config(config: &ScaleConfig, timeout: Duration) -> Result<ScaleProbeResult, String> {
+    let started = Instant::now();
+    let protocol = *protocol_by_id(&config.protocol_id);
+    if config.connection_type == "simulator" {
+        return Ok(ScaleProbeResult {
+            connection_type: config.connection_type.clone(),
+            protocol_id: "simulator".to_owned(),
+            endpoint: "Встроенный симулятор".to_owned(),
+            reachable: true,
+            valid_frame: true,
+            details: "Симулятор генерирует вес без внешнего оборудования".to_owned(),
+            elapsed_ms: started.elapsed().as_millis() as u64,
+            reading: Some(ScaleReading {
+                weight: 2.5,
+                unit: "kg",
+                stable: true,
+                tare: None,
+            }),
+        });
+    }
+
+    let (endpoint, reading) = if config.connection_type == "tcp" {
+        let host = config.host.as_deref().unwrap_or_default();
+        let port = config.port.unwrap_or_default();
+        let address = resolve_address(host, port)?;
+        let mut stream = TcpStream::connect_timeout(&address, CONNECT_TIMEOUT)
+            .map_err(|error| format!("TCP connect {address}: {error}"))?;
+        stream
+            .set_read_timeout(Some(IO_TIMEOUT))
+            .map_err(|error| format!("TCP read timeout: {error}"))?;
+        stream
+            .set_write_timeout(Some(IO_TIMEOUT))
+            .map_err(|error| format!("TCP write timeout: {error}"))?;
+        let _ = stream.set_nodelay(true);
+        (
+            address.to_string(),
+            probe_transport(config, &protocol, &mut stream, true, timeout)?,
+        )
+    } else {
+        let path = config.path.as_deref().unwrap_or_default();
+        let baud_rate = config.baud_rate.unwrap_or(protocol.default_baud_rate);
+        let builder = serialport::new(path, baud_rate)
+            .timeout(IO_TIMEOUT)
+            .flow_control(FlowControl::None)
+            .parity(match protocol.parity {
+                ProtocolParity::None => Parity::None,
+                ProtocolParity::Even => Parity::Even,
+                ProtocolParity::Odd => Parity::Odd,
+            })
+            .data_bits(match protocol.data_bits {
+                5 => DataBits::Five,
+                6 => DataBits::Six,
+                7 => DataBits::Seven,
+                _ => DataBits::Eight,
+            })
+            .stop_bits(if protocol.stop_bits == 2 {
+                StopBits::Two
+            } else {
+                StopBits::One
+            });
+        let mut port = builder
+            .open()
+            .map_err(|error| format!("serial open {path}: {error}"))?;
+        let _ = port.write_data_terminal_ready(true);
+        let _ = port.write_request_to_send(true);
+        (
+            format!("{path} · {baud_rate} · {}", protocol.serial_format()),
+            probe_transport(config, &protocol, &mut *port, false, timeout)?,
+        )
+    };
+
+    let details = reading.as_ref().map_or_else(
+        || {
+            format!(
+                "Транспорт открыт, но за {} мс не получен кадр протокола {}",
+                timeout.as_millis(),
+                protocol.name
+            )
+        },
+        |reading| {
+            format!(
+                "Получен кадр {}: {:.3} {}{}",
+                protocol.name,
+                reading.weight,
+                reading.unit,
+                if reading.stable {
+                    " · стабильно"
+                } else {
+                    ""
+                }
+            )
+        },
+    );
+    Ok(ScaleProbeResult {
+        connection_type: config.connection_type.clone(),
+        protocol_id: protocol.id.to_owned(),
+        endpoint,
+        reachable: true,
+        valid_frame: reading.is_some(),
+        details,
+        elapsed_ms: started.elapsed().as_millis() as u64,
+        reading,
+    })
+}
+
+#[cfg(feature = "native-ui")]
+fn probe_transport<T: Read + Write + ?Sized>(
+    config: &ScaleConfig,
+    protocol: &Protocol,
+    transport: &mut T,
+    zero_means_closed: bool,
+    timeout: Duration,
+) -> Result<Option<ScaleReading>, String> {
+    let deadline = Instant::now() + timeout;
+    let interval = Duration::from_millis(config.polling_interval);
+    let command = protocol.weight_command();
+    let mut next_poll = Instant::now();
+    let mut decoder = FrameDecoder::new(protocol.framing);
+    let mut read_buffer = [0_u8; 4096];
+    while Instant::now() < deadline {
+        let now = Instant::now();
+        if protocol.polling_required && now >= next_poll {
+            if let Some(command) = command.as_deref() {
+                transport
+                    .write_all(command)
+                    .map_err(|error| format!("scale probe write: {error}"))?;
+                transport
+                    .flush()
+                    .map_err(|error| format!("scale probe flush: {error}"))?;
+            }
+            next_poll = now + interval;
+        }
+        match transport.read(&mut read_buffer) {
+            Ok(0) if zero_means_closed => {
+                return Err("TCP scale closed the probe connection".to_owned())
+            }
+            Ok(0) => thread::sleep(Duration::from_millis(5)),
+            Ok(count) => {
+                for frame in decoder.push(&read_buffer[..count]) {
+                    if let Some(reading) = parse_protocol(protocol, &frame) {
+                        return Ok(Some(reading));
+                    }
+                }
+            }
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+                ) =>
+            {
+                for frame in decoder.flush_idle() {
+                    if let Some(reading) = parse_protocol(protocol, &frame) {
+                        return Ok(Some(reading));
+                    }
+                }
+            }
+            Err(error) => return Err(format!("scale probe read: {error}")),
+        }
+    }
+    Ok(None)
+}
+
 fn run_scale_worker(
     inner: Arc<ScaleInner>,
-    app: AppHandle,
+    app: RuntimeEventSink,
     config: ScaleConfig,
     generation: u64,
     stop: Arc<AtomicBool>,
@@ -1336,7 +1577,7 @@ fn run_scale_worker(
 
 fn run_tcp_once(
     inner: &Arc<ScaleInner>,
-    app: &AppHandle,
+    app: &RuntimeEventSink,
     config: &ScaleConfig,
     protocol: &Protocol,
     generation: u64,
@@ -1370,7 +1611,7 @@ fn run_tcp_once(
 
 fn run_serial_once(
     inner: &Arc<ScaleInner>,
-    app: &AppHandle,
+    app: &RuntimeEventSink,
     config: &ScaleConfig,
     protocol: &Protocol,
     generation: u64,
@@ -1413,9 +1654,10 @@ fn run_serial_once(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_transport<T: Read + Write + ?Sized>(
     inner: &Arc<ScaleInner>,
-    app: &AppHandle,
+    app: &RuntimeEventSink,
     config: &ScaleConfig,
     protocol: &Protocol,
     generation: u64,
@@ -1491,7 +1733,7 @@ fn run_transport<T: Read + Write + ?Sized>(
 
 fn process_frames(
     inner: &Arc<ScaleInner>,
-    app: &AppHandle,
+    app: &RuntimeEventSink,
     protocol: &Protocol,
     generation: u64,
     filter: &mut ReadingFilter,
@@ -1515,7 +1757,7 @@ fn process_frames(
 
 fn run_simulator(
     inner: &Arc<ScaleInner>,
-    app: &AppHandle,
+    app: &RuntimeEventSink,
     config: &ScaleConfig,
     generation: u64,
     stop: &Arc<AtomicBool>,
@@ -1597,7 +1839,12 @@ fn status_of(inner: &Arc<ScaleInner>) -> ScaleStatus {
         .unwrap_or(ScaleStatus::Disconnected)
 }
 
-fn set_status(inner: &Arc<ScaleInner>, app: &AppHandle, generation: u64, status: ScaleStatus) {
+fn set_status(
+    inner: &Arc<ScaleInner>,
+    app: &RuntimeEventSink,
+    generation: u64,
+    status: ScaleStatus,
+) {
     if inner.generation.load(Ordering::Acquire) != generation {
         return;
     }
@@ -1614,21 +1861,26 @@ fn set_status(inner: &Arc<ScaleInner>, app: &AppHandle, generation: u64, status:
         })
         .unwrap_or(false);
     if changed {
-        let _ = app.emit("scale-status", status.as_str());
+        app.emit("scale-status", status.as_str());
     }
 }
 
-fn emit_reading(inner: &Arc<ScaleInner>, app: &AppHandle, generation: u64, reading: ScaleReading) {
+fn emit_reading(
+    inner: &Arc<ScaleInner>,
+    app: &RuntimeEventSink,
+    generation: u64,
+    reading: ScaleReading,
+) {
     if inner.generation.load(Ordering::Acquire) != generation {
         return;
     }
     inner.stats.emitted_readings.fetch_add(1, Ordering::AcqRel);
-    let _ = app.emit("scale-reading", reading);
+    app.emit("scale-reading", reading);
 }
 
-fn emit_error(inner: &Arc<ScaleInner>, app: &AppHandle, generation: u64, message: &str) {
+fn emit_error(inner: &Arc<ScaleInner>, app: &RuntimeEventSink, generation: u64, message: &str) {
     if inner.generation.load(Ordering::Acquire) == generation {
-        let _ = app.emit("scale-error", message);
+        app.emit("scale-error", message);
     }
 }
 
@@ -1653,9 +1905,8 @@ fn map_scale_error(config: &ScaleConfig, error: &str) -> String {
     }
 }
 
-fn log_scale(app: &AppHandle, level: &str, message: &str) {
-    let _ = app.state::<RuntimeState>().log(level, message);
-    telemetry::record_subsystem_log(app, "scale", level, message);
+fn log_scale(app: &RuntimeEventSink, level: &str, message: &str) {
+    app.log("scale", level, message);
 }
 #[cfg(test)]
 mod tests {
@@ -1730,7 +1981,22 @@ mod tests {
     fn catalog_contains_twenty_unique_current_protocols() {
         let ids: HashSet<&str> = PROTOCOLS.iter().map(|protocol| protocol.id).collect();
         assert_eq!(ids.len(), 20);
-        assert_eq!(protocol_catalog().len(), 20);
+        let catalog = protocol_catalog();
+        assert_eq!(catalog.len(), 20);
+        assert!(catalog
+            .iter()
+            .all(|protocol| protocol.default_baud_rate >= 1_200));
+        assert!(catalog
+            .iter()
+            .all(|protocol| protocol.serial_format.len() == 3));
+        assert_eq!(
+            catalog
+                .iter()
+                .find(|protocol| protocol.id == "massak_100")
+                .unwrap()
+                .serial_format,
+            "8E1"
+        );
         assert_eq!(protocol_by_id("missing").id, "generic");
         assert!(!protocol_by_id("massak_cont").polling_required);
         assert!(protocol_by_id("massak_100").polling_required);

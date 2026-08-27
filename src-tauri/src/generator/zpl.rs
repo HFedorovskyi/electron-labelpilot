@@ -142,9 +142,9 @@ fn append_element(
 
 fn orientation(rotation: Option<f64>) -> &'static str {
     match rotation {
-        Some(value) if value == 90.0 => "R",
-        Some(value) if value == 180.0 => "I",
-        Some(value) if value == 270.0 => "B",
+        Some(90.0) => "R",
+        Some(180.0) => "I",
+        Some(270.0) => "B",
         _ => "N",
     }
 }

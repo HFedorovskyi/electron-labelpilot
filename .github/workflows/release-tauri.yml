@@ -39,8 +39,11 @@ jobs:
       - name: Verify migration and telemetry contracts
         run: npm run test:migration
 
-      - name: Run Rust tests
+      - name: Run Tauri Rust tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Run Slint Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --features slint-ui
 
       - name: Report external signing mode
         if: env.TAURI_SIGNING_PRIVATE_KEY == ''
@@ -68,7 +71,7 @@ jobs:
           $assetName = $installer.Name
           $manifest = [ordered]@{
             version = $version
-            notes = "LabelPilot $version — Tauri desktop runtime"
+            notes = "LabelPilot $version — dual Tauri/Slint desktop runtime"
             pub_date = [DateTimeOffset]::UtcNow.ToString('o')
             platforms = [ordered]@{
               'windows-x86_64' = [ordered]@{
@@ -83,6 +86,7 @@ jobs:
             -Version $version `
             -OutputPath "$output/latest.yml" `
             -ReleaseDate $manifest.pub_date
+          ./scripts/new-native-update-package.ps1 -SlintExecutable src-tauri/target/release/labelpilot-slint.exe -MaintenanceExecutable src-tauri/target/release/labelpilot-maintenance.exe -Version $version -OutputDirectory $output -ReleaseBaseUrl "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}" -UseEnvironmentKey
           Get-ChildItem $output -File | Sort-Object Name | ForEach-Object {
             "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())  $($_.Name)"
           } | Set-Content "$output/SHA256SUMS.txt" -Encoding ascii

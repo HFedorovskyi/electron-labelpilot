@@ -1,9 +1,9 @@
-use crate::commands::RuntimeState;
 use crate::crypto::decode_push_body;
+#[cfg(feature = "desktop")]
 use crate::network::NetworkState;
 use crate::persisted::PersistedState;
 use crate::processor::{export_full_snapshot, process_print_job, process_sync};
-use crate::telemetry;
+use crate::runtime_events::RuntimeEventSink;
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::io::{self, Read, Write};
@@ -12,7 +12,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, Manager};
+#[cfg(feature = "desktop")]
+use tauri::{AppHandle, Manager};
 
 const INGRESS_ADDRESS: &str = "0.0.0.0:5556";
 const WAKE_ADDRESS: &str = "127.0.0.1:5556";
@@ -96,6 +97,14 @@ struct IngressInner {
     rejected: AtomicU64,
 }
 
+#[derive(Clone)]
+struct IngressRuntime {
+    persisted: Arc<PersistedState>,
+    events: RuntimeEventSink,
+    client_version: String,
+    request_check: Arc<dyn Fn() + Send + Sync + 'static>,
+}
+
 pub struct IngressState {
     inner: Arc<IngressInner>,
 }
@@ -113,7 +122,38 @@ impl IngressState {
         }
     }
 
+    #[cfg(feature = "desktop")]
     pub fn start(&self, app: AppHandle) -> Result<(), String> {
+        let data_dir = app.state::<PersistedState>().data_dir().to_path_buf();
+        let client_version = app.package_info().version.to_string();
+        let request_app = app.clone();
+        self.start_with_sink(
+            Arc::new(PersistedState::for_data_dir(data_dir)),
+            RuntimeEventSink::tauri(app),
+            client_version,
+            move || request_app.state::<NetworkState>().request_check(),
+        )
+    }
+
+    pub(crate) fn start_with_sink<F>(
+        &self,
+        persisted: Arc<PersistedState>,
+        events: RuntimeEventSink,
+        client_version: String,
+        request_check: F,
+    ) -> Result<(), String>
+    where
+        F: Fn() + Send + Sync + 'static,
+    {
+        self.start_runtime(IngressRuntime {
+            persisted,
+            events,
+            client_version,
+            request_check: Arc::new(request_check),
+        })
+    }
+
+    fn start_runtime(&self, runtime: IngressRuntime) -> Result<(), String> {
         let mut worker = self
             .inner
             .worker
@@ -134,7 +174,7 @@ impl IngressState {
         *worker = Some(
             thread::Builder::new()
                 .name("labelpilot-ingress".to_owned())
-                .spawn(move || run_ingress(listener, inner, app))
+                .spawn(move || run_ingress(listener, inner, runtime))
                 .map_err(|error| format!("failed to start sync ingress worker: {error}"))?,
         );
         Ok(())
@@ -179,9 +219,9 @@ impl Drop for IngressState {
     }
 }
 
-fn run_ingress(listener: TcpListener, inner: Arc<IngressInner>, app: AppHandle) {
+fn run_ingress(listener: TcpListener, inner: Arc<IngressInner>, runtime: IngressRuntime) {
     log(
-        &app,
+        &runtime,
         "INFO",
         &format!("sync ingress listening on {INGRESS_ADDRESS}"),
     );
@@ -194,14 +234,14 @@ fn run_ingress(listener: TcpListener, inner: Arc<IngressInner>, app: AppHandle) 
                 if let Err(error) = stream.set_nonblocking(false) {
                     inner.rejected.fetch_add(1, Ordering::AcqRel);
                     log(
-                        &app,
+                        &runtime,
                         "ERROR",
                         &format!("failed to make accepted ingress socket blocking: {error}"),
                     );
                     continue;
                 }
                 inner.accepted.fetch_add(1, Ordering::AcqRel);
-                let status = serve_connection(&mut stream, peer, &app);
+                let status = serve_connection(&mut stream, peer, &runtime);
                 if status >= 400 {
                     inner.rejected.fetch_add(1, Ordering::AcqRel);
                 }
@@ -212,7 +252,7 @@ fn run_ingress(listener: TcpListener, inner: Arc<IngressInner>, app: AppHandle) 
             }
             Err(error) => {
                 log(
-                    &app,
+                    &runtime,
                     "ERROR",
                     &format!("sync ingress accept failed: {error}"),
                 );
@@ -220,12 +260,12 @@ fn run_ingress(listener: TcpListener, inner: Arc<IngressInner>, app: AppHandle) 
             }
         }
     }
-    log(&app, "INFO", "sync ingress stopped");
+    log(&runtime, "INFO", "sync ingress stopped");
 }
 
-fn serve_connection(stream: &mut TcpStream, peer: SocketAddr, app: &AppHandle) -> u16 {
+fn serve_connection(stream: &mut TcpStream, peer: SocketAddr, runtime: &IngressRuntime) -> u16 {
     let response = match read_request(stream) {
-        Ok(request) => route_request(app, peer.ip(), request),
+        Ok(request) => route_request(runtime, peer.ip(), request),
         Err(ReadRequestError::PayloadTooLarge) => {
             HttpResponse::json(413, json!({"error": "Payload too large"}))
         }
@@ -236,14 +276,18 @@ fn serve_connection(stream: &mut TcpStream, peer: SocketAddr, app: &AppHandle) -
             HttpResponse::json(400, json!({"error": message}))
         }
         Err(ReadRequestError::Io(message)) => {
-            log(app, "WARN", &format!("sync ingress read failed: {message}"));
+            log(
+                runtime,
+                "WARN",
+                &format!("sync ingress read failed: {message}"),
+            );
             HttpResponse::json(400, json!({"error": "Invalid request"}))
         }
     };
     let status = response.status;
     if let Err(error) = write_response(stream, &response) {
         log(
-            app,
+            runtime,
             "WARN",
             &format!("sync ingress response failed: {error}"),
         );
@@ -388,7 +432,7 @@ fn drain_rejected_body(stream: &mut TcpStream, already_received: usize, content_
     }
 }
 
-fn route_request(app: &AppHandle, peer: IpAddr, request: HttpRequest) -> HttpResponse {
+fn route_request(runtime: &IngressRuntime, peer: IpAddr, request: HttpRequest) -> HttpResponse {
     if request.method == "OPTIONS" {
         return HttpResponse::empty(200);
     }
@@ -397,11 +441,11 @@ fn route_request(app: &AppHandle, peer: IpAddr, request: HttpRequest) -> HttpRes
         if !peer.is_loopback() {
             return HttpResponse::json(403, json!({"error": "Forbidden"}));
         }
-        return match export_full_snapshot(&app.state::<PersistedState>()) {
+        return match export_full_snapshot(runtime.persisted.as_ref()) {
             Ok(snapshot) => HttpResponse::json(200, snapshot),
             Err(error) => {
                 log(
-                    app,
+                    runtime,
                     "ERROR",
                     &format!("full snapshot export failed: {error}"),
                 );
@@ -413,55 +457,65 @@ fn route_request(app: &AppHandle, peer: IpAddr, request: HttpRequest) -> HttpRes
     if request.method == "POST"
         && matches!(request.path.as_str(), "/api/sync_db" | "/api/full_sync")
     {
-        return handle_sync(app, &request.body);
+        return handle_sync(runtime, &request.body);
     }
 
     if request.method == "POST" && request.path == "/api/print_job" {
-        return handle_print_job(app, &request.body);
+        return handle_print_job(runtime, &request.body);
     }
 
     HttpResponse::text(404, "Not Found")
 }
 
-fn handle_sync(app: &AppHandle, body: &[u8]) -> HttpResponse {
-    let persisted = app.state::<PersistedState>();
-    let decoded = match decode_push_body(&persisted, body) {
+fn handle_sync(runtime: &IngressRuntime, body: &[u8]) -> HttpResponse {
+    let persisted = runtime.persisted.as_ref();
+    let decoded = match decode_push_body(persisted, body) {
         Ok(decoded) => decoded,
         Err(error) if error.is_unauthorized() => {
             return HttpResponse::json(401, json!({"error": "Unauthorized"}));
         }
         Err(error) => {
-            log(app, "WARN", &format!("sync body decode failed: {error}"));
+            log(
+                runtime,
+                "WARN",
+                &format!("sync body decode failed: {error}"),
+            );
             return HttpResponse::json(500, json!({"error": error.to_string()}));
         }
     };
 
-    let client_version = app.package_info().version.to_string();
-    let outcome = match process_sync(&persisted, &client_version, &decoded.value) {
+    let client_version = runtime.client_version.clone();
+    let outcome = match process_sync(persisted, &client_version, &decoded.value) {
         Ok(outcome) => outcome,
         Err(error) => {
-            log(app, "ERROR", &format!("sync import failed: {error}"));
+            log(runtime, "ERROR", &format!("sync import failed: {error}"));
             return HttpResponse::json(500, json!({"error": error}));
         }
     };
-    if let Err(error) = decoded.persist_verified_token(&persisted) {
+    if let Err(error) = decoded.persist_verified_token(persisted) {
         log(
-            app,
+            runtime,
             "ERROR",
             &format!("license token persistence failed: {error}"),
         );
         return HttpResponse::json(500, json!({"error": error}));
     }
 
-    app.state::<NetworkState>().request_check();
-    let _ = app.emit("printer-config-updated", outcome.printer_config.clone());
-    let _ = app.emit(
+    (runtime.request_check)();
+    runtime
+        .events
+        .emit("printer-config-updated", outcome.printer_config.clone());
+    runtime.events.emit(
         "sync-complete",
         json!({"success": true, "message": outcome.message}),
     );
-    let _ = app.emit("data-updated", ());
+    runtime.events.emit("data-updated", ());
+    runtime.events.emit(
+        "server-status-updated",
+        json!({ "status": "connected", "source": "ingress" }),
+    );
     log(
-        app,
+        runtime,
         "INFO",
         &format!(
             "{} sync completed: {} master rows",
@@ -471,29 +525,33 @@ fn handle_sync(app: &AppHandle, body: &[u8]) -> HttpResponse {
     HttpResponse::json(200, json!({"success": true, "message": "Sync completed"}))
 }
 
-fn handle_print_job(app: &AppHandle, body: &[u8]) -> HttpResponse {
-    let persisted = app.state::<PersistedState>();
-    let decoded = match decode_push_body(&persisted, body) {
+fn handle_print_job(runtime: &IngressRuntime, body: &[u8]) -> HttpResponse {
+    let persisted = runtime.persisted.as_ref();
+    let decoded = match decode_push_body(persisted, body) {
         Ok(decoded) => decoded,
         Err(error) if error.is_unauthorized() => {
             return HttpResponse::json(401, json!({"error": "Unauthorized"}));
         }
         Err(error) => {
-            log(app, "WARN", &format!("print job decode failed: {error}"));
+            log(
+                runtime,
+                "WARN",
+                &format!("print job decode failed: {error}"),
+            );
             return HttpResponse::json(400, json!({"error": error.to_string()}));
         }
     };
 
-    let job = match process_print_job(&persisted, &decoded.value) {
+    let job = match process_print_job(persisted, &decoded.value) {
         Ok(job) => job,
         Err(error) => {
-            log(app, "WARN", &format!("print job rejected: {error}"));
+            log(runtime, "WARN", &format!("print job rejected: {error}"));
             return HttpResponse::json(400, json!({"error": error}));
         }
     };
-    if let Err(error) = decoded.persist_verified_token(&persisted) {
+    if let Err(error) = decoded.persist_verified_token(persisted) {
         log(
-            app,
+            runtime,
             "ERROR",
             &format!("license token persistence failed: {error}"),
         );
@@ -501,13 +559,13 @@ fn handle_print_job(app: &AppHandle, body: &[u8]) -> HttpResponse {
     }
 
     let job_id = job.job_id;
-    let _ = app.emit(
+    runtime.events.emit(
         "sync-complete",
         json!({"success": true, "type": "print_job", "job": job}),
     );
-    let _ = app.emit("data-updated", ());
-    let _ = app.emit("print-jobs-updated", ());
-    log(app, "INFO", &format!("print job #{job_id} accepted"));
+    runtime.events.emit("data-updated", ());
+    runtime.events.emit("print-jobs-updated", ());
+    log(runtime, "INFO", &format!("print job #{job_id} accepted"));
     HttpResponse::json(200, json!({"success": true, "job_id": job_id}))
 }
 
@@ -559,9 +617,8 @@ fn find_header_end(buffer: &[u8]) -> Option<usize> {
     buffer.windows(4).position(|window| window == b"\r\n\r\n")
 }
 
-fn log(app: &AppHandle, level: &str, message: &str) {
-    let _ = app.state::<RuntimeState>().log(level, message);
-    telemetry::record_subsystem_log(app, "ingress", level, message);
+fn log(runtime: &IngressRuntime, level: &str, message: &str) {
+    runtime.events.log("ingress", level, message);
 }
 
 #[cfg(test)]
@@ -603,5 +660,102 @@ mod tests {
         assert!(response.starts_with("HTTP/1.1 413 Payload Too Large\r\n"));
         assert!(response.contains("Access-Control-Allow-Origin: *\r\n"));
         assert!(response.contains("Connection: close\r\n"));
+    }
+
+    #[cfg(feature = "native-ui")]
+    #[test]
+    fn committed_sync_and_print_job_emit_direct_native_events() {
+        use crate::runtime_events::NativeRuntimeEvent;
+        use std::sync::atomic::AtomicUsize;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let data_dir = std::env::temp_dir().join(format!(
+            "labelpilot-ingress-events-{}-{suffix}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&data_dir).unwrap();
+        let persisted = Arc::new(PersistedState::for_data_dir(data_dir.clone()));
+        let captured = Arc::new(Mutex::new(Vec::<NativeRuntimeEvent>::new()));
+        let captured_events = Arc::clone(&captured);
+        let checks = Arc::new(AtomicUsize::new(0));
+        let request_checks = Arc::clone(&checks);
+        let runtime = IngressRuntime {
+            persisted: Arc::clone(&persisted),
+            events: RuntimeEventSink::callback(move |event| {
+                captured_events.lock().unwrap().push(event);
+            }),
+            client_version: "2.0.0".to_owned(),
+            request_check: Arc::new(move || {
+                request_checks.fetch_add(1, Ordering::AcqRel);
+            }),
+        };
+        let sync = json!({
+            "station": {
+                "uuid": "event-station", "number": 7, "name": "Event station",
+                "server_url": "http://127.0.0.1:8000/api/v1"
+            },
+            "payload": {
+                "operators": [{"uuid": "operator-1", "full_name": "Operator", "is_active": true}],
+                "barcodes": [{"id": 10, "name": "GS1", "structure": {"type": "code128"}}],
+                "labels": [{"id": 20, "name": "Label", "structure": {"width": 80}}],
+                "containers": [{"id": 30, "name": "Tray", "weight": 12.5}],
+                "nomenclature": [{"id": 40, "name": "Product", "article": "A-40", "exp_date": 10}]
+            },
+            "meta": {
+                "type": "FULL_SYNC", "generated_at": "2026-08-25T10:00:00Z",
+                "min_client_version": "1.3.0"
+            }
+        });
+        let response = handle_sync(&runtime, &serde_json::to_vec(&sync).unwrap());
+        assert_eq!(response.status, 200);
+        assert_eq!(checks.load(Ordering::Acquire), 1);
+        let names = captured
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|event| match event {
+                NativeRuntimeEvent::Event { name, .. } => Some(name.clone()),
+                NativeRuntimeEvent::Log { .. } => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            names,
+            vec![
+                "printer-config-updated",
+                "sync-complete",
+                "data-updated",
+                "server-status-updated"
+            ]
+        );
+
+        captured.lock().unwrap().clear();
+        let job = json!({
+            "type": "PRINT_JOB", "job_id": 7001, "nomenclature_id": 40,
+            "nomenclature_name": "Product", "nomenclature_article": "A-40",
+            "quantity": 25, "quantity_unit": "pcs", "batch_number": "EVENT"
+        });
+        let response = handle_print_job(&runtime, &serde_json::to_vec(&job).unwrap());
+        assert_eq!(response.status, 200);
+        let names = captured
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|event| match event {
+                NativeRuntimeEvent::Event { name, .. } => Some(name.clone()),
+                NativeRuntimeEvent::Log { .. } => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            names,
+            vec!["sync-complete", "data-updated", "print-jobs-updated"]
+        );
+        assert_eq!(process_print_job(&persisted, &job).unwrap().job_id, 7001);
+        drop(runtime);
+        drop(persisted);
+        std::fs::remove_dir_all(data_dir).unwrap();
     }
 }

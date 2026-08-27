@@ -75,13 +75,22 @@ impl OperationalState {
             } else {
                 ""
             };
+            let joins = "LEFT JOIN container pc ON n.portion_container_id = pc.id \
+                         LEFT JOIN container bc ON n.box_container_id = bc.id \
+                         LEFT JOIN labels pack_label ON n.templates_pack_label = pack_label.id \
+                         LEFT JOIN labels box_label ON n.templates_box_label = box_label.id \
+                         LEFT JOIN labels pallet_label ON n.templates_pallet_label = pallet_label.id";
+            let columns = "n.*, \
+                           pc.weight AS portion_weight, pc.name AS portion_container_name, \
+                           bc.weight AS box_weight, bc.name AS box_container_name, \
+                           pack_label.name AS pack_label_name, \
+                           box_label.name AS box_label_name, \
+                           pallet_label.name AS pallet_label_name";
             if search.is_empty() {
                 query_all_json(
                     connection,
                     &format!(
-                        "SELECT n.*, c.weight AS portion_weight \
-                         FROM nomenclature n \
-                         LEFT JOIN container c ON n.portion_container_id = c.id \
+                        "SELECT {columns} FROM nomenclature n {joins} \
                          {fixed_clause} ORDER BY n.name COLLATE NOCASE ASC LIMIT 50"
                     ),
                     &[],
@@ -91,9 +100,7 @@ impl OperationalState {
                 query_all_json(
                     connection,
                     &format!(
-                        "SELECT n.*, c.weight AS portion_weight \
-                         FROM nomenclature n \
-                         LEFT JOIN container c ON n.portion_container_id = c.id \
+                        "SELECT {columns} FROM nomenclature n {joins} \
                          {fixed_clause} {search_clause} (n.name LIKE ?1 OR n.article LIKE ?1) \
                          ORDER BY n.name COLLATE NOCASE ASC LIMIT 50"
                     ),
@@ -103,6 +110,81 @@ impl OperationalState {
         })
     }
 
+    #[cfg(feature = "slint-ui")]
+    pub fn product_count(
+        &self,
+        search: Option<&str>,
+        fixed_weight_only: bool,
+    ) -> Result<i64, String> {
+        let search = search.unwrap_or_default().trim();
+        let search: String = search.chars().take(256).collect();
+        self.with_connection(|connection| {
+            let fixed_clause = if fixed_weight_only {
+                "WHERE is_fixed_weight = 1"
+            } else {
+                ""
+            };
+            if search.is_empty() {
+                connection
+                    .query_row(
+                        &format!("SELECT COUNT(*) FROM nomenclature {fixed_clause}"),
+                        [],
+                        |row| row.get(0),
+                    )
+                    .map_err(db_error("count products"))
+            } else {
+                let search_clause = if fixed_weight_only { "AND" } else { "WHERE" };
+                connection
+                    .query_row(
+                        &format!(
+                            "SELECT COUNT(*) FROM nomenclature {fixed_clause} {search_clause} \
+                             (name LIKE ?1 OR article LIKE ?1)"
+                        ),
+                        params![format!("%{search}%")],
+                        |row| row.get(0),
+                    )
+                    .map_err(db_error("count filtered products"))
+            }
+        })
+    }
+
+    #[cfg(feature = "slint-ui")]
+    pub fn product(&self, id: i64) -> Result<Option<Value>, String> {
+        require_positive_id(id, "productId")?;
+        self.with_connection(|connection| {
+            query_one_json(
+                connection,
+                "SELECT n.*, \
+                        pc.weight AS portion_weight, pc.name AS portion_container_name, \
+                        bc.weight AS box_weight, bc.name AS box_container_name, \
+                        pack_label.name AS pack_label_name, \
+                        box_label.name AS box_label_name, \
+                        pallet_label.name AS pallet_label_name \
+                 FROM nomenclature n \
+                 LEFT JOIN container pc ON n.portion_container_id = pc.id \
+                 LEFT JOIN container bc ON n.box_container_id = bc.id \
+                 LEFT JOIN labels pack_label ON n.templates_pack_label = pack_label.id \
+                 LEFT JOIN labels box_label ON n.templates_box_label = box_label.id \
+                 LEFT JOIN labels pallet_label ON n.templates_pallet_label = pallet_label.id \
+                 WHERE n.id = ?1",
+                &[SqlValue::Integer(id)],
+            )
+        })
+    }
+    #[cfg(feature = "slint-ui")]
+    pub fn latest_active_pack_id(&self, nomenclature_id: i64) -> Result<Option<i64>, String> {
+        require_positive_id(nomenclature_id, "nomenclatureId")?;
+        self.with_connection(|connection| {
+            connection
+                .query_row(
+                    "SELECT p.id FROM pack p JOIN boxes b ON b.id = p.box_id WHERE p.nomenclature_id = ?1 AND p.status != 'Deleted' AND b.status = 'Open' ORDER BY p.id DESC LIMIT 1",
+                    params![nomenclature_id],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(db_error("read latest active pack"))
+        })
+    }
     pub fn containers(&self) -> Result<Vec<Value>, String> {
         self.with_connection(|connection| {
             query_all_json(
@@ -148,14 +230,23 @@ impl OperationalState {
     pub fn station_info(&self) -> Result<Value, String> {
         self.with_connection(|connection| {
             let row = connection
-                .query_row("SELECT uuid, number FROM station LIMIT 1", [], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, Option<i64>>(1)?))
-                })
+                .query_row(
+                    "SELECT uuid, number, name FROM station LIMIT 1",
+                    [],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, Option<i64>>(1)?,
+                            row.get::<_, Option<String>>(2)?,
+                        ))
+                    },
+                )
                 .optional()
                 .map_err(db_error("read station info"))?;
             Ok(match row {
-                Some((uuid, number)) => json!({
+                Some((uuid, number, name)) => json!({
                     "uuid_client": uuid,
+                    "station_name": name,
                     "station_number": number
                         .filter(|value| *value != 0)
                         .map(|value| format!("{value:02}")),
@@ -510,6 +601,7 @@ impl RecordPackPayload {
 #[serde(rename_all = "camelCase")]
 pub struct RecordPackResult {
     pub success: bool,
+    pub pack_id: i64,
     pub box_id: i64,
     pub box_number: String,
     pub new_box_created: bool,
@@ -576,7 +668,7 @@ fn record_pack_transaction(
                 Err(error) if is_unique_constraint(&error) => {
                     let next_attempt = attempts + 1;
                     let count: i64 = transaction
-                        .query_row("SELECT COUNT(*) FROM boxes", [], |row| row.get(0))
+                        .query_row("SELECT COUNT(*) FROM boxes WHERE status != 'Deleted'", [], |row| row.get(0))
                         .map_err(db_error("count boxes after number collision"))?;
                     actual_number = if actual_number.chars().all(|character| character.is_ascii_digit()) {
                         (count + 1).to_string()
@@ -628,9 +720,11 @@ fn record_pack_transaction(
             ],
         )
         .map_err(db_error("insert pack"))?;
+    let pack_id = transaction.last_insert_rowid();
 
     Ok(RecordPackResult {
         success: true,
+        pack_id,
         box_id,
         box_number,
         new_box_created,
@@ -661,7 +755,7 @@ fn insert_unique_pallet(transaction: &Transaction<'_>) -> Result<i64, String> {
 fn latest_counters(connection: &Connection, nomenclature_id: Option<i64>) -> Result<Value, String> {
     let last_pack: Option<String> = connection
         .query_row(
-            "SELECT number FROM pack ORDER BY id DESC LIMIT 1",
+            "SELECT number FROM pack WHERE status != 'Deleted' ORDER BY id DESC LIMIT 1",
             [],
             |row| row.get(0),
         )
@@ -669,17 +763,25 @@ fn latest_counters(connection: &Connection, nomenclature_id: Option<i64>) -> Res
         .map_err(db_error("read latest pack number"))?;
     let last_box: Option<String> = connection
         .query_row(
-            "SELECT number FROM boxes ORDER BY id DESC LIMIT 1",
+            "SELECT number FROM boxes WHERE status != 'Deleted' ORDER BY id DESC LIMIT 1",
             [],
             |row| row.get(0),
         )
         .optional()
         .map_err(db_error("read latest box number"))?;
     let total_units: i64 = connection
-        .query_row("SELECT COUNT(*) FROM pack", [], |row| row.get(0))
+        .query_row(
+            "SELECT COUNT(*) FROM pack WHERE status != 'Deleted'",
+            [],
+            |row| row.get(0),
+        )
         .map_err(db_error("count packs"))?;
     let total_boxes: i64 = connection
-        .query_row("SELECT COUNT(*) FROM boxes", [], |row| row.get(0))
+        .query_row(
+            "SELECT COUNT(*) FROM boxes WHERE status != 'Deleted'",
+            [],
+            |row| row.get(0),
+        )
         .map_err(db_error("count boxes"))?;
     let open_pallet: Option<i64> = connection
         .query_row(

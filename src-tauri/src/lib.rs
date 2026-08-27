@@ -1,33 +1,78 @@
+#![cfg_attr(feature = "native-ui", allow(dead_code, unused_imports))]
+
+#[cfg(any(feature = "desktop", feature = "slint-ui"))]
 mod barcode;
+#[cfg(feature = "desktop")]
 mod commands;
+#[cfg(any(feature = "desktop", feature = "slint-ui"))]
 mod crypto;
+#[cfg(feature = "desktop")]
 mod diagnostic;
+#[cfg(any(feature = "desktop", feature = "slint-ui"))]
 mod generator;
+#[cfg(any(feature = "desktop", feature = "slint-ui"))]
 mod ingress;
+#[cfg(feature = "desktop")]
 mod lifecycle;
+#[cfg(feature = "native-update")]
+pub mod native_update;
+#[cfg(feature = "desktop")]
 mod network;
+#[cfg(any(feature = "desktop", feature = "slint-ui"))]
 mod operational;
+#[cfg(any(feature = "desktop", feature = "slint-ui"))]
 mod persisted;
+#[cfg(any(feature = "desktop", feature = "slint-ui"))]
 mod printer;
+#[cfg(any(feature = "desktop", feature = "slint-ui"))]
 mod processor;
+#[cfg(any(feature = "desktop", feature = "slint-ui"))]
+mod runtime_events;
+pub mod runtime_selector;
+#[cfg(any(feature = "desktop", feature = "slint-ui"))]
 mod scale;
+#[cfg(any(feature = "desktop", feature = "slint-ui"))]
 mod session;
+#[cfg(feature = "desktop")]
 mod telemetry;
+#[cfg(feature = "desktop")]
 mod transfer;
 
+#[cfg(feature = "slint-ui")]
+mod native_print;
+#[cfg(feature = "slint-ui")]
+mod native_raster;
+#[cfg(feature = "native-ui")]
+pub mod native_ui;
+#[cfg(feature = "slint-ui")]
+pub mod slint_runtime;
+
+#[cfg(feature = "desktop")]
 use commands::RuntimeState;
+#[cfg(feature = "desktop")]
 use generator::GeneratorState;
+#[cfg(feature = "desktop")]
 use ingress::IngressState;
+#[cfg(feature = "desktop")]
 use lifecycle::UpdateRuntimeState;
+#[cfg(feature = "desktop")]
 use network::NetworkState;
+#[cfg(feature = "desktop")]
 use operational::OperationalState;
+#[cfg(feature = "desktop")]
 use persisted::PersistedState;
+#[cfg(feature = "desktop")]
 use printer::PrinterTransportState;
+#[cfg(feature = "desktop")]
 use scale::ScaleState;
+#[cfg(feature = "desktop")]
 use session::SessionState;
+#[cfg(feature = "desktop")]
 use tauri::Manager;
+#[cfg(feature = "desktop")]
 use telemetry::TelemetryState;
 
+#[cfg(feature = "desktop")]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()

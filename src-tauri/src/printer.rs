@@ -8,8 +8,7 @@ pub use backend::{plan_backend, BackendPlanPayload, UniversalPrinterPlan};
 pub use durable::{DurablePrintJobRecord, DurableQueueSummary};
 pub use status::PrinterStatusReport;
 
-use crate::commands::RuntimeState;
-use crate::telemetry;
+use crate::runtime_events::RuntimeEventSink;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
@@ -20,11 +19,12 @@ use std::io::{self, Write};
 use std::net::{Shutdown, SocketAddr, TcpStream, ToSocketAddrs};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError};
+use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Emitter, Manager};
+#[cfg(feature = "desktop")]
+use tauri::AppHandle;
 
 const DEFAULT_TCP_PORT: u16 = 9100;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
@@ -493,11 +493,13 @@ impl PrinterTransportState {
         }
     }
 
+    #[cfg(feature = "desktop")]
     pub fn submit_raw(
         &self,
         app: AppHandle,
         payload: RawPrintPayload,
     ) -> Result<PrintReceipt, String> {
+        let app = RuntimeEventSink::tauri(app);
         let config = PrinterDeviceConfig::from_value(payload.config)?;
         let max_encoded = MAX_RAW_JOB_BYTES.div_ceil(3) * 4 + 8;
         if payload.data_base64.len() > max_encoded {
@@ -516,9 +518,19 @@ impl PrinterTransportState {
         self.submit_bytes_with_config(app, config, data)
     }
 
+    #[cfg(feature = "desktop")]
     pub fn submit_generated(
         &self,
         app: AppHandle,
+        config: Value,
+        data: Vec<u8>,
+    ) -> Result<PrintReceipt, String> {
+        self.submit_generated_with_sink(RuntimeEventSink::tauri(app), config, data)
+    }
+
+    pub(crate) fn submit_generated_with_sink(
+        &self,
+        app: RuntimeEventSink,
         config: Value,
         data: Vec<u8>,
     ) -> Result<PrintReceipt, String> {
@@ -528,7 +540,7 @@ impl PrinterTransportState {
 
     fn submit_bytes_with_config(
         &self,
-        app: AppHandle,
+        app: RuntimeEventSink,
         config: PrinterDeviceConfig,
         data: Vec<u8>,
     ) -> Result<PrintReceipt, String> {
@@ -549,11 +561,120 @@ impl PrinterTransportState {
         self.submit(app, config, JobAction::Print(data))
     }
 
+    #[cfg(feature = "slint-ui")]
+    pub(crate) fn submit_driver_bitmap_with_sink(
+        &self,
+        app: RuntimeEventSink,
+        config: Value,
+        width: u32,
+        height: u32,
+        mono: Vec<u8>,
+    ) -> Result<PrintReceipt, String> {
+        let config = PrinterDeviceConfig::from_value(config)?;
+        if config.connection != "windows_driver" {
+            return Err("driver bitmap printing requires windows_driver connection".to_owned());
+        }
+        if width == 0 || height == 0 || width > 10_000 || height > 10_000 {
+            return Err("driver bitmap dimensions must be in 1..10000 dots".to_owned());
+        }
+        let expected = width.div_ceil(8) as usize * height as usize;
+        if mono.len() != expected || mono.len() > MAX_RAW_JOB_BYTES {
+            return Err(format!(
+                "driver bitmap requires exactly {expected} bytes, got {}",
+                mono.len()
+            ));
+        }
+        self.submit(
+            app,
+            config,
+            JobAction::DriverBitmap {
+                width,
+                height,
+                mono,
+            },
+        )
+    }
+    #[cfg(feature = "slint-ui")]
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn submit_driver_page_with_sink(
+        &self,
+        app: RuntimeEventSink,
+        config: Value,
+        width: u32,
+        height: u32,
+        mono: Vec<u8>,
+        page_width_mm: f64,
+        page_height_mm: f64,
+        margins_mm: PageMarginsMm,
+        fit_mode: String,
+        document_name: String,
+    ) -> Result<PrintReceipt, String> {
+        let config = PrinterDeviceConfig::from_value(config)?;
+        if config.connection != "windows_driver" {
+            return Err("page-sheet printing requires windows_driver connection".to_owned());
+        }
+        if width == 0 || height == 0 || width > 10_000 || height > 10_000 {
+            return Err("driver page bitmap dimensions must be in 1..10000 dots".to_owned());
+        }
+        if !page_width_mm.is_finite()
+            || !page_height_mm.is_finite()
+            || !(25.0..=2_000.0).contains(&page_width_mm)
+            || !(25.0..=2_000.0).contains(&page_height_mm)
+        {
+            return Err("driver page size must be in 25..2000 mm".to_owned());
+        }
+        if [
+            margins_mm.top,
+            margins_mm.right,
+            margins_mm.bottom,
+            margins_mm.left,
+        ]
+        .into_iter()
+        .any(|value| !value.is_finite() || !(0.0..=100.0).contains(&value))
+            || margins_mm.left + margins_mm.right >= page_width_mm
+            || margins_mm.top + margins_mm.bottom >= page_height_mm
+        {
+            return Err("driver page margins are invalid for the selected page".to_owned());
+        }
+        let fit_mode = fit_mode.trim().to_ascii_lowercase();
+        if !["fit-printable", "actual-size"].contains(&fit_mode.as_str()) {
+            return Err(format!("unsupported driver page fit mode: {fit_mode}"));
+        }
+        let document_name = document_name.trim().to_owned();
+        if document_name.is_empty() || document_name.len() > 256 {
+            return Err("driver page document name must contain 1..256 bytes".to_owned());
+        }
+        let expected = width.div_ceil(8) as usize * height as usize;
+        if mono.len() != expected || mono.len() > MAX_RAW_JOB_BYTES {
+            return Err(format!(
+                "driver page requires exactly {expected} bytes, got {}",
+                mono.len()
+            ));
+        }
+        self.submit(
+            app,
+            config,
+            JobAction::DriverPage {
+                width,
+                height,
+                mono,
+                page: DriverPageSpec {
+                    page_width_mm,
+                    page_height_mm,
+                    margins_mm,
+                    fit_mode,
+                    document_name,
+                },
+            },
+        )
+    }
+    #[cfg(feature = "desktop")]
     pub fn submit_driver_bitmap(
         &self,
         app: AppHandle,
         payload: DriverBitmapPayload,
     ) -> Result<PrintReceipt, String> {
+        let app = RuntimeEventSink::tauri(app);
         let config = PrinterDeviceConfig::from_value(payload.config)?;
         if config.connection != "windows_driver" {
             return Err("driver bitmap printing requires windows_driver connection".to_owned());
@@ -592,11 +713,13 @@ impl PrinterTransportState {
         )
     }
 
+    #[cfg(feature = "desktop")]
     pub fn submit_driver_page(
         &self,
         app: AppHandle,
         payload: DriverPagePayload,
     ) -> Result<PrintReceipt, String> {
+        let app = RuntimeEventSink::tauri(app);
         let config = PrinterDeviceConfig::from_value(payload.config)?;
         if config.connection != "windows_driver" {
             return Err("page-sheet printing requires windows_driver connection".to_owned());
@@ -670,7 +793,16 @@ impl PrinterTransportState {
         )
     }
 
+    #[cfg(feature = "desktop")]
     pub fn warmup(&self, app: AppHandle, config: Value) -> Result<PrintReceipt, String> {
+        self.warmup_with_sink(RuntimeEventSink::tauri(app), config)
+    }
+
+    pub(crate) fn warmup_with_sink(
+        &self,
+        app: RuntimeEventSink,
+        config: Value,
+    ) -> Result<PrintReceipt, String> {
         let config = PrinterDeviceConfig::from_value(config)?;
         self.submit(app, config, JobAction::Probe)
     }
@@ -798,7 +930,7 @@ impl PrinterTransportState {
 
     fn submit(
         &self,
-        app: AppHandle,
+        app: RuntimeEventSink,
         config: PrinterDeviceConfig,
         action: JobAction,
     ) -> Result<PrintReceipt, String> {
@@ -860,7 +992,7 @@ impl PrinterTransportState {
     }
     fn submit_once(
         &self,
-        app: AppHandle,
+        app: RuntimeEventSink,
         config: PrinterDeviceConfig,
         action: JobAction,
         physical_key: &str,
@@ -1045,23 +1177,51 @@ impl PrinterTransportState {
         self.inner.durable.summary()
     }
 
+    #[cfg(feature = "desktop")]
     pub fn cancel_durable(
         &self,
         app: &AppHandle,
         job_id: &str,
     ) -> Result<DurablePrintJobRecord, String> {
+        self.cancel_durable_with_sink(RuntimeEventSink::tauri(app.clone()), job_id)
+    }
+
+    pub(crate) fn cancel_durable_with_sink(
+        &self,
+        app: RuntimeEventSink,
+        job_id: &str,
+    ) -> Result<DurablePrintJobRecord, String> {
         let record = self.inner.durable.cancel(job_id)?;
-        emit_durable_status(app, Some(job_id), "cancelled", record.last_error.as_deref());
+        emit_durable_status(
+            &app,
+            Some(job_id),
+            "cancelled",
+            record.last_error.as_deref(),
+        );
         Ok(record)
     }
 
+    #[cfg(feature = "desktop")]
     pub fn retry_durable(&self, app: AppHandle, job_id: &str) -> Result<PrintReceipt, String> {
+        self.retry_durable_with_sink(RuntimeEventSink::tauri(app), job_id)
+    }
+
+    pub(crate) fn retry_durable_with_sink(
+        &self,
+        app: RuntimeEventSink,
+        job_id: &str,
+    ) -> Result<PrintReceipt, String> {
         let job = self.inner.durable.prepare_retry(job_id)?;
         emit_durable_status(&app, Some(&job.job_id), "queued", None);
         self.submit_stored(app, job)
     }
 
+    #[cfg(feature = "desktop")]
     pub fn recover_pending(&self, app: AppHandle) -> Result<usize, String> {
+        self.recover_pending_with_sink(RuntimeEventSink::tauri(app))
+    }
+
+    pub(crate) fn recover_pending_with_sink(&self, app: RuntimeEventSink) -> Result<usize, String> {
         let jobs = self.inner.durable.queued_jobs()?;
         let count = jobs.len();
         if jobs.is_empty() {
@@ -1089,7 +1249,7 @@ impl PrinterTransportState {
 
     fn submit_stored(
         &self,
-        app: AppHandle,
+        app: RuntimeEventSink,
         job: durable::StoredPrintJob,
     ) -> Result<PrintReceipt, String> {
         let physical_key = job.config.physical_key();
@@ -1221,7 +1381,7 @@ fn action_fingerprint(action: &JobAction) -> u64 {
 }
 
 struct PrintJob {
-    app: AppHandle,
+    app: RuntimeEventSink,
     config: PrinterDeviceConfig,
     action: JobAction,
     durable_job_id: Option<String>,
@@ -1383,21 +1543,16 @@ fn run_device_worker(
         }
     }
     connection.close();
-    loop {
-        match receiver.try_recv() {
-            Ok(job) => {
-                depth.fetch_sub(1, Ordering::AcqRel);
-                stats.queued_now.fetch_sub(1, Ordering::AcqRel);
-                stats.failed_jobs.fetch_add(1, Ordering::AcqRel);
-                let error = "printer worker stopped during reconfiguration".to_owned();
-                if let Some(job_id) = job.durable_job_id.as_deref() {
-                    let _ = durable.mark_failed(job_id, &error);
-                    emit_durable_status(&job.app, Some(job_id), "failed", Some(&error));
-                }
-                let _ = job.completion.send(Err(error));
-            }
-            Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
+    while let Ok(job) = receiver.try_recv() {
+        depth.fetch_sub(1, Ordering::AcqRel);
+        stats.queued_now.fetch_sub(1, Ordering::AcqRel);
+        stats.failed_jobs.fetch_add(1, Ordering::AcqRel);
+        let error = "printer worker stopped during reconfiguration".to_owned();
+        if let Some(job_id) = job.durable_job_id.as_deref() {
+            let _ = durable.mark_failed(job_id, &error);
+            emit_durable_status(&job.app, Some(job_id), "failed", Some(&error));
         }
+        let _ = job.completion.send(Err(error));
     }
 }
 fn process_job(
@@ -1685,7 +1840,7 @@ fn io_failure(context: &str, error: io::Error) -> TransportFailure {
 }
 
 fn log_duplicate(
-    app: &AppHandle,
+    app: &RuntimeEventSink,
     config: &PrinterDeviceConfig,
     physical_key: &str,
     receipt: &PrintReceipt,
@@ -1702,7 +1857,12 @@ fn log_duplicate(
         ),
     );
 }
-fn emit_durable_status(app: &AppHandle, job_id: Option<&str>, state: &str, error: Option<&str>) {
+fn emit_durable_status(
+    app: &RuntimeEventSink,
+    job_id: Option<&str>,
+    state: &str,
+    error: Option<&str>,
+) {
     let Some(job_id) = job_id else {
         return;
     };
@@ -1711,7 +1871,7 @@ fn emit_durable_status(app: &AppHandle, job_id: Option<&str>, state: &str, error
         .unwrap_or_default()
         .as_millis()
         .min(u64::MAX as u128) as u64;
-    let _ = app.emit(
+    app.emit(
         "printer-durable-job-update",
         serde_json::json!({
             "jobId": job_id,
@@ -1722,7 +1882,12 @@ fn emit_durable_status(app: &AppHandle, job_id: Option<&str>, state: &str, error
     );
 }
 
-fn emit_delivery_status(app: &AppHandle, id: &str, status: &str, receipt: Option<&PrintReceipt>) {
+fn emit_delivery_status(
+    app: &RuntimeEventSink,
+    id: &str,
+    status: &str,
+    receipt: Option<&PrintReceipt>,
+) {
     let payload = match receipt {
         Some(receipt) => serde_json::json!({
             "id": id,
@@ -1734,12 +1899,11 @@ fn emit_delivery_status(app: &AppHandle, id: &str, status: &str, receipt: Option
         }),
         None => serde_json::json!({ "id": id, "status": status }),
     };
-    let _ = app.emit("printer-status-update", payload);
+    app.emit("printer-status-update", payload);
 }
 
-fn log_printer(app: &AppHandle, level: &str, message: &str) {
-    let _ = app.state::<RuntimeState>().log(level, message);
-    telemetry::record_subsystem_log(app, "printer", level, message);
+fn log_printer(app: &RuntimeEventSink, level: &str, message: &str) {
+    app.log("printer", level, message);
 }
 
 #[cfg(test)]

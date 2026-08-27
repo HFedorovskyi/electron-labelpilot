@@ -1,1 +1,1 @@
-{"bundle":{"createUpdaterArtifacts":false}}
+{"bundle":{"externalBin":["binaries/labelpilot-slint","binaries/labelpilot-maintenance"],"createUpdaterArtifacts":false}}

@@ -672,7 +672,7 @@ fn pre_update_compatibility(
     let required = match new_client_version.trim_start_matches('v') {
         "1.3.0" => Some("1.1.0"),
         "1.3.7" | "1.3.8" | "1.3.9" | "1.3.10" | "1.3.11" => Some("1.1.13"),
-        "1.3.12" | "1.3.13" | "1.3.14" | "1.3.15" | "1.3.16" | "2.0.0" => Some("1.1.23"),
+        "1.3.12" | "1.3.13" | "1.3.14" | "1.3.15" | "1.3.16" | "2.0.0" | "2.0.1" => Some("1.1.23"),
         _ => None,
     };
     let Some(server) = server_version else {

@@ -117,9 +117,8 @@ impl PersistedState {
     }
 
     pub fn load_identity(&self) -> Option<Value> {
-        match read_database_identity(&self.data_dir.join(DATABASE_FILE)) {
-            Ok(Some(identity)) => return Some(identity),
-            Ok(None) | Err(_) => {}
+        if let Ok(Some(identity)) = read_database_identity(&self.data_dir.join(DATABASE_FILE)) {
+            return Some(identity);
         }
         read_json(&self.data_dir.join(IDENTITY_FILE))
             .ok()

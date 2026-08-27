@@ -153,7 +153,7 @@ fn decode_lpi2_with_key(
     let token = std::str::from_utf8(&rest[..token_end])
         .map_err(|_| PushDecodeError::Invalid("LPI2 token must be ASCII".to_owned()))?;
     let encrypted = &rest[token_end + 1..];
-    if encrypted.len() < 32 || (encrypted.len() - 16) % 16 != 0 {
+    if encrypted.len() < 32 || !(encrypted.len() - 16).is_multiple_of(16) {
         return Err(PushDecodeError::Invalid(
             "Malformed LPI2 encrypted body length".to_owned(),
         ));
