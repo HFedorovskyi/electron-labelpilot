@@ -1,14 +1,14 @@
 [CmdletBinding()]
 param(
-    [string]$NativeInstaller = 'artifacts/legacy-install-migration-2.0.2/publish/LabelPilot_2.0.2_x64-setup.exe',
-    [string]$UpdateManifest = 'artifacts/legacy-install-migration-2.0.2/publish/latest.yml',
-    [string]$OutputDirectory = 'artifacts/legacy-install-migration-2.0.2/install-e2e'
+    [string]$NativeInstaller = 'artifacts/slint-default-2.0.3/publish/LabelPilot_2.0.3_x64-setup.exe',
+    [string]$UpdateManifest = 'artifacts/slint-default-2.0.3/publish/latest.yml',
+    [string]$OutputDirectory = 'artifacts/slint-default-2.0.3/install-e2e'
 )
 
 $ErrorActionPreference = 'Stop'
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 Set-Location $repo
-$phaseRoot = [IO.Path]::GetFullPath((Join-Path $repo 'artifacts\legacy-install-migration-2.0.2'))
+$phaseRoot = [IO.Path]::GetFullPath((Join-Path $repo 'artifacts\slint-default-2.0.3'))
 $output = [IO.Path]::GetFullPath((Join-Path $repo $OutputDirectory))
 $phasePrefix = $phaseRoot.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
 if (-not $output.StartsWith($phasePrefix, [StringComparison]::OrdinalIgnoreCase)) {
@@ -23,7 +23,7 @@ $nativeInstallerPath = [IO.Path]::GetFullPath((Join-Path $repo $NativeInstaller)
 $manifestPath = [IO.Path]::GetFullPath((Join-Path $repo $UpdateManifest))
 $hookPath = Join-Path $repo 'src-tauri\windows\legacy-migration.nsh'
 $generatedInstallerNsi = Join-Path $repo 'src-tauri\target\release\nsis\x64\installer.nsi'
-$slintExecutable = Join-Path $repo 'artifacts\legacy-install-migration-2.0.2\publish\LabelPilot-Slint.exe'
+$slintExecutable = Join-Path $repo 'artifacts\slint-default-2.0.3\publish\LabelPilot-Slint.exe'
 $makensis = Join-Path $env:LOCALAPPDATA 'tauri\NSIS\makensis.exe'
 foreach ($required in @($nativeInstallerPath, $manifestPath, $hookPath, $generatedInstallerNsi, $slintExecutable, $makensis)) {
     if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw "E2E input missing: $required" }
@@ -133,8 +133,8 @@ $hostFilesBefore = @($hostPaths | ForEach-Object {
 })
 
 $manifestText = [IO.File]::ReadAllText($manifestPath)
-if ($manifestText -notmatch '(?m)^version:\s*2\.0\.2\s*$') { throw 'latest.yml version is not 2.0.2' }
-if ($manifestText -notmatch "(?m)^path:\s*'?LabelPilot_2\.0\.2_x64-setup\.exe'?\s*$") { throw 'latest.yml installer path mismatch' }
+if ($manifestText -notmatch '(?m)^version:\s*2\.0\.3\s*$') { throw 'latest.yml version is not 2.0.3' }
+if ($manifestText -notmatch "(?m)^path:\s*'?LabelPilot_2\.0\.3_x64-setup\.exe'?\s*$") { throw 'latest.yml installer path mismatch' }
 if ($manifestText -notmatch '(?m)^sha512:\s*(\S+)\s*$') { throw 'latest.yml sha512 is missing' }
 $manifestSha512 = $matches[1]
 if ($manifestSha512 -ne (Get-Sha512Base64 $nativeInstallerPath)) { throw 'latest.yml sha512 differs from native installer' }
@@ -160,7 +160,7 @@ New-Item -ItemType Directory -Force -Path $legacyInstall, $dataDir, $toolsDir, $
 [IO.File]::WriteAllText((Join-Path $legacyInstall 'LabelPilot.exe'), 'legacy-electron-runtime', [Text.UTF8Encoding]::new($false))
 $sentinel = Join-Path $dataDir 'migration-sentinel.bin'
 $printer = Join-Path $dataDir 'printer-config.json'
-[IO.File]::WriteAllText($sentinel, 'LABELPILOT_DATA_PRESERVED_1.3.16_TO_2.0.2', [Text.UTF8Encoding]::new($false))
+[IO.File]::WriteAllText($sentinel, 'LABELPILOT_DATA_PRESERVED_1.3.16_TO_2.0.3', [Text.UTF8Encoding]::new($false))
 [IO.File]::WriteAllText($printer, '{"profile":"legacy-zpl","port":9100}', [Text.UTF8Encoding]::new($false))
 $sentinelHash = Get-Sha256 $sentinel
 $printerHash = Get-Sha256 $printer
@@ -207,7 +207,7 @@ $harnessLines = @(
     '!include "@HOOK@"',
     'Section',
     '  !insertmacro NSIS_HOOK_PREINSTALL',
-    '  WriteRegStr HKCU "${UNINSTKEY}" "DisplayVersion" "2.0.2"',
+    '  WriteRegStr HKCU "${UNINSTKEY}" "DisplayVersion" "2.0.3"',
     'SectionEnd'
 )
 Write-NsisFile $harnessNsi $harnessLines ([ordered]@{
@@ -241,7 +241,7 @@ try {
     $nativePsPath = "Registry::HKEY_CURRENT_USER\$nativeSubKey"
     if (-not (Test-Path -LiteralPath $nativePsPath)) { throw 'test native registry key was not created' }
     $marker = Get-ItemProperty -LiteralPath $nativePsPath
-    if ([string]$marker.DisplayVersion -ne '2.0.2') { throw 'test native version marker mismatch' }
+    if ([string]$marker.DisplayVersion -ne '2.0.3') { throw 'test native version marker mismatch' }
     if ([string]$marker.LegacyMigrationFrom -ne '1.3.16') { throw 'migration source marker mismatch' }
     if ([string]$marker.LegacyMigrationStatus -ne 'removed') { throw "migration status is $($marker.LegacyMigrationStatus)" }
     if ((Get-Sha256 $sentinel) -ne $sentinelHash -or (Get-Sha256 $printer) -ne $printerHash) {
@@ -268,9 +268,9 @@ try {
         schema = 1
         mode = 'isolated-nsis-harness'
         fromVersion = '1.3.16'
-        toVersion = '2.0.2'
+        toVersion = '2.0.3'
         testRegistryRoot = "HKCU\$testRoot"
-        feed = [ordered]@{ version = '2.0.2'; sha512Verified = $true; sizeVerified = $true }
+        feed = [ordered]@{ version = '2.0.3'; sha512Verified = $true; sizeVerified = $true }
         productionInstallerHookIncluded = $true
         productionInstallerHookInvoked = $true
         fakeUninstallerCompile = $fakeCompile
@@ -319,5 +319,5 @@ try {
 if ($null -ne $primaryError) { throw $primaryError }
 $resultPath = Join-Path $output 'result.json'
 [IO.File]::WriteAllText($resultPath, (($result | ConvertTo-Json -Depth 10) + "`n"), [Text.UTF8Encoding]::new($false))
-"LEGACY_INSTALL_MIGRATION_E2E_OK mode=isolated-nsis-harness from=1.3.16 to=2.0.2 migration=$($result.migrationRun.elapsedMs)ms firstStart=$($result.firstStart.elapsedMs)ms"
+"LEGACY_INSTALL_MIGRATION_E2E_OK mode=isolated-nsis-harness from=1.3.16 to=2.0.3 migration=$($result.migrationRun.elapsedMs)ms firstStart=$($result.firstStart.elapsedMs)ms"
 "RESULT=$resultPath"

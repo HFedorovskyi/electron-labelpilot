@@ -4,8 +4,8 @@
 
 ## Runtime
 
-- Основной и совместимый runtime по умолчанию: Tauri/WebView2.
-- Опциональный native runtime экрана взвешивания: Slint sidecar без WebView2.
+- Основной runtime по умолчанию: native Slint без WebView2.
+- Tauri/WebView2 сохранён как автоматический fallback и диагностический runtime.
 - Native backend обоих runtime: общий Rust core (`src-tauri`).
 - `labelpilot-tauri.exe` выбирает runtime; `labelpilot-slint.exe` устанавливается тем же NSIS/updater.
 - При отсутствии или ранней ошибке sidecar автоматически запускается Tauri; `--no-ui-fallback` отключает этот механизм для диагностики.
@@ -36,7 +36,7 @@ The main renderer bundle is gated below 160 KiB, operating screens are lazy chun
 
 ## Release
 
-Version `2.0.2` is packaged as a current-user NSIS EXE containing both Tauri and Slint runtime binaries with signed updater metadata. Production telemetry persists structured events, retries encrypted delta reports, and writes a final shutdown spool.
+Version `2.0.3` is packaged as a current-user NSIS EXE containing both Tauri and Slint runtime binaries with signed updater metadata. Production telemetry persists structured events, retries encrypted delta reports, and writes a final shutdown spool.
 
 ## Native updates
 

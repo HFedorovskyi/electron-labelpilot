@@ -58,6 +58,14 @@ pub struct RuntimeSelection {
 }
 
 impl RuntimeSelection {
+    pub fn slint_default() -> Self {
+        Self {
+            runtime: UiRuntime::Slint,
+            source: SelectionSource::Default,
+            fallback_enabled: true,
+        }
+    }
+
     pub fn tauri_default() -> Self {
         Self {
             runtime: UiRuntime::Tauri,
@@ -107,7 +115,7 @@ where
 {
     let mut runtime = match environment_runtime {
         Some(value) => (UiRuntime::parse(value)?, SelectionSource::Environment),
-        None => (UiRuntime::Tauri, SelectionSource::Default),
+        None => (UiRuntime::Slint, SelectionSource::Default),
     };
     let mut fallback_enabled = match environment_fallback {
         Some(value) => parse_boolean("LABELPILOT_UI_FALLBACK", value)?,
@@ -219,9 +227,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn defaults_to_tauri_with_fallback() {
+    fn defaults_to_slint_with_tauri_fallback() {
         let selected = select_from(Vec::<String>::new(), None, None).unwrap();
-        assert_eq!(selected, RuntimeSelection::tauri_default());
+        assert_eq!(selected, RuntimeSelection::slint_default());
     }
 
     #[test]

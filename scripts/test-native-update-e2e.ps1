@@ -1,11 +1,11 @@
 [CmdletBinding()]
 param(
-    [string]$OldReleaseDirectory = 'artifacts/native-update-e2e-2.0.1/publish',
-    [string]$NewReleaseDirectory = 'artifacts/legacy-install-migration-2.0.2/publish',
-    [string]$RollbackProbeDirectory = 'artifacts/legacy-install-migration-2.0.2/rollback-probe',
-    [string]$OutputDirectory = 'artifacts/legacy-install-migration-2.0.2/native-update-e2e',
-    [string]$FromVersion = '2.0.1',
-    [string]$ToVersion = '2.0.2'
+    [string]$OldReleaseDirectory = 'artifacts/legacy-install-migration-2.0.2/publish',
+    [string]$NewReleaseDirectory = 'artifacts/slint-default-2.0.3/publish',
+    [string]$RollbackProbeDirectory = 'artifacts/slint-default-2.0.3/rollback-probe',
+    [string]$OutputDirectory = 'artifacts/slint-default-2.0.3/native-update-e2e',
+    [string]$FromVersion = '2.0.2',
+    [string]$ToVersion = '2.0.3'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -18,7 +18,7 @@ $output = [IO.Path]::GetFullPath((Join-Path $repo $OutputDirectory))
 $packageName = "LabelPilot_${ToVersion}_windows_x86_64.lpupdate"
 $databaseSentinel = "DATABASE_$FromVersion"
 $printerSentinel = "{`"profile`":`"zpl-$FromVersion`"}"
-$phaseRoot = [IO.Path]::GetFullPath((Join-Path $repo 'artifacts\legacy-install-migration-2.0.2'))
+$phaseRoot = [IO.Path]::GetFullPath((Join-Path $repo 'artifacts\slint-default-2.0.3'))
 if (-not $output.StartsWith($phaseRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
     throw "E2E output must remain inside $phaseRoot"
 }
