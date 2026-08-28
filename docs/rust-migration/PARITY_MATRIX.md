@@ -27,6 +27,10 @@
 | ZPL generator | current rollback | implemented native staging path | shared TypeScript/Rust golden streams | 203/300/600 DPI geometry; exact native bytes |
 | TSPL/TSPL2 generator | current rollback | implemented native staging path | shared TypeScript/Rust golden streams | exact native bytes; complex text uses explicit fallback |
 | Bitmap fallback | renderer retained | implemented lazy Canvas handoff to Rust transport | public release smoke: ZPL GFA + TSPL BITMAP | bounded 8M pixels/16 MiB and lazy bwip-js |
+| Pallet table footer | designer preview indicator | implemented canonical draw-table port (body limit + footer band) | unit: truncation counts, footer text, body limit pixels | "Стр. 1/N · показано X из N" honest indicator; multi-page buffers deferred by contract |
+| Sort/group/maxRows tables | designer preview grouping | implemented sortBy/maxRows/groupBy with wrapped headers and variable row heights | unit: group label, ru sort order, cell padStart | mirrors server reference draw-table.ts |
+| Rotated text raster | canvas center rotation | implemented quarter-turn raster rotation around element center | unit: 0/90/180/45 pixel bounding boxes | non-quarter angles keep the unrotated layout |
+| Serial status probe | separate COM open | routed through the holding print worker when one owns the port | unit: routed vs direct error paths; breaker bypass | Windows exclusive COM access honored; direct probe kept for unconfigured devices |
 | Barcode generation | bwip-js | hybrid, Р·Р°С‚РµРј libzint | decode + geometry corpus | symbology parity |
 | Printer fonts/cache | current capability path | Rust capability strategy | warm/cold printer tests | safe fallback |
 | Online updater | current | Tauri updater/service | signed staging release | install + rollback |
