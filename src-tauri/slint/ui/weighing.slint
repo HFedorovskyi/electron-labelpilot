@@ -669,7 +669,7 @@ export component WeighingPrototype inherits Window {
     in-out property <bool> update-busy: false;
     in-out property <string> update-state: "idle";
     in-out property <string> update-status: "Готово к проверке обновлений";
-    in-out property <string> update-current-version: "2.0.1";
+    in-out property <string> update-current-version: "2.0.2";
     in-out property <string> update-available-version: "—";
     in-out property <string> update-notes: "Канал обновлений ещё не проверен";
     in-out property <string> update-size: "—";
@@ -971,7 +971,7 @@ callback reload-catalog;
                             operator-switch-touch := TouchArea { clicked => { root.switch-operator(); } }
                         }
                         if !root.effective-collapsed: Text {
-                            text: "ВЕРСИЯ 2.0.1";
+                            text: "ВЕРСИЯ 2.0.2";
                             color: Palette.e600;
                             font-size: 10px;
                             font-weight: 700;

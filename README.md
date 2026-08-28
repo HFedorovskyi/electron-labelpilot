@@ -36,7 +36,7 @@ The main renderer bundle is gated below 160 KiB, operating screens are lazy chun
 
 ## Release
 
-Version `2.0.1` is packaged as a current-user NSIS EXE containing both Tauri and Slint runtime binaries with signed updater metadata. Production telemetry persists structured events, retries encrypted delta reports, and writes a final shutdown spool.
+Version `2.0.2` is packaged as a current-user NSIS EXE containing both Tauri and Slint runtime binaries with signed updater metadata. Production telemetry persists structured events, retries encrypted delta reports, and writes a final shutdown spool.
 
 ## Native updates
 

@@ -17,7 +17,7 @@ const packageJson = JSON.parse(read('package.json'));
 const tauriConfig = JSON.parse(read('src-tauri/tauri.conf.json'));
 const cargoVersion = cargo.match(/^version = "([^"]+)"/m)?.[1];
 
-assert.equal(packageJson.version, '2.0.1');
+assert.equal(packageJson.version, '2.0.2');
 assert.equal(tauriConfig.version, packageJson.version);
 assert.equal(cargoVersion, packageJson.version);
 

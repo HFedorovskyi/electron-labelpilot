@@ -8,7 +8,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const exe = path.resolve(process.argv[2] || '');
-const resultPath = path.resolve(process.argv[3] || 'artifacts/release-v2.0.1/telemetry-smoke.json');
+const resultPath = path.resolve(process.argv[3] || 'artifacts/release-v2.0.2/telemetry-smoke.json');
 if (!process.argv[2] || !fs.existsSync(exe)) throw new Error('Usage: node smoke-tauri-telemetry.cjs EXE [RESULT_JSON]');
 const delay = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'labelpilot-telemetry-smoke-'));
@@ -102,7 +102,7 @@ async function main() {
         }
         assert.equal(await client.evaluate("return typeof window.__TAURI_INTERNALS__?.invoke === 'function';"), true, 'Tauri invoke bridge did not initialize');
         const version = await client.evaluate("return await window.__TAURI_INTERNALS__.invoke('desktop_get_version');");
-        assert.equal(version, '2.0.1');
+        assert.equal(version, '2.0.2');
         await client.evaluate("return await window.__TAURI_INTERNALS__.invoke('desktop_log', {payload:{level:'ERROR',event:'smoke_renderer_error',message:'bounded smoke event'}});");
         const summary = await client.evaluate("return await window.__TAURI_INTERNALS__.invoke('desktop_telemetry_flush');");
         assert.equal(summary.workerRunning, true);
