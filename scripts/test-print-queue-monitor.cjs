@@ -14,6 +14,7 @@ const compatibility = read('src/renderer/platform/tauriUiCompatibility.ts');
 const status = read('src-tauri/src/printer/status.rs');
 const spooler = read('src-tauri/src/printer/spooler.rs');
 const commands = read('src-tauri/src/commands.rs');
+const printer = read('src-tauri/src/printer.rs');
 const runtime = read('src-tauri/src/lib.rs');
 const i18n = read('src/shared/i18n_data.ts');
 
@@ -45,7 +46,9 @@ for (const marker of [
 assert.match(compatibility, /const statusReport = await queryTauriPrinterStatus\(config\)/);
 assert.match(compatibility, /supportsBidirectionalStatus: statusReport\.supportsBidirectionalStatus/);
 assert.match(commands, /pub async fn desktop_printer_query_status/);
-assert.match(commands, /spawn_blocking\(move \|\| query_printer_status\(payload\)\)/);
+assert.match(commands, /query_printer_status_routed\(RuntimeEventSink::tauri\(app\), &printer, payload\)/);
+assert.match(printer, /query_printer_status_with_sink/);
+assert.match(printer, /worker_holds_serial/);
 assert.match(runtime, /commands::desktop_printer_query_status/);
 
 assert.match(status, /STATUS_CONNECT_TIMEOUT: Duration = Duration::from_millis\(1_500\)/);

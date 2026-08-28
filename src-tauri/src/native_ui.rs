@@ -4,7 +4,7 @@ use crate::native_print::{NativePrintOutcome, NativePrintService, PackPrintReque
 use crate::operational::{OpenEntitiesSummary, OperationalState};
 use crate::persisted::PersistedState;
 use crate::printer::{
-    list_system_printers, query_printer_status, DurablePrintJobRecord, DurableQueueSummary,
+    list_system_printers, query_printer_status_routed, DurablePrintJobRecord, DurableQueueSummary,
     PrinterTransportState,
 };
 use crate::runtime_events::{NativeRuntimeEvent, RuntimeEventSink};
@@ -738,7 +738,9 @@ impl NativeUiRuntime {
             ("pallet", "Паллетный лист", "palletPrinter"),
         ]
         .into_iter()
-        .map(|(role, role_label, key)| probe_printer_role(&config, role, role_label, key))
+        .map(|(role, role_label, key)| {
+            probe_printer_role(&self.printer, &self.events, &config, role, role_label, key)
+        })
         .collect())
     }
 
@@ -829,7 +831,7 @@ impl NativeUiRuntime {
         let protocol = detected_protocol(&device);
         let dpi = normalized_dpi(value_i64(device.get("dpi")).unwrap_or(203) as i32);
         let recommended_profile = compatible_profile(&protocol).to_owned();
-        match query_printer_status(device) {
+        match query_printer_status_routed(self.events.clone(), &self.printer, device) {
             Ok(report) => {
                 let details = if report.details.is_empty() {
                     "Транспорт доступен".to_owned()
@@ -1936,6 +1938,8 @@ fn effective_profile_id(device: &Value) -> String {
 }
 
 fn probe_printer_role(
+    printer: &PrinterTransportState,
+    events: &RuntimeEventSink,
     config: &Value,
     role: &str,
     role_label: &str,
@@ -1961,7 +1965,7 @@ fn probe_printer_role(
     let fallback_name = value_string(device.get("name"))
         .or_else(|| value_string(device.get("driverName")))
         .unwrap_or_else(|| role_label.to_owned());
-    match query_printer_status(device.clone()) {
+    match query_printer_status_routed(events.clone(), printer, device.clone()) {
         Ok(report) => NativePrinterDiagnostic {
             role: role.to_owned(),
             role_label: role_label.to_owned(),

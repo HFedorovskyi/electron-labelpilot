@@ -578,6 +578,7 @@ fn encode_action(action: &JobAction) -> Result<(&'static str, &[u8], String), St
             .map_err(|error| format!("encode driver page metadata: {error}"))?,
         )),
         JobAction::Probe => Err("probe jobs are not persisted".to_owned()),
+        JobAction::Status => Err("status jobs are not persisted".to_owned()),
     }
 }
 
@@ -795,6 +796,7 @@ mod tests {
             deduplicated: false,
             durable_job_id: Some(job_id.clone()),
             durable_state: Some("accepted".to_owned()),
+            status_report: None,
         };
         store.mark_accepted(&job_id, &receipt).unwrap();
         let duplicate = store

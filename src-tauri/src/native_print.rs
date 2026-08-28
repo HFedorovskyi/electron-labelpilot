@@ -731,7 +731,15 @@ impl NativePrintService {
                 .map_err(|error| format!("create last print directory: {error}"))?;
         }
         let temporary = self.last_print_path.with_extension("json.tmp");
-        fs::write(&temporary, bytes).map_err(|error| format!("write last print: {error}"))?;
+        {
+            use std::io::Write as _;
+            let mut file = fs::File::create(&temporary)
+                .map_err(|error| format!("write last print: {error}"))?;
+            file.write_all(&bytes)
+                .map_err(|error| format!("write last print: {error}"))?;
+            file.sync_all()
+                .map_err(|error| format!("sync last print: {error}"))?;
+        }
         if self.last_print_path.exists() {
             fs::remove_file(&self.last_print_path)
                 .map_err(|error| format!("replace last print: {error}"))?;
@@ -1018,6 +1026,15 @@ fn station_number(
         .unwrap_or_else(|| "00".to_owned()))
 }
 
+fn log_printer_env_override(host: &str, port: u16) {
+    static LOGGED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    if LOGGED.set(()).is_ok() {
+        crate::runtime_selector::append_runtime_log(&format!(
+            "LABELPILOT_PRINTER_HOST override active: pack/box printing redirected to {host}:{port}"
+        ));
+    }
+}
+
 fn role_config(persisted: &PersistedState, role: &str) -> Result<Value, String> {
     if matches!(role, "packPrinter" | "boxPrinter") {
         if let Some(host) = std::env::var("LABELPILOT_PRINTER_HOST")
@@ -1028,6 +1045,7 @@ fn role_config(persisted: &PersistedState, role: &str) -> Result<Value, String> 
                 .ok()
                 .and_then(|value| value.parse::<u16>().ok())
                 .unwrap_or(9_100);
+            log_printer_env_override(&host, port);
             return Ok(json!({
                 "id": format!("slint-{}-override", role.trim_end_matches("Printer")),
                 "active": true,

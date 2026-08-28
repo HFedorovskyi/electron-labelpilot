@@ -465,6 +465,22 @@ mod platform {
     ) -> Result<SendOutcome, TransportFailure> {
         send_bitmap_internal(config, width, height, mono, Some(page))
     }
+
+    pub(super) fn driver_dpi(config: &PrinterDeviceConfig) -> Result<(i32, i32), String> {
+        const LOGPIXELSX: i32 = 88;
+        const LOGPIXELSY: i32 = 90;
+        let printer_name = resolve_printer_name(config).map_err(|error| error.message)?;
+        let name = wide(&printer_name);
+        let driver = wide("WINSPOOL");
+        let dc = unsafe { CreateDCW(driver.as_ptr(), name.as_ptr(), null(), null()) };
+        if dc.is_null() {
+            return Err("Windows printer CreateDCW".to_owned());
+        }
+        let dc = PrinterDc(dc);
+        Ok((unsafe { GetDeviceCaps(dc.0, LOGPIXELSX) }, unsafe {
+            GetDeviceCaps(dc.0, LOGPIXELSY)
+        }))
+    }
 }
 
 #[cfg(not(windows))]
@@ -506,8 +522,14 @@ mod platform {
     ) -> Result<SendOutcome, TransportFailure> {
         Err(unsupported())
     }
+    pub(super) fn driver_dpi(_: &PrinterDeviceConfig) -> Result<(i32, i32), String> {
+        Err("Windows spooler is available on Windows only".to_owned())
+    }
 }
 
+pub(super) fn driver_dpi(config: &PrinterDeviceConfig) -> Result<(i32, i32), String> {
+    platform::driver_dpi(config)
+}
 pub(super) fn probe(config: &PrinterDeviceConfig) -> Result<SendOutcome, TransportFailure> {
     platform::probe(config)
 }

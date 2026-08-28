@@ -28,6 +28,10 @@ enum RuntimeEventBackend {
     Tauri(AppHandle),
     #[cfg(feature = "native-ui")]
     Callback(Arc<dyn Fn(NativeRuntimeEvent) + Send + Sync + 'static>),
+    /// Discards every event; used by paths that never emit (unit tests,
+    /// internal transport probes).
+    #[cfg(test)]
+    Detached,
 }
 
 #[derive(Clone)]
@@ -53,6 +57,13 @@ impl RuntimeEventSink {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn detached() -> Self {
+        Self {
+            backend: Arc::new(RuntimeEventBackend::Detached),
+        }
+    }
+
     pub(crate) fn emit<T>(&self, name: &str, payload: T)
     where
         T: Serialize + Clone,
@@ -74,6 +85,8 @@ impl RuntimeEventSink {
                     message: format!("failed to serialize event {name}: {error}"),
                 }),
             },
+            #[cfg(test)]
+            RuntimeEventBackend::Detached => {}
         }
     }
 
@@ -90,6 +103,8 @@ impl RuntimeEventSink {
                 level: level.to_owned(),
                 message: message.to_owned(),
             }),
+            #[cfg(test)]
+            RuntimeEventBackend::Detached => {}
         }
     }
 }

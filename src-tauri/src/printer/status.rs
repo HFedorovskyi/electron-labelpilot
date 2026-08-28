@@ -1,16 +1,16 @@
 use super::{resolve_address, spooler, PrinterDeviceConfig, TransportFailure};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serialport::{DataBits, FlowControl, Parity, StopBits};
 use std::io::{self, Read, Write};
 use std::net::TcpStream;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const STATUS_CONNECT_TIMEOUT: Duration = Duration::from_millis(1_500);
-const STATUS_IO_TIMEOUT: Duration = Duration::from_millis(700);
+pub(super) const STATUS_IO_TIMEOUT: Duration = Duration::from_millis(700);
 const MAX_STATUS_RESPONSE_BYTES: usize = 4 * 1024;
 const MAX_STATUS_PREVIEW_BYTES: usize = 256;
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PrinterStatusReport {
     pub printer_id: String,
@@ -109,6 +109,15 @@ fn query_stream<T: Read + Write>(
         .map_err(|error| transport_error("printer status command write", error))?;
     let response = read_bounded_response(stream, &config.protocol)?;
     Ok(parse_protocol_response(&config.protocol, response))
+}
+
+/// Runs the protocol status handshake on an already-open stream (the print
+/// worker's held serial port) and builds the full report.
+pub(super) fn query_stream_report<T: Read + Write>(
+    config: &PrinterDeviceConfig,
+    stream: &mut T,
+) -> Result<PrinterStatusReport, TransportFailure> {
+    query_stream(config, stream).map(|observation| report(config, observation))
 }
 
 fn status_command(protocol: &str) -> Option<&'static [u8]> {
@@ -304,15 +313,21 @@ fn parse_text_response(response: Vec<u8>) -> StatusObservation {
 
 fn query_spooler(config: &PrinterDeviceConfig) -> Result<StatusObservation, TransportFailure> {
     let (name, flags) = spooler::query_status(config)?;
-    let (status, details) = spooler_status(flags);
+    let (status, mut details) = spooler_status(flags);
+    if details.is_empty() {
+        details.push(format!("Windows print queue {name} is ready"));
+    }
+    // Label-roll GDI prints the raster 1:1, so a driver DPI other than the
+    // template DPI changes the physical label size.
+    if let Ok((driver_dpi_x, _)) = spooler::driver_dpi(config) {
+        if driver_dpi_x > 0 {
+            details.push(format!("Windows driver DPI: {driver_dpi_x}"));
+        }
+    }
     Ok(StatusObservation {
         reachable: true,
         status,
-        details: if details.is_empty() {
-            vec![format!("Windows print queue {name} is ready")]
-        } else {
-            details
-        },
+        details,
         supports_bidirectional_status: true,
         response: flags.to_le_bytes().to_vec(),
     })

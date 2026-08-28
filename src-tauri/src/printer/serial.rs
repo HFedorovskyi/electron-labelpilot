@@ -78,6 +78,21 @@ impl SerialConnection {
         }
     }
 
+    /// Runs the protocol status handshake on the held port: the print worker
+    /// owns the COM port exclusively on Windows, so a second open from the
+    /// status path would always fail.
+    pub(super) fn query_status(
+        &mut self,
+        config: &PrinterDeviceConfig,
+    ) -> Result<super::status::PrinterStatusReport, TransportFailure> {
+        self.ensure_connected(config)?;
+        let port = self.port.as_mut().expect("connected serial port");
+        let _ = port.set_timeout(super::status::STATUS_IO_TIMEOUT);
+        let result = super::status::query_stream_report(config, port);
+        let _ = port.set_timeout(WRITE_TIMEOUT);
+        result
+    }
+
     fn ensure_connected(&mut self, config: &PrinterDeviceConfig) -> Result<(), TransportFailure> {
         let endpoint = config.physical_key();
         if self.endpoint.as_deref() != Some(&endpoint) {

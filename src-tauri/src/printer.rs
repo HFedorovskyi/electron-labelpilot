@@ -156,9 +156,15 @@ pub fn list_system_printers() -> Result<Vec<SystemPrinterInfo>, String> {
 pub fn list_system_printers() -> Result<Vec<SystemPrinterInfo>, String> {
     Ok(Vec::new())
 }
-pub fn query_printer_status(config: Value) -> Result<PrinterStatusReport, String> {
+/// Status probe that routes through an active serial print worker when one
+/// holds the port (see [`PrinterTransportState::query_printer_status_with_sink`]).
+pub fn query_printer_status_routed(
+    app: RuntimeEventSink,
+    transport: &PrinterTransportState,
+    config: Value,
+) -> Result<PrinterStatusReport, String> {
     let config = PrinterDeviceConfig::from_value(config)?;
-    status::query(&config)
+    transport.query_printer_status_with_sink(app, &config)
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -375,6 +381,8 @@ pub struct PrintReceipt {
     pub durable_job_id: Option<String>,
     #[serde(default)]
     pub durable_state: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_report: Option<Box<PrinterStatusReport>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1126,12 +1134,13 @@ impl PrinterTransportState {
 
     pub fn reconfigure(&self, config: &Value) {
         let mut retained = HashSet::new();
-        for role in ["packPrinter", "boxPrinter", "palletPrinter"] {
-            let Some(value) = config.get(role) else {
-                continue;
-            };
-            if let Ok(device) = PrinterDeviceConfig::from_value(value.clone()) {
-                retained.insert(device.physical_key());
+        if let Some(entries) = config.as_object() {
+            // Any parseable device role keeps its worker; the role catalog is
+            // owned by the config, not by this list.
+            for value in entries.values() {
+                if let Ok(device) = PrinterDeviceConfig::from_value(value.clone()) {
+                    retained.insert(device.physical_key());
+                }
             }
         }
         let removed = match self.inner.workers.lock() {
@@ -1175,6 +1184,56 @@ impl PrinterTransportState {
 
     pub fn durable_summary(&self) -> Result<DurableQueueSummary, String> {
         self.inner.durable.summary()
+    }
+
+    /// Queries printer status. When an active print worker holds the device
+    /// (persistent serial ports), the handshake is executed on that worker's
+    /// connection instead of opening a second one, which Windows would refuse.
+    pub fn query_printer_status_with_sink(
+        &self,
+        app: RuntimeEventSink,
+        config: &PrinterDeviceConfig,
+    ) -> Result<PrinterStatusReport, String> {
+        let physical_key = config.physical_key();
+        let worker_holds_serial = config.connection == "serial"
+            && self
+                .inner
+                .workers
+                .lock()
+                .map(|workers| workers.contains_key(&physical_key))
+                .unwrap_or(false);
+        if !worker_holds_serial {
+            return status::query(config);
+        }
+        let queue = self.queue_for(&physical_key)?;
+        let (completion, result) = mpsc::sync_channel(1);
+        let job = PrintJob {
+            app,
+            config: config.clone(),
+            action: JobAction::Status,
+            durable_job_id: None,
+            submitted_at: Instant::now(),
+            completion,
+        };
+        queue.depth.fetch_add(1, Ordering::AcqRel);
+        self.inner.stats.queued_now.fetch_add(1, Ordering::AcqRel);
+        if let Err(error) = queue.sender.try_send(job) {
+            queue.depth.fetch_sub(1, Ordering::AcqRel);
+            self.inner.stats.queued_now.fetch_sub(1, Ordering::AcqRel);
+            return Err(match error {
+                TrySendError::Full(_) => {
+                    format!("printer queue is full (capacity {PRINTER_QUEUE_CAPACITY})")
+                }
+                TrySendError::Disconnected(_) => "printer worker is disconnected".to_owned(),
+            });
+        }
+        let outcome = result
+            .recv_timeout(COMPLETION_TIMEOUT)
+            .map_err(|_| "printer job completion timed out".to_owned())??;
+        outcome
+            .status_report
+            .map(|report| *report)
+            .ok_or_else(|| "printer status report missing from transport response".to_owned())
     }
 
     #[cfg(feature = "desktop")]
@@ -1326,6 +1385,7 @@ enum JobAction {
         page: DriverPageSpec,
     },
     Probe,
+    Status,
 }
 
 fn fingerprint_bytes(mut hash: u64, bytes: &[u8]) -> u64 {
@@ -1377,6 +1437,7 @@ fn action_fingerprint(action: &JobAction) -> u64 {
             fingerprint_bytes(hash, mono)
         }
         JobAction::Probe => fingerprint_bytes(hash, b"probe"),
+        JobAction::Status => fingerprint_bytes(hash, b"status"),
     }
 }
 
@@ -1507,33 +1568,36 @@ fn run_device_worker(
                 }
 
                 stats.active_now.fetch_sub(1, Ordering::AcqRel);
-                match &result {
-                    Ok(receipt) => {
-                        stats.completed_jobs.fetch_add(1, Ordering::AcqRel);
-                        stats
-                            .bytes_sent
-                            .fetch_add(receipt.bytes as u64, Ordering::AcqRel);
-                        match job.config.connection.as_str() {
-                            "tcp" => {
-                                stats.tcp_jobs.fetch_add(1, Ordering::AcqRel);
+                // Status probes are transport diagnostics, not print jobs.
+                if !matches!(job.action, JobAction::Status) {
+                    match &result {
+                        Ok(receipt) => {
+                            stats.completed_jobs.fetch_add(1, Ordering::AcqRel);
+                            stats
+                                .bytes_sent
+                                .fetch_add(receipt.bytes as u64, Ordering::AcqRel);
+                            match job.config.connection.as_str() {
+                                "tcp" => {
+                                    stats.tcp_jobs.fetch_add(1, Ordering::AcqRel);
+                                }
+                                "serial" => {
+                                    stats.serial_jobs.fetch_add(1, Ordering::AcqRel);
+                                }
+                                "windows_driver" => {
+                                    stats.spooler_jobs.fetch_add(1, Ordering::AcqRel);
+                                }
+                                _ => {}
                             }
-                            "serial" => {
-                                stats.serial_jobs.fetch_add(1, Ordering::AcqRel);
+                            if matches!(&job.action, JobAction::DriverBitmap { .. }) {
+                                stats.driver_bitmap_jobs.fetch_add(1, Ordering::AcqRel);
                             }
-                            "windows_driver" => {
-                                stats.spooler_jobs.fetch_add(1, Ordering::AcqRel);
+                            if matches!(&job.action, JobAction::DriverPage { .. }) {
+                                stats.driver_page_jobs.fetch_add(1, Ordering::AcqRel);
                             }
-                            _ => {}
                         }
-                        if matches!(&job.action, JobAction::DriverBitmap { .. }) {
-                            stats.driver_bitmap_jobs.fetch_add(1, Ordering::AcqRel);
+                        Err(_) => {
+                            stats.failed_jobs.fetch_add(1, Ordering::AcqRel);
                         }
-                        if matches!(&job.action, JobAction::DriverPage { .. }) {
-                            stats.driver_page_jobs.fetch_add(1, Ordering::AcqRel);
-                        }
-                    }
-                    Err(_) => {
-                        stats.failed_jobs.fetch_add(1, Ordering::AcqRel);
                     }
                 }
                 let _ = job.completion.send(result);
@@ -1562,6 +1626,30 @@ fn process_job(
     breaker_until: &mut Option<Instant>,
     stats: &PrinterStats,
 ) -> Result<PrintReceipt, String> {
+    if matches!(job.action, JobAction::Status) {
+        let send_started = Instant::now();
+        // Status probes bypass the circuit breaker: a printer that ignores a
+        // status command must not fail-fast the label queue behind it.
+        return match connection.query_status(&job.config) {
+            Ok(report) => Ok(PrintReceipt {
+                printer_id: job.config.id.clone(),
+                physical_key: key.to_owned(),
+                bytes: 0,
+                queue_ms: elapsed_ms(job.submitted_at),
+                send_ms: elapsed_ms(send_started),
+                attempts: 1,
+                reused_connection: true,
+                delivery_state: "status-queried".to_owned(),
+                confirmation_mode: "protocol-status".to_owned(),
+                idempotency_key: job.config.job_idempotency_key.clone(),
+                deduplicated: false,
+                durable_job_id: None,
+                durable_state: None,
+                status_report: Some(Box::new(report)),
+            }),
+            Err(error) => Err(error.message),
+        };
+    }
     if breaker_until.is_some_and(|until| Instant::now() < until) {
         let remaining = breaker_until
             .map(|until| until.saturating_duration_since(Instant::now()).as_millis())
@@ -1588,6 +1676,7 @@ fn process_job(
             page,
         } => connection.send_driver_page(&job.config, *width, *height, mono, page),
         JobAction::Probe => connection.probe(&job.config),
+        JobAction::Status => unreachable!("status jobs are handled before transport dispatch"),
     };
     let (delivery_state, confirmation_mode) = match &job.action {
         JobAction::Probe => ("reachable", "connect-probe"),
@@ -1609,6 +1698,7 @@ fn process_job(
             deduplicated: false,
             durable_job_id: None,
             durable_state: None,
+            status_report: None,
         }),
         Err(error) => {
             *breaker_until = Some(Instant::now() + BREAKER_DURATION);
@@ -1634,6 +1724,21 @@ impl DeviceConnection {
             "windows_driver" => spooler::probe(config),
             other => Err(TransportFailure {
                 message: format!("unsupported printer connection: {other}"),
+                timed_out: false,
+            }),
+        }
+    }
+
+    fn query_status(
+        &mut self,
+        config: &PrinterDeviceConfig,
+    ) -> Result<status::PrinterStatusReport, TransportFailure> {
+        match config.connection.as_str() {
+            // Serial is probed on the worker's held port; other connections
+            // open their own short-lived status connection.
+            "serial" => self.serial.query_status(config),
+            _ => status::query(config).map_err(|message| TransportFailure {
+                message,
                 timed_out: false,
             }),
         }
@@ -2046,6 +2151,42 @@ mod tests {
         assert!(matches!(sender.try_send(2_u8), Err(TrySendError::Full(2))));
     }
 
+    fn serial_device(port_name: &str) -> PrinterDeviceConfig {
+        serde_json::from_value(serde_json::json!({
+            "id": "pack",
+            "connection": "serial",
+            "protocol": "zpl",
+            "serialPort": port_name,
+            "baudRate": 9600
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn serial_status_routes_through_the_holding_worker() {
+        let state = PrinterTransportState::new();
+        let device = serial_device("LABELPILOT-NONE-1");
+        let key = device.physical_key();
+        // A printer that already printed has a live worker holding the port.
+        let _queue = state.queue_for(&key).unwrap();
+        let error = state
+            .query_printer_status_with_sink(RuntimeEventSink::detached(), &device)
+            .unwrap_err();
+        // The handshake failed inside the worker's held-port connection.
+        assert!(error.contains("serial printer open"), "{error}");
+    }
+
+    #[test]
+    fn serial_status_falls_back_to_direct_probe_without_worker() {
+        let state = PrinterTransportState::new();
+        let device = serial_device("LABELPILOT-NONE-2");
+        let error = state
+            .query_printer_status_with_sink(RuntimeEventSink::detached(), &device)
+            .unwrap_err();
+        // No worker for this key: the status path opened its own port.
+        assert!(error.contains("serial printer status open"), "{error}");
+    }
+
     #[test]
     fn summary_reports_weak_device_bounds() {
         let state = PrinterTransportState::new();
@@ -2095,6 +2236,7 @@ mod tests {
             deduplicated: false,
             durable_job_id: None,
             durable_state: None,
+            status_report: None,
         };
         state.finish_idempotency(&scope, fingerprint, &Ok(receipt));
         let cached = match state

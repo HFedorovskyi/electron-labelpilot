@@ -9,11 +9,12 @@ use crate::network::{fetch_license_status, test_connection_full, NetworkState, N
 use crate::operational::{CloseBoxPayload, OperationalState, RecordPackPayload, RecordPackResult};
 use crate::persisted::PersistedState;
 use crate::printer::{
-    list_system_printers, plan_backend, query_printer_status, BackendPlanPayload,
+    list_system_printers, plan_backend, query_printer_status_routed, BackendPlanPayload,
     DriverBitmapPayload, DriverPagePayload, DurablePrintJobRecord, DurableQueueSummary,
     PrintReceipt, PrinterStatusReport, PrinterTransportState, PrinterTransportSummary,
     RawPrintPayload, SystemPrinterInfo, UniversalPrinterPlan,
 };
+use crate::runtime_events::RuntimeEventSink;
 use crate::scale::{list_serial_ports, protocol_catalog, ScaleState, ScaleSummary, SerialPortInfo};
 use crate::session::{CurrentOperator, SessionState};
 use crate::telemetry::{TelemetryState, TelemetrySummary};
@@ -792,10 +793,17 @@ pub fn desktop_printer_disconnect_all(printer: State<'_, PrinterTransportState>)
     printer.disconnect_all();
 }
 #[tauri::command]
-pub async fn desktop_printer_query_status(payload: Value) -> Result<PrinterStatusReport, String> {
-    tauri::async_runtime::spawn_blocking(move || query_printer_status(payload))
-        .await
-        .map_err(|error| format!("printer status task failed: {error}"))?
+pub async fn desktop_printer_query_status(
+    app: AppHandle,
+    printer: State<'_, PrinterTransportState>,
+    payload: Value,
+) -> Result<PrinterStatusReport, String> {
+    let printer = (*printer).clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        query_printer_status_routed(RuntimeEventSink::tauri(app), &printer, payload)
+    })
+    .await
+    .map_err(|error| format!("printer status task failed: {error}"))?
 }
 
 #[derive(Debug, Deserialize)]
