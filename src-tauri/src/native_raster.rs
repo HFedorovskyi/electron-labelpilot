@@ -132,7 +132,9 @@ pub fn render(payload: &GenerationPayload) -> Result<RasterizedLabel, String> {
         match string(element.get("type")).unwrap_or_default() {
             "text" => draw_text(&mut mono, bytes_per_row, geometry, element, data)?,
             "rect" => draw_rect(&mut mono, bytes_per_row, geometry, element),
-            "table" => draw_table(&mut mono, bytes_per_row, geometry, element, data)?,
+            "table" => {
+                draw_table(&mut mono, bytes_per_row, geometry, element, data)?;
+            }
             "image" => draw_image(&mut mono, bytes_per_row, geometry, element)?,
             "barcode" if supports_zpl_commands && native_zpl_barcode_eligible(element, data)? => {
                 native_zpl_commands.push(zpl_barcode(element, data, geometry)?);
@@ -242,6 +244,15 @@ fn draw_text(
     let y = scaled(element, "y", geometry.scale_y).round() as i32;
     let width = scaled(element, "w", geometry.scale_x).round().max(1.0) as i32;
     let height = scaled(element, "h", geometry.scale_y).round().max(1.0) as i32;
+    // The label contract rotates elements around their center; quarter turns
+    // are rasterized, other angles keep the unrotated layout.
+    if let Ok(turns) = quarter_turns(finite(element.get("rotation")).unwrap_or(0.0)) {
+        if turns != 0 {
+            return draw_text_rotated(
+                mono, stride, geometry, element, data, turns, x, y, width, height,
+            );
+        }
+    }
     let font_size =
         (finite(element.get("fontSize")).unwrap_or(12.0) as f32 * geometry.scale_y).max(1.0);
     let weight = finite(element.get("fontWeight")).unwrap_or_else(|| {
@@ -303,11 +314,85 @@ fn draw_text(
     Ok(())
 }
 
+/// Renders the unrotated text block into a local bitmap, then rotates it
+/// around the element center (label contract semantics, same quarter-turn
+/// placement as barcodes and images).
+#[allow(clippy::too_many_arguments)]
+fn draw_text_rotated(
+    mono: &mut [u8],
+    stride: usize,
+    geometry: Geometry,
+    element: &Map<String, Value>,
+    data: &Map<String, Value>,
+    turns: u8,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+) -> Result<(), String> {
+    let local_width = width.max(1) as usize;
+    let local_height = height.max(1) as usize;
+    let local_stride = local_width.div_ceil(8);
+    let mut local_mono = vec![0_u8; local_stride * local_height];
+    let mut local_element = element.clone();
+    local_element.insert("x".to_owned(), Value::from(0.0));
+    local_element.insert("y".to_owned(), Value::from(0.0));
+    local_element.remove("rotation");
+    let local_space = local_geometry(local_width, local_height, geometry.dpi);
+    draw_text(
+        &mut local_mono,
+        local_stride,
+        local_space,
+        &local_element,
+        data,
+    )?;
+    // Quarter turns swap the footprint for 90/270; anchor it so the rotated
+    // footprint shares its center with the element box.
+    let (destination_x, destination_y) = if matches!(turns, 1 | 3) {
+        (
+            x + ((width - height) as f32 / 2.0).round() as i32,
+            y + ((height - width) as f32 / 2.0).round() as i32,
+        )
+    } else {
+        (x, y)
+    };
+    blit_local_bitmap(
+        mono,
+        stride,
+        geometry,
+        destination_x,
+        destination_y,
+        &local_mono,
+        local_width,
+        local_height,
+        turns,
+    );
+    Ok(())
+}
+
+/// Canonical word wrap: breaks on spaces and hard-splits words wider than the
+/// line (mirrors wrapText from the server's table renderer).
 fn wrap_text(font: &FontArc, scale: PxScale, text: &str, width: f32) -> Vec<String> {
+    if text.is_empty() {
+        return Vec::new();
+    }
     let mut lines = Vec::new();
     for paragraph in text.split('\n') {
         let mut current = String::new();
         for word in paragraph.split(' ') {
+            if measure_text(font, scale, word) > width {
+                if !current.is_empty() {
+                    lines.push(std::mem::take(&mut current));
+                }
+                for character in word.chars() {
+                    let candidate = format!("{current}{character}");
+                    if measure_text(font, scale, &candidate) > width && !current.is_empty() {
+                        lines.push(std::mem::take(&mut current));
+                    }
+                    current.push(character);
+                }
+                continue;
+            }
             let candidate = if current.is_empty() {
                 word.to_owned()
             } else {
@@ -384,13 +469,25 @@ fn draw_glyph_line(
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct TableSummary {
+    total_rows: usize,
+    drawn_rows: usize,
+}
+
+struct TableColumn {
+    key: String,
+    title: String,
+    width: i32,
+}
+
 fn draw_table(
     mono: &mut [u8],
     stride: usize,
     geometry: Geometry,
     element: &Map<String, Value>,
     data: &Map<String, Value>,
-) -> Result<(), String> {
+) -> Result<TableSummary, String> {
     let columns = element
         .get("columns")
         .and_then(Value::as_array)
@@ -402,114 +499,447 @@ fn draw_table(
     let y = scaled(element, "y", geometry.scale_y).round() as i32;
     let width = scaled(element, "w", geometry.scale_x).round().max(1.0) as i32;
     let height = scaled(element, "h", geometry.scale_y).round().max(1.0) as i32;
-    let font_size =
-        (finite(element.get("fontSize")).unwrap_or(10.0) as f32 * geometry.scale_y).max(6.0);
+    let raw_font_size = finite(element.get("fontSize")).unwrap_or(10.0);
+    let font_size = (raw_font_size as f32 * geometry.scale_y).max(6.0);
     let padding = (4.0 * geometry.scale_x.min(geometry.scale_y))
         .round()
-        .max(2.0) as i32;
-    let row_height = (font_size * 1.2).round() as i32 + padding * 2;
+        .max(1.0) as i32;
+    let line_height = font_size * 1.1;
+    let row_height = (font_size * 1.5).round().max(1.0) as i32;
     let show_headers = element.get("showHeaders").and_then(Value::as_bool) != Some(false);
     let show_borders = element.get("showBorders").and_then(Value::as_bool) != Some(false);
-    let mut current_y = y;
-    let rows = data
-        .get("items")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    let mut draw_row =
-        |row: Option<&Map<String, Value>>, header: bool, current_y: i32| -> Result<(), String> {
-            let mut current_x = x;
-            for (index, raw_column) in columns.iter().enumerate() {
-                let column = object(raw_column, "table column")?;
-                let ratio =
-                    finite(column.get("widthRatio")).unwrap_or(100.0 / columns.len() as f64);
-                let cell_width = if index + 1 == columns.len() {
-                    x + width - current_x
-                } else {
-                    (width as f64 * ratio / 100.0).round().max(1.0) as i32
-                };
-                let key = string(column.get("key")).unwrap_or_default();
-                let text = if header {
-                    string(column.get("title"))
-                        .filter(|value| !value.is_empty())
-                        .unwrap_or(key)
-                        .to_owned()
-                } else {
-                    row.and_then(|row| row.get(key))
-                        .map(value_text)
-                        .unwrap_or_default()
-                };
-                let mut cell = element.clone();
-                cell.insert("type".to_owned(), json_value("text"));
-                cell.insert(
-                    "x".to_owned(),
-                    Value::from(current_x as f64 / geometry.scale_x as f64),
-                );
-                cell.insert(
-                    "y".to_owned(),
-                    Value::from(current_y as f64 / geometry.scale_y as f64),
-                );
-                cell.insert(
-                    "w".to_owned(),
-                    Value::from(cell_width as f64 / geometry.scale_x as f64),
-                );
-                cell.insert(
-                    "h".to_owned(),
-                    Value::from(row_height as f64 / geometry.scale_y as f64),
-                );
-                cell.insert("text".to_owned(), Value::String(text));
-                cell.insert(
-                    "fontSize".to_owned(),
-                    Value::from(font_size as f64 / geometry.scale_y as f64),
-                );
-                cell.insert(
-                    "fontWeight".to_owned(),
-                    Value::from(if header { 700 } else { 400 }),
-                );
-                cell.insert("verticalAlign".to_owned(), json_value("middle"));
-                cell.insert("textAlign".to_owned(), json_value("left"));
-                draw_text(mono, stride, geometry, &cell, &Map::new())?;
-                if show_borders {
-                    line_h(mono, stride, geometry, current_x, current_y, cell_width);
-                    line_h(
-                        mono,
-                        stride,
-                        geometry,
-                        current_x,
-                        current_y + row_height - 1,
-                        cell_width,
-                    );
-                    line_v(mono, stride, geometry, current_x, current_y, row_height);
-                    line_v(
-                        mono,
-                        stride,
-                        geometry,
-                        current_x + cell_width - 1,
-                        current_y,
-                        row_height,
-                    );
-                }
-                current_x += cell_width;
-            }
-            Ok(())
+    let family = string(element.get("fontFamily"))
+        .unwrap_or("Inter")
+        .to_owned();
+    let body_font = font_for(&family, false);
+    let bold_font = font_for(&family, true);
+    let body_scale = PxScale::from(font_size);
+    let clip = (
+        x.max(0),
+        y.max(0),
+        (x + width).min(geometry.width_dots as i32),
+        (y + height).min(geometry.height_dots as i32),
+    );
+    let right = x + width;
+    let bottom = y + height;
+    let footer_height = (row_height as f32 * 3.0).round() as i32;
+    let body_limit = bottom - footer_height;
+
+    let mut table_columns = Vec::with_capacity(columns.len());
+    let mut used = 0_i32;
+    for (index, raw_column) in columns.iter().enumerate() {
+        let column = object(raw_column, "table column")?;
+        let ratio = finite(column.get("widthRatio")).unwrap_or(100.0 / columns.len() as f64);
+        let cell_width = if index + 1 == columns.len() {
+            (width - used).max(1)
+        } else {
+            ((width as f64 * ratio / 100.0).round().max(1.0) as i32).max(1)
         };
-    if show_headers && current_y + row_height <= y + height {
-        draw_row(None, true, current_y)?;
-        current_y += row_height;
+        let key = string(column.get("key")).unwrap_or_default().to_owned();
+        let title = string(column.get("title"))
+            .filter(|value| !value.is_empty())
+            .unwrap_or(&key)
+            .to_owned();
+        table_columns.push(TableColumn {
+            key,
+            title,
+            width: cell_width,
+        });
+        used += cell_width;
     }
-    for row in &rows {
-        if current_y + row_height > y + height {
-            break;
+
+    // Rows come from data.items[] (canonical draw-table.ts); a table without
+    // items renders the whole data object as a single row.
+    let fallback_row = Value::Object(data.clone());
+    let mut items: Vec<&Value> = match data.get("items") {
+        Some(Value::Array(values)) => values.iter().collect(),
+        _ => vec![&fallback_row],
+    };
+    if let Some(max_rows) = finite(element.get("maxRows")).filter(|value| *value > 0.0) {
+        items.truncate(max_rows.round() as usize);
+    }
+    sort_table_items(
+        &mut items,
+        string(element.get("sortBy")).unwrap_or_default(),
+    );
+    let total_count = items.len();
+
+    let mut current_y = y;
+    let mut header_height = 0;
+    if show_headers {
+        let mut header_cells: Vec<(i32, Vec<String>)> = Vec::with_capacity(table_columns.len());
+        let mut max_lines = 1;
+        let mut current_x = x;
+        for column in &table_columns {
+            let inner = (column.width - padding * 2).max(1) as f32;
+            let lines = wrap_text(bold_font, body_scale, &column.title, inner);
+            max_lines = max_lines.max(lines.len());
+            header_cells.push((current_x, lines));
+            current_x += column.width;
         }
-        draw_row(row.as_object(), false, current_y)?;
-        current_y += row_height;
+        header_height =
+            row_height.max((max_lines as f32 * line_height).round() as i32 + padding * 2);
+        for (cell_x, lines) in &header_cells {
+            for (line_index, line) in lines.iter().enumerate() {
+                let top = y as f32 + padding as f32 + line_index as f32 * line_height;
+                draw_glyph_line(
+                    mono,
+                    stride,
+                    geometry,
+                    clip,
+                    bold_font,
+                    body_scale,
+                    line,
+                    (cell_x + padding) as f32,
+                    top,
+                );
+            }
+        }
+        current_y += header_height;
     }
-    Ok(())
+
+    if show_borders {
+        line_h(mono, stride, geometry, x, y, width);
+        line_h(mono, stride, geometry, x, bottom - 1, width);
+        line_v(mono, stride, geometry, x, y, height);
+        line_v(mono, stride, geometry, right - 1, y, height);
+        if show_headers {
+            line_h(mono, stride, geometry, x, y + header_height, width);
+        }
+        let mut current_x = x;
+        for column in &table_columns[..table_columns.len() - 1] {
+            current_x += column.width;
+            line_v(mono, stride, geometry, current_x, y, height);
+        }
+    }
+
+    let mut drawn_count = 0_usize;
+    let group_by = string(element.get("groupBy"))
+        .unwrap_or_default()
+        .to_owned();
+    if group_by == "nomenclature" || group_by == "batch" {
+        let field = if group_by == "batch" {
+            "batch_number"
+        } else {
+            "name"
+        };
+        let mut order: Vec<String> = Vec::new();
+        let mut groups: std::collections::HashMap<String, Vec<&Value>> =
+            std::collections::HashMap::new();
+        for item in &items {
+            let key = table_row_value(item, field).unwrap_or_else(|| "—".to_owned());
+            let key = if key.is_empty() {
+                "—".to_owned()
+            } else {
+                key
+            };
+            if !groups.contains_key(&key) {
+                order.push(key.clone());
+            }
+            groups.entry(key).or_default().push(item);
+        }
+        'groups: for key in &order {
+            let group_items = &groups[key];
+            let label = table_group_label(
+                &group_by,
+                key,
+                group_items.first().and_then(|value| value.as_object()),
+            );
+            match draw_table_group_header(
+                mono,
+                stride,
+                geometry,
+                clip,
+                bold_font,
+                body_scale,
+                &label,
+                x,
+                current_y,
+                row_height,
+                padding,
+                body_limit,
+                width,
+                show_borders,
+            )? {
+                Some(band_height) => current_y += band_height,
+                None => break,
+            }
+            for item in group_items {
+                match draw_table_row(
+                    mono,
+                    stride,
+                    geometry,
+                    clip,
+                    &table_columns,
+                    body_font,
+                    body_scale,
+                    line_height,
+                    padding,
+                    row_height,
+                    x,
+                    current_y,
+                    body_limit,
+                    width,
+                    show_borders,
+                    item,
+                )? {
+                    Some(row_height) => {
+                        current_y += row_height;
+                        drawn_count += 1;
+                    }
+                    None => break 'groups,
+                }
+            }
+        }
+    } else {
+        for item in &items {
+            match draw_table_row(
+                mono,
+                stride,
+                geometry,
+                clip,
+                &table_columns,
+                body_font,
+                body_scale,
+                line_height,
+                padding,
+                row_height,
+                x,
+                current_y,
+                body_limit,
+                width,
+                show_borders,
+                item,
+            )? {
+                Some(row_height) => {
+                    current_y += row_height;
+                    drawn_count += 1;
+                }
+                None => break,
+            }
+        }
+    }
+
+    if total_count > 0 {
+        line_h(mono, stride, geometry, x, body_limit, width);
+        let footer_text = table_footer_text(total_count, drawn_count);
+        let footer_size =
+            ((raw_font_size * 1.8).round().max(13.0) as f32 * geometry.scale_y).max(1.0);
+        let footer_scale = PxScale::from(footer_size);
+        let scaled_font = bold_font.as_scaled(footer_scale);
+        let em_height = scaled_font.ascent() - scaled_font.descent();
+        let middle = body_limit as f32 + footer_height as f32 / 2.0;
+        let top = middle - em_height / 2.0;
+        draw_glyph_line(
+            mono,
+            stride,
+            geometry,
+            clip,
+            bold_font,
+            footer_scale,
+            &footer_text,
+            (x + padding * 2) as f32,
+            top,
+        );
+    }
+
+    Ok(TableSummary {
+        total_rows: total_count,
+        drawn_rows: drawn_count,
+    })
 }
 
-fn json_value(value: &str) -> Value {
-    Value::String(value.to_owned())
+fn table_footer_text(total: usize, drawn: usize) -> String {
+    if drawn < total {
+        let pages = ((total as f64 / drawn.max(1) as f64).ceil() as usize).max(2);
+        format!("Стр. 1 / {pages}   ·   показано {drawn} из {total} позиций")
+    } else {
+        format!("Стр. 1 / 1   ·   всего {total} позиций")
+    }
 }
+
+fn sort_table_items(items: &mut [&Value], sort_by: &str) {
+    match sort_by {
+        "name" => items.sort_by(|a, b| {
+            ru_order(
+                &table_row_value(a, "name").unwrap_or_default(),
+                &table_row_value(b, "name").unwrap_or_default(),
+            )
+        }),
+        "date" => items.sort_by(|a, b| {
+            table_row_value(a, "production_date_batch")
+                .unwrap_or_default()
+                .cmp(&table_row_value(b, "production_date_batch").unwrap_or_default())
+        }),
+        _ => {}
+    }
+}
+
+/// Approximates `String.prototype.localeCompare(..., "ru")`: case-insensitive
+/// with `ё` folded onto `е`.
+fn ru_order(a: &str, b: &str) -> std::cmp::Ordering {
+    fn key(value: &str) -> Vec<char> {
+        value
+            .to_lowercase()
+            .chars()
+            .map(|character| if character == 'ё' { 'е' } else { character })
+            .collect()
+    }
+    key(a).cmp(&key(b))
+}
+
+fn table_row_value(row: &Value, key: &str) -> Option<String> {
+    row.as_object().and_then(|map| map.get(key)).map(value_text)
+}
+
+/// Mirrors `processDynamicText` from the canonical table renderer: missing row
+/// keys keep the literal `{{ key }}` placeholder, all-digit pack/box numbers
+/// are zero-padded to 12 characters.
+fn resolve_table_cell(key: &str, row: Option<&Map<String, Value>>) -> String {
+    let Some(map) = row else {
+        return format!("{{{{ {key} }}}}");
+    };
+    let value = map.get(key).or_else(|| {
+        let lowered = key.to_lowercase();
+        map.iter()
+            .find(|(name, _)| name.to_lowercase() == lowered)
+            .map(|(_, value)| value)
+    });
+    let Some(value) = value else {
+        return format!("{{{{ {key} }}}}");
+    };
+    let mut text = value_text(value);
+    if !text.is_empty()
+        && text.chars().all(|character| character.is_ascii_digit())
+        && matches!(key, "pack_number" | "box_number")
+    {
+        while text.len() < 12 {
+            text.insert(0, '0');
+        }
+    }
+    text
+}
+
+fn table_group_label(kind: &str, key: &str, first: Option<&Map<String, Value>>) -> String {
+    if kind != "batch" {
+        return key.to_owned();
+    }
+    let mut label = format!("Партия {key}");
+    let production = first
+        .and_then(|row| row.get("production_date_batch"))
+        .map(value_text)
+        .filter(|value| !value.is_empty());
+    if let Some(value) = production {
+        label.push_str(&format!(" · Произв.: {value}"));
+    }
+    let expiration = first
+        .and_then(|row| row.get("exp_date_full"))
+        .map(value_text)
+        .filter(|value| !value.is_empty());
+    if let Some(value) = expiration {
+        label.push_str(&format!(" · Годен до: {value}"));
+    }
+    label
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_table_group_header(
+    mono: &mut [u8],
+    stride: usize,
+    geometry: Geometry,
+    clip: (i32, i32, i32, i32),
+    font: &FontArc,
+    scale: PxScale,
+    label: &str,
+    x: i32,
+    y: i32,
+    band_height: i32,
+    padding: i32,
+    body_limit: i32,
+    width: i32,
+    show_borders: bool,
+) -> Result<Option<i32>, String> {
+    if y + band_height > body_limit {
+        return Ok(None);
+    }
+    let scaled_font = font.as_scaled(scale);
+    let em_height = scaled_font.ascent() - scaled_font.descent();
+    let middle = y as f32 + band_height as f32 / 2.0;
+    let top = middle - em_height / 2.0;
+    draw_glyph_line(
+        mono,
+        stride,
+        geometry,
+        clip,
+        font,
+        scale,
+        label,
+        (x + padding) as f32,
+        top,
+    );
+    if show_borders {
+        line_h(mono, stride, geometry, x, y + band_height, width);
+    }
+    Ok(Some(band_height))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_table_row(
+    mono: &mut [u8],
+    stride: usize,
+    geometry: Geometry,
+    clip: (i32, i32, i32, i32),
+    columns: &[TableColumn],
+    font: &FontArc,
+    scale: PxScale,
+    line_height: f32,
+    padding: i32,
+    min_row_height: i32,
+    x: i32,
+    y: i32,
+    body_limit: i32,
+    width: i32,
+    show_borders: bool,
+    row: &Value,
+) -> Result<Option<i32>, String> {
+    let mut max_lines = 1;
+    let mut cell_lines: Vec<Vec<String>> = Vec::with_capacity(columns.len());
+    for column in columns {
+        let value = resolve_table_cell(&column.key, row.as_object());
+        let inner = (column.width - padding * 2).max(1) as f32;
+        let lines = wrap_text(font, scale, &value, inner);
+        max_lines = max_lines.max(lines.len());
+        cell_lines.push(lines);
+    }
+    let row_height =
+        min_row_height.max((max_lines as f32 * line_height).round() as i32 + padding * 2);
+    if y + row_height > body_limit {
+        return Ok(None);
+    }
+    let mut current_x = x;
+    for (index, column) in columns.iter().enumerate() {
+        for (line_index, line) in cell_lines[index].iter().enumerate() {
+            let top = y as f32 + padding as f32 + line_index as f32 * line_height;
+            draw_glyph_line(
+                mono,
+                stride,
+                geometry,
+                clip,
+                font,
+                scale,
+                line,
+                (current_x + padding) as f32,
+                top,
+            );
+        }
+        current_x += column.width;
+    }
+    if show_borders {
+        line_h(mono, stride, geometry, x, y + row_height, width);
+    }
+    Ok(Some(row_height))
+}
+
 fn draw_rect(mono: &mut [u8], stride: usize, geometry: Geometry, element: &Map<String, Value>) {
     let x = scaled(element, "x", geometry.scale_x).round() as i32;
     let y = scaled(element, "y", geometry.scale_y).round() as i32;
@@ -667,7 +1097,9 @@ fn draw_barcode(
             {
                 return draw_embedded_image(mono, stride, geometry, element, source, false);
             }
-            return Err(format!("native raster barcode {kind} has no Rust encoder"));
+            return Err(format!(
+                "native raster barcode {kind} has no Rust encoder; provide an embedded imageData preview or switch the template to a supported symbology"
+            ));
         }
     };
     if value.len() > maximum_length {
@@ -1823,5 +2255,228 @@ mod tests {
             rendered += 1;
         }
         assert!(rendered > 0);
+    }
+
+    fn table_element(extra: Value) -> Map<String, Value> {
+        let mut element = json!({
+            "id": "tbl",
+            "type": "table",
+            "x": 10,
+            "y": 10,
+            "w": 380,
+            "h": 380,
+            "fontSize": 10,
+            "columns": [
+                {"key": "name", "title": "Наименование", "widthRatio": 60},
+                {"key": "weight", "title": "Вес", "widthRatio": 40}
+            ],
+            "showHeaders": true,
+            "showBorders": true
+        });
+        if let (Some(target), Some(extra)) = (element.as_object_mut(), extra.as_object()) {
+            for (key, value) in extra {
+                target.insert(key.clone(), value.clone());
+            }
+        }
+        element.as_object().unwrap().clone()
+    }
+
+    fn draw_test_table(data: Value, extra_element: Value) -> (TableSummary, Vec<u8>) {
+        let element = table_element(extra_element);
+        let data_map = data.as_object().cloned().unwrap_or_default();
+        let geometry = local_geometry(400, 400, 254.0);
+        let stride = geometry.width_dots.div_ceil(8);
+        let mut mono = vec![0_u8; stride * geometry.height_dots];
+        let summary = draw_table(&mut mono, stride, geometry, &element, &data_map).unwrap();
+        (summary, mono)
+    }
+
+    fn set_bytes_in_row(mono: &[u8], stride: usize, y: usize) -> usize {
+        (0..stride)
+            .filter(|byte| mono[y * stride + byte] != 0)
+            .count()
+    }
+
+    #[test]
+    fn table_footer_text_formats_page_indicator() {
+        assert_eq!(
+            table_footer_text(30, 16),
+            "Стр. 1 / 2   ·   показано 16 из 30 позиций"
+        );
+        assert_eq!(table_footer_text(3, 3), "Стр. 1 / 1   ·   всего 3 позиций");
+        assert_eq!(
+            table_footer_text(7, 0),
+            "Стр. 1 / 7   ·   показано 0 из 7 позиций"
+        );
+    }
+
+    #[test]
+    fn table_body_limit_and_footer_report_truncation() {
+        let items: Vec<Value> = (0..30)
+            .map(|index| json!({"name": format!("A{index:02}"), "weight": "1.000"}))
+            .collect();
+        let (summary, mono) = draw_test_table(json!({ "items": items }), json!({}));
+        // fontSize 10, padding 4: single-line rows and the header are 19 dots,
+        // the footer band is 45 dots (row band * 3).
+        assert_eq!(summary.total_rows, 30);
+        assert_eq!(summary.drawn_rows, 16);
+        let stride = 50;
+        // Full-width separator at the footer top edge (y = 10 + 380 - 45 = 345).
+        assert!(set_bytes_in_row(&mono, stride, 345) >= 40);
+        // Rows never leak past the body limit: rows 334..344 only carry the
+        // outer and column separator verticals.
+        for y in 334..345 {
+            assert!(
+                set_bytes_in_row(&mono, stride, y) <= 8,
+                "row {y} leaks into the footer band"
+            );
+        }
+        // The truncated-pages footer text is rendered inside the band.
+        assert!((346..390).any(|y| {
+            let count = set_bytes_in_row(&mono, stride, y);
+            count > 2 && count < 40
+        }));
+    }
+
+    #[test]
+    fn table_footer_counts_single_page_when_rows_fit() {
+        let items: Vec<Value> = (0..5)
+            .map(|index| json!({"name": format!("A{index}"), "weight": "1.000"}))
+            .collect();
+        let (summary, mono) = draw_test_table(json!({ "items": items }), json!({}));
+        assert_eq!(summary.total_rows, 5);
+        assert_eq!(summary.drawn_rows, 5);
+        let stride = 50;
+        assert!((346..390).any(|y| {
+            let count = set_bytes_in_row(&mono, stride, y);
+            count > 2 && count < 40
+        }));
+    }
+
+    #[test]
+    fn table_group_by_batch_draws_group_bands() {
+        let items = json!({"items": [
+            {"name": "Молоко", "weight": "1.000", "batch_number": "B-2"},
+            {"name": "Сметана", "weight": "2.000", "batch_number": "B-1"},
+            {"name": "Кефир", "weight": "3.000", "batch_number": "B-1"}
+        ]});
+        let (summary, _) = draw_test_table(items, json!({ "groupBy": "batch" }));
+        assert_eq!(summary.total_rows, 3);
+        assert_eq!(summary.drawn_rows, 3);
+        let first = json!({
+            "production_date_batch": "24.08.2026",
+            "exp_date_full": "03.09.2026"
+        });
+        assert_eq!(
+            table_group_label("batch", "B-1", first.as_object()),
+            "Партия B-1 · Произв.: 24.08.2026 · Годен до: 03.09.2026"
+        );
+        assert_eq!(table_group_label("nomenclature", "Молоко", None), "Молоко");
+    }
+
+    #[test]
+    fn table_sort_by_name_reorders_rows() {
+        assert_eq!(ru_order("Апельсин", "Яблоко"), std::cmp::Ordering::Less);
+        assert_eq!(ru_order("Яблоко", "Апельсин"), std::cmp::Ordering::Greater);
+        assert_eq!(ru_order("ёлка", "желудь"), std::cmp::Ordering::Less);
+        let items = [json!({"name": "Яблоко"}), json!({"name": "Апельсин"})];
+        let mut refs: Vec<&Value> = items.iter().collect();
+        sort_table_items(&mut refs, "name");
+        assert_eq!(
+            table_row_value(refs[0], "name").as_deref(),
+            Some("Апельсин")
+        );
+    }
+
+    #[test]
+    fn table_without_items_renders_single_data_row() {
+        let (summary, _) = draw_test_table(json!({"name": "Молоко"}), json!({}));
+        assert_eq!(summary.total_rows, 1);
+        assert_eq!(summary.drawn_rows, 1);
+    }
+
+    #[test]
+    fn resolve_table_cell_pads_numbers_and_keeps_missing_literal() {
+        let row = json!({"pack_number": "70", "box_number": 12345, "name": "Молоко"});
+        let map = row.as_object().unwrap();
+        assert_eq!(resolve_table_cell("pack_number", Some(map)), "000000000070");
+        assert_eq!(resolve_table_cell("box_number", Some(map)), "000000012345");
+        assert_eq!(resolve_table_cell("name", Some(map)), "Молоко");
+        assert_eq!(resolve_table_cell("unknown", Some(map)), "{{ unknown }}");
+        assert_eq!(resolve_table_cell("name", None), "{{ name }}");
+    }
+
+    #[test]
+    fn wrap_text_hard_splits_overlong_words() {
+        let font = font_for("Inter", false);
+        let scale = PxScale::from(10.0);
+        let lines = wrap_text(font, scale, "ШШШШШШШШШШ", 30.0);
+        assert!(lines.len() >= 3, "expected hard split, got {lines:?}");
+        assert_eq!(
+            wrap_text(font, scale, "Раз два три", 100.0),
+            vec!["Раз два три"]
+        );
+        assert!(wrap_text(font, scale, "", 100.0).is_empty());
+    }
+
+    fn text_pixel_bbox(bitmap: &RasterizedLabel) -> Option<(i32, i32, i32, i32)> {
+        let mut bbox: Option<(i32, i32, i32, i32)> = None;
+        for y in 0..bitmap.height_dots {
+            for x in 0..bitmap.width_dots {
+                let byte = bitmap.mono[y * bitmap.bytes_per_row + (x >> 3)];
+                if byte & (0x80 >> (x & 7)) == 0 {
+                    continue;
+                }
+                let (min_x, min_y, max_x, max_y) =
+                    bbox.unwrap_or((x as i32, y as i32, x as i32, y as i32));
+                bbox = Some((
+                    min_x.min(x as i32),
+                    min_y.min(y as i32),
+                    max_x.max(x as i32),
+                    max_y.max(y as i32),
+                ));
+            }
+        }
+        bbox
+    }
+
+    fn text_rotation_payload(rotation: f64) -> GenerationPayload {
+        // Canvas 406 px at 5.08 cm with 203 DPI renders 1:1 (406 dots).
+        GenerationPayload {
+            config: json!({"connection":"windows_driver","protocol":"image","dpi":203}),
+            doc: json!({"canvas":{"width":406,"height":406,"widthCm":5.08,"heightCm":5.08,"dpi":254},"elements":[
+                {"id":"t","type":"text","x":10,"y":183,"w":386,"h":40,"rotation":rotation,
+                 "text":"ВЕРТИКАЛЬНЫЙ ТЕКСТ ПАЛЛЕТЫ","fontFamily":"Inter","fontSize":24,
+                 "textAlign":"center","verticalAlign":"middle"}
+            ]}),
+            data: json!({}),
+        }
+    }
+
+    #[test]
+    fn text_rotation_places_quarter_turns_around_center() {
+        let horizontal = render(&text_rotation_payload(0.0)).unwrap();
+        let (min_x, min_y, max_x, max_y) = text_pixel_bbox(&horizontal).unwrap();
+        assert!(max_x - min_x >= 250, "horizontal text must be wide");
+        assert!(max_y - min_y <= 45);
+
+        let rotated = render(&text_rotation_payload(90.0)).unwrap();
+        let (min_x, min_y, max_x, max_y) = text_pixel_bbox(&rotated).unwrap();
+        assert!(max_x - min_x <= 45, "90° text must be narrow");
+        assert!(max_y - min_y >= 250, "90° text must be tall");
+        // The rotated footprint shares its center with the element box center.
+        assert!((min_x + max_x - 406).abs() <= 12);
+        assert!((min_y + max_y - 406).abs() <= 12);
+
+        let flipped = render(&text_rotation_payload(180.0)).unwrap();
+        let (min_x, min_y, max_x, max_y) = text_pixel_bbox(&flipped).unwrap();
+        assert!(max_x - min_x >= 250);
+        assert!(min_x >= 5 && min_y >= 178 && max_x <= 401 && max_y <= 228);
+
+        // Non-quarter angles keep the unrotated layout instead of failing.
+        let arbitrary = render(&text_rotation_payload(45.0)).unwrap();
+        let (min_x, _, max_x, max_y) = text_pixel_bbox(&arbitrary).unwrap();
+        assert!(max_x - min_x >= 250);
+        assert!(max_y - min_y <= 45);
     }
 }
