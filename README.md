@@ -32,7 +32,7 @@ Native ZPL/TSPL generation, raster adapters for EPL/CPCL/DPL/SBPL, TCP/Serial/Wi
 
 ## Resource profile
 
-The main renderer bundle is gated below 160 KiB, operating screens are lazy chunks below 50 KiB each, barcode generation loads on demand, printer queues and telemetry outbox are bounded. Slint uses the deterministic `winit-femtovg` backend and exits the Tauri dispatcher after sidecar startup.
+The main renderer bundle is gated below 160 KiB, operating screens are lazy chunks below 50 KiB each, barcode generation loads on demand, printer queues and telemetry outbox are bounded. Slint defaults to the GPU-backed `winit-skia-opengl` renderer for subpixel text, falls back to Skia software rendering when OpenGL is unavailable, keeps `winit-femtovg` as an explicit low-footprint override, and exits the Tauri dispatcher after sidecar startup.
 
 ## Release
 

@@ -264,7 +264,7 @@ impl NativePrintService {
             kind: "pack".to_owned(),
             pack_id: Some(result.pack_id),
         };
-        let receipt = self
+        let send_result = self
             .send_prepared(
                 printer,
                 events,
@@ -277,7 +277,34 @@ impl NativePrintService {
                     "ERROR",
                 );
                 error
-            })?;
+            });
+        let receipt = match send_result {
+            Ok(receipt) => receipt,
+            Err(error) => {
+                // The pack row is committed regardless of delivery, so the box
+                // limit accounting must not stall until the printer returns.
+                let after_pack = operational.latest_counters(Some(request.product_id))?;
+                let limit = integer(product.get("close_box_counter")).unwrap_or(0);
+                if limit > 0 && integer(after_pack.get("unitsInBox")).unwrap_or(0) >= limit {
+                    if let Err(close_error) = self.close_box_internal(
+                        persisted,
+                        operational,
+                        session,
+                        printer,
+                        events,
+                        &product,
+                        &request.batch_number,
+                        production,
+                    ) {
+                        operational.record_print_error(
+                            &format!("pack {} box auto-close: {close_error}", result.pack_id),
+                            "ERROR",
+                        );
+                    }
+                }
+                return Err(error);
+            }
+        };
         self.remember(stored)?;
 
         let after_pack = operational.latest_counters(Some(request.product_id))?;

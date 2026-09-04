@@ -132,10 +132,67 @@ fn verify_pin(pin: &str, pin_hash: Option<&str>) -> bool {
         return false;
     }
     let mut computed = vec![0_u8; expected.len()];
-    pbkdf2_hmac::<Sha256>(pin.as_bytes(), salt.as_bytes(), iterations, &mut computed);
+    derive_pbkdf2_sha256(pin.as_bytes(), salt.as_bytes(), iterations, &mut computed);
     bool::from(computed.as_slice().ct_eq(expected.as_slice()))
 }
 
+fn derive_pbkdf2_sha256(password: &[u8], salt: &[u8], iterations: u32, output: &mut [u8]) {
+    #[cfg(target_os = "windows")]
+    if derive_pbkdf2_sha256_windows(password, salt, iterations, output) {
+        return;
+    }
+
+    pbkdf2_hmac::<Sha256>(password, salt, iterations, output);
+}
+
+#[cfg(target_os = "windows")]
+fn derive_pbkdf2_sha256_windows(
+    password: &[u8],
+    salt: &[u8],
+    iterations: u32,
+    output: &mut [u8],
+) -> bool {
+    use std::ptr::{null, null_mut};
+    use windows_sys::Win32::Security::Cryptography::{
+        BCryptCloseAlgorithmProvider, BCryptDeriveKeyPBKDF2, BCryptOpenAlgorithmProvider,
+        BCRYPT_ALG_HANDLE, BCRYPT_ALG_HANDLE_HMAC_FLAG, BCRYPT_SHA256_ALGORITHM,
+    };
+
+    let (Ok(password_len), Ok(salt_len), Ok(output_len)) = (
+        u32::try_from(password.len()),
+        u32::try_from(salt.len()),
+        u32::try_from(output.len()),
+    ) else {
+        return false;
+    };
+    let mut algorithm: BCRYPT_ALG_HANDLE = null_mut();
+    let open_status = unsafe {
+        BCryptOpenAlgorithmProvider(
+            &mut algorithm,
+            BCRYPT_SHA256_ALGORITHM,
+            null(),
+            BCRYPT_ALG_HANDLE_HMAC_FLAG,
+        )
+    };
+    if open_status < 0 || algorithm.is_null() {
+        return false;
+    }
+    let derive_status = unsafe {
+        BCryptDeriveKeyPBKDF2(
+            algorithm,
+            password.as_ptr(),
+            password_len,
+            salt.as_ptr(),
+            salt_len,
+            u64::from(iterations),
+            output.as_mut_ptr(),
+            output_len,
+            0,
+        )
+    };
+    let _ = unsafe { BCryptCloseAlgorithmProvider(algorithm, 0) };
+    derive_status >= 0
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -158,5 +215,21 @@ mod tests {
             }
         );
         assert!(!verify_pin("1234", Some("unknown$1$salt$AA==")));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_cng_handles_deployed_iteration_cost() {
+        let started = std::time::Instant::now();
+        assert!(!verify_pin(
+            "0000",
+            Some("pbkdf2_sha256$1000000$labelpilot-test$elnfK0B19+/j3z1ZRAqrW0zpFDrkI245e24wd/JU+Eo=")
+        ));
+        let elapsed = started.elapsed();
+        eprintln!("Windows CNG PBKDF2 1,000,000 iterations: {elapsed:?}");
+        assert!(
+            elapsed < std::time::Duration::from_secs(5),
+            "deployed PIN verification took {elapsed:?}"
+        );
     }
 }

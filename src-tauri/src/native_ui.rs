@@ -730,6 +730,18 @@ impl NativeUiRuntime {
             .cancel_durable_with_sink(self.events.clone(), job_id)
     }
 
+    pub fn probe_pack_printer(&self) -> Result<NativePrinterDiagnostic, String> {
+        let config = self.printer_config()?;
+        Ok(probe_printer_role(
+            &self.printer,
+            &self.events,
+            &config,
+            "pack",
+            "Этикетка упаковки",
+            "packPrinter",
+        ))
+    }
+
     pub fn probe_configured_printers(&self) -> Result<Vec<NativePrinterDiagnostic>, String> {
         let config = self.printer_config()?;
         Ok([
@@ -1003,8 +1015,29 @@ impl NativeUiRuntime {
         selected_product_id: Option<i64>,
         search: Option<&str>,
     ) -> Result<NativeCatalogSnapshot, String> {
-        let products = self.products(search)?;
+        self.catalog_snapshot_with_limit(selected_product_id, search, 50)
+    }
+
+    pub fn catalog_snapshot_with_limit(
+        &self,
+        selected_product_id: Option<i64>,
+        search: Option<&str>,
+        requested_limit: usize,
+    ) -> Result<NativeCatalogSnapshot, String> {
+        const SMALL_CATALOG_EAGER_LIMIT: i64 = 100;
+
         let total_matching = self.operational()?.product_count(search, false)?;
+        let effective_limit = if total_matching <= SMALL_CATALOG_EAGER_LIMIT {
+            usize::try_from(total_matching.max(1)).unwrap_or(requested_limit.max(1))
+        } else {
+            requested_limit.max(1)
+        };
+        let products = self
+            .operational()?
+            .products_with_limit(search, false, effective_limit)?
+            .iter()
+            .map(NativeUiProduct::try_from)
+            .collect::<Result<Vec<_>, _>>()?;
         let selected_product_id = selected_product_id
             .filter(|id| products.iter().any(|product| product.id == *id))
             .or_else(|| products.first().map(|product| product.id));
@@ -1197,7 +1230,16 @@ impl NativeUiRuntime {
 
         let station = self.station_snapshot()?;
 
-        let products = self.products(search)?;
+        let mut products = self.products(search)?;
+        if search.is_none_or(|value| value.trim().is_empty()) {
+            if let Some(selected_id) = selected_product_id {
+                if !products.iter().any(|product| product.id == selected_id) {
+                    if let Some(product) = operational.product(selected_id)? {
+                        products.insert(0, NativeUiProduct::try_from(&product)?);
+                    }
+                }
+            }
+        }
 
         let containers = operational
             .containers()?
@@ -1468,7 +1510,6 @@ impl NativeUiRuntime {
         );
         Ok(result)
     }
-
     pub fn delete_production_print_job(&self, job_id: i64) -> Result<Value, String> {
         let result = self.operational()?.delete_print_job(job_id)?;
         self.events.emit(
@@ -2549,7 +2590,7 @@ mod tests {
                 "#,
             )
             .unwrap();
-        for id in 1..=55_i64 {
+        for id in 1..=205_i64 {
             let name = if id == 55 {
                 "Искомый промышленный товар".to_owned()
             } else {
@@ -2577,7 +2618,7 @@ mod tests {
 
         let runtime = NativeUiRuntime::with_persisted(persisted, |_| {}).unwrap();
         let catalog = runtime.catalog_snapshot(None, None).unwrap();
-        assert_eq!(catalog.total_matching, 55);
+        assert_eq!(catalog.total_matching, 205);
         assert_eq!(catalog.products.len(), 50);
         assert!(catalog.truncated);
         let first = &catalog.products[0];
@@ -2589,6 +2630,20 @@ mod tests {
         assert_eq!(first.pallet_label_name, "Паллетный лист");
         assert!(first.extra_data_summary.contains("line: A"));
 
+        let expanded = runtime
+            .catalog_snapshot_with_limit(None, None, 250)
+            .unwrap();
+        assert_eq!(expanded.total_matching, 205);
+        assert_eq!(expanded.products.len(), 205);
+        assert!(!expanded.truncated);
+
+        let eager_small_result = runtime
+            .catalog_snapshot_with_limit(None, Some("Товар 0"), 5)
+            .unwrap();
+        assert_eq!(eager_small_result.total_matching, 9);
+        assert_eq!(eager_small_result.products.len(), 9);
+        assert!(!eager_small_result.truncated);
+
         let filtered = runtime
             .catalog_snapshot(None, Some("промышленный"))
             .unwrap();
@@ -2596,6 +2651,15 @@ mod tests {
         assert_eq!(filtered.products.len(), 1);
         assert!(!filtered.truncated);
         assert_eq!(filtered.selected_product_id, Some(55));
+
+        let by_article = runtime.catalog_snapshot(None, Some("ART-055")).unwrap();
+        assert_eq!(by_article.products.len(), 1);
+        assert_eq!(by_article.products[0].id, 55);
+
+        let selected_beyond_first_page = runtime.weighing_snapshot(Some(54), None).unwrap();
+        assert_eq!(selected_beyond_first_page.selected_product_id, Some(54));
+        assert_eq!(selected_beyond_first_page.products[0].id, 54);
+        assert_eq!(selected_beyond_first_page.products.len(), 51);
     }
 
     #[test]

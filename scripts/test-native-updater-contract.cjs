@@ -32,6 +32,11 @@ for (const token of [
   'rollback_files', 'confirm_startup_health', 'PACKAGE_METADATA',
   'verify_package_metadata', 'verify_plan_package', 'package_signature',
   'package_sha256', 'package_size', 'restart_restored_application',
+  'queue_manual_rollback', 'apply_manual_rollback', 'validate_manual_rollback',
+  'restore_manual_snapshot', 'snapshot_current_binaries',
+  'LABELPILOT_MANUAL_ROLLBACK_IN_PROGRESS', 'replace_directory_snapshot',
+  'verify_database_snapshot', 'PRAGMA quick_check(1)',
+  'rollback binary checksum mismatch', 'last-manual-rollback.json',
 ]) {
   assert.ok(updater.includes(token), 'native updater token missing: ' + token);
 }
@@ -42,15 +47,27 @@ assert.match(updater, /OpenProcess\(0x0010_0000/);
 for (const token of [
   'NativeUpdateManager', 'UiMessage::UpdateProgress', 'UiMessage::UpdateFinished',
   'on_check_update', 'on_download_update', 'on_stage_offline_update',
-  'on_install_update', 'confirm_startup_health',
+  'on_install_update', 'on_rollback_update', 'queue_manual_rollback',
+  'confirm_startup_health', 'entering recovery mode',
+  'Рабочая база данных не открылась', 'if runtime.is_some()',
 ]) {
   assert.ok(runtime.includes(token), 'Slint updater runtime token missing: ' + token);
 }
 for (const token of [
-  'active-page == 9', 'Обновление и обслуживание', 'ОФЛАЙН-ОБСЛУЖИВАНИЕ',
-  'update-progress', 'Minisign + SHA-256', '30 секунд',
+  'active-page == 9', 'update-page-title-label', 'update-current-label',
+  'update-status-row', 'update-status-badge', 'update-progress',
+  'update-offline-visible', 'update-usb-label', 'update-recovery-card',
+  'update-protection-title-label', 'update-rollback-available',
+  'update-rollback-confirm-visible', 'update-manual-restore-label',
+  'update-restore-message-label', 'callback rollback-update',
 ]) {
   assert.ok(ui.includes(token), 'Slint updater UI token missing: ' + token);
+}
+for (const token of [
+  'Minisign + SHA-256', 'ОТКАТ СОЗДАЁТСЯ АВТОМАТИЧЕСКИ',
+  'Updater не работает в фоне', 'native-latest.json',
+]) {
+  assert.ok(!ui.includes(token), 'technical updater text must not be shown: ' + token);
 }
 
 for (const config of [dualConfig, localConfig]) {
@@ -71,4 +88,4 @@ assert.match(buildRelease, /new-native-update-package\.ps1/);
 assert.match(buildRelease, /NATIVE_MANIFEST/);
 assert.match(workflow, /new-native-update-package\.ps1/);
 
-console.log('native-updater-contract: signed version-bound package, offline staging, repeated pre-apply verification, health confirmation and rollback verified');
+console.log('native-updater-contract: signed packages, consistent data snapshots, automatic rollback and confirmed manual recovery verified');

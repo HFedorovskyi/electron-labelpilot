@@ -67,8 +67,18 @@ impl OperationalState {
         search: Option<&str>,
         fixed_weight_only: bool,
     ) -> Result<Vec<Value>, String> {
+        self.products_with_limit(search, fixed_weight_only, 50)
+    }
+
+    pub fn products_with_limit(
+        &self,
+        search: Option<&str>,
+        fixed_weight_only: bool,
+        limit: usize,
+    ) -> Result<Vec<Value>, String> {
         let search = search.unwrap_or_default().trim();
         let search: String = search.chars().take(256).collect();
+        let limit = i64::try_from(limit.max(1)).unwrap_or(i64::MAX);
         self.with_connection(|connection| {
             let fixed_clause = if fixed_weight_only {
                 "WHERE n.is_fixed_weight = 1"
@@ -91,9 +101,9 @@ impl OperationalState {
                     connection,
                     &format!(
                         "SELECT {columns} FROM nomenclature n {joins} \
-                         {fixed_clause} ORDER BY n.name COLLATE NOCASE ASC LIMIT 50"
+                         {fixed_clause} ORDER BY n.name COLLATE NOCASE ASC LIMIT ?1"
                     ),
-                    &[],
+                    &[SqlValue::Integer(limit)],
                 )
             } else {
                 let search_clause = if fixed_weight_only { "AND" } else { "WHERE" };
@@ -102,9 +112,12 @@ impl OperationalState {
                     &format!(
                         "SELECT {columns} FROM nomenclature n {joins} \
                          {fixed_clause} {search_clause} (n.name LIKE ?1 OR n.article LIKE ?1) \
-                         ORDER BY n.name COLLATE NOCASE ASC LIMIT 50"
+                         ORDER BY n.name COLLATE NOCASE ASC LIMIT ?2"
                     ),
-                    &[SqlValue::Text(format!("%{search}%"))],
+                    &[
+                        SqlValue::Text(format!("%{search}%")),
+                        SqlValue::Integer(limit),
+                    ],
                 )
             }
         })
@@ -312,16 +325,55 @@ impl OperationalState {
     pub fn complete_print_job(&self, job_id: i64) -> Result<Value, String> {
         require_positive_id(job_id, "jobId")?;
         self.with_connection(|connection| {
-            connection
+            let transaction = connection.transaction().map_err(|error| {
+                format!("failed to begin print-job completion transaction: {error}")
+            })?;
+            let nomenclature_id = transaction
+                .query_row(
+                    "SELECT nomenclature_id FROM print_jobs WHERE job_id = ?1",
+                    params![job_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()
+                .map_err(db_error("read print-job product before completion"))?
+                .ok_or_else(|| format!("Print job #{job_id} not found"))?;
+            let discarded_empty_boxes =
+                discard_empty_open_boxes_transaction(&transaction, nomenclature_id)?;
+            let open_box_number = transaction
+                .query_row(
+                    "SELECT number FROM boxes WHERE status = 'Open' AND nomenclature_id = ?1 ORDER BY id DESC LIMIT 1",
+                    params![nomenclature_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(db_error("read open product box before print-job completion"))?;
+            if let Some(number) = open_box_number {
+                let number = number.trim();
+                let suffix = if number.is_empty() {
+                    String::new()
+                } else {
+                    format!(" {number}")
+                };
+                return Err(format!(
+                    "перед завершением задания закройте открытый короб{suffix}"
+                ));
+            }
+
+            transaction
                 .execute(
                     "UPDATE print_jobs SET status = 'completed', completed_at = CURRENT_TIMESTAMP WHERE job_id = ?1",
                     params![job_id],
                 )
                 .map_err(db_error("complete print job"))?;
-            Ok(json!({ "success": true }))
+            transaction
+                .commit()
+                .map_err(|error| format!("failed to commit print-job completion: {error}"))?;
+            Ok(json!({
+                "success": true,
+                "discardedEmptyBoxes": discarded_empty_boxes,
+            }))
         })
     }
-
     pub fn delete_print_job(&self, job_id: i64) -> Result<Value, String> {
         require_positive_id(job_id, "jobId")?;
         self.with_connection(|connection| {
@@ -1192,6 +1244,42 @@ fn delete_pack_transaction(transaction: &Transaction<'_>, pack_id: i64) -> Resul
     Ok(json!({ "success": true, "boxId": box_id }))
 }
 
+fn discard_empty_open_boxes_transaction(
+    transaction: &Transaction<'_>,
+    nomenclature_id: i64,
+) -> Result<usize, String> {
+    let box_ids = {
+        let mut statement = transaction
+            .prepare_cached(
+                r#"
+                SELECT b.id
+                FROM boxes b
+                JOIN pallet p ON p.id = b.pallete_id
+                WHERE b.status = 'Open'
+                  AND b.nomenclature_id = ?1
+                  AND p.status = 'Open'
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM pack pk
+                      WHERE pk.box_id = b.id
+                        AND pk.status != 'Deleted'
+                  )
+                ORDER BY b.id
+                "#,
+            )
+            .map_err(db_error("prepare empty open product boxes"))?;
+        let rows = statement
+            .query_map(params![nomenclature_id], |row| row.get::<_, i64>(0))
+            .map_err(db_error("query empty open product boxes"))?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(db_error("read empty open product boxes"))?
+    };
+
+    for box_id in &box_ids {
+        delete_box_transaction(transaction, *box_id)?;
+    }
+    Ok(box_ids.len())
+}
 fn delete_box_transaction(transaction: &Transaction<'_>, box_id: i64) -> Result<Value, String> {
     let box_row: Option<(i64, String, f64, f64)> = transaction
         .query_row(
@@ -1602,6 +1690,73 @@ mod tests {
         assert_eq!(weights["weight_brutto"], 0.0);
     }
 
+    #[test]
+    fn completion_scopes_the_open_box_guard_to_the_job_product() {
+        let (_directory, _persisted, state) = fixture("empty-box-completion");
+        state
+            .with_connection(|connection| {
+                connection
+                    .execute_batch(
+                        r#"
+                        INSERT INTO nomenclature (id, name, article, exp_date)
+                        VALUES (2, 'Unrelated product', 'OTHER', 10);
+                        INSERT INTO print_jobs (
+                            job_id, nomenclature_id, nomenclature_name, quantity, quantity_unit
+                        ) VALUES
+                            (900, 1, 'Milk', 10, 'pcs'),
+                            (901, 1, 'Milk', 10, 'pcs'),
+                            (902, 2, 'Unrelated product', 10, 'pcs');
+                        "#,
+                    )
+                    .map_err(db_error("seed completion jobs"))
+            })
+            .unwrap();
+
+        let empty_box = state.record_pack(pack("1", "279"), None).unwrap();
+        state.delete_pack(1).unwrap();
+        assert_eq!(state.open_entities_summary().unwrap().open_box_count, 1);
+        assert_eq!(state.latest_counters(Some(1)).unwrap()["unitsInBox"], 0);
+
+        let completed = state.complete_print_job(900).unwrap();
+        assert_eq!(completed["success"], true);
+        assert_eq!(completed["discardedEmptyBoxes"], 1);
+        assert_eq!(state.open_entities_summary().unwrap().open_box_count, 0);
+        assert_eq!(
+            state.query_value(&format!(
+                "SELECT status FROM boxes WHERE id={}",
+                empty_box.box_id
+            ))["status"],
+            "Deleted"
+        );
+        assert_eq!(
+            state.query_value("SELECT status FROM print_jobs WHERE job_id=900")["status"],
+            "completed"
+        );
+
+        let nonempty_box = state.record_pack(pack("2", "280"), None).unwrap();
+        let error = state.complete_print_job(901).unwrap_err();
+        assert!(error.contains("открытый короб"));
+        assert!(error.contains(&nonempty_box.box_number));
+        assert_eq!(
+            state.query_value("SELECT status FROM print_jobs WHERE job_id=901")["status"],
+            "pending"
+        );
+
+        let unrelated = state.complete_print_job(902).unwrap();
+        assert_eq!(unrelated["success"], true);
+        assert_eq!(unrelated["discardedEmptyBoxes"], 0);
+        assert_eq!(
+            state.query_value("SELECT status FROM print_jobs WHERE job_id=902")["status"],
+            "completed"
+        );
+        assert_eq!(
+            state.query_value(&format!(
+                "SELECT status FROM boxes WHERE id={}",
+                nonempty_box.box_id
+            ))["status"],
+            "Open"
+        );
+    }
     #[test]
     fn closes_empty_boxes_and_rehomes_nonempty_strays() {
         let (_directory, _persisted, state) = fixture("pallet-close");

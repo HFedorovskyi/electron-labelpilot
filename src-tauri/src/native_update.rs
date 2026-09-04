@@ -1,10 +1,11 @@
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use minisign_verify::{PublicKey, Signature};
+use rusqlite::{Connection, OpenFlags};
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     env,
     ffi::OsStr,
     fs::{self, File},
@@ -37,6 +38,8 @@ const DATA_FILES: &[&str] = &[
     "scale-config.json",
     "numbering-config.json",
     "sequence-store.json",
+    "last-operator.json",
+    "native-last-print.json",
     "demo.flag",
     "identity_pre_demo.json",
 ];
@@ -115,7 +118,8 @@ impl NativeUpdateManager {
             current_version: env!("CARGO_PKG_VERSION").into(),
             state: "idle".into(),
             status: "Готово к проверке обновлений".into(),
-            rollback_available: data_dir.join("updates/last-transaction.json").is_file(),
+            rollback_available: data_dir.join("updates/last-transaction.json").is_file()
+                && env::var_os("LABELPILOT_MANUAL_ROLLBACK_IN_PROGRESS").is_none(),
             ..Default::default()
         };
         Ok(Self {
@@ -126,7 +130,8 @@ impl NativeUpdateManager {
     }
 
     pub fn snapshot(&self) -> NativeUpdateSnapshot {
-        self.state
+        let mut snapshot = self
+            .state
             .lock()
             .map(|value| value.1.clone())
             .unwrap_or_else(|_| NativeUpdateSnapshot {
@@ -135,7 +140,13 @@ impl NativeUpdateManager {
                 status: "Состояние updater недоступно".into(),
                 last_error: "updater state lock is poisoned".into(),
                 ..Default::default()
-            })
+            });
+        snapshot.rollback_available = self
+            .data_dir
+            .join("updates/last-transaction.json")
+            .is_file()
+            && env::var_os("LABELPILOT_MANUAL_ROLLBACK_IN_PROGRESS").is_none();
+        snapshot
     }
 
     fn edit(&self, action: impl FnOnce(&mut NativeUpdateSnapshot)) -> Result<(), String> {
@@ -433,6 +444,63 @@ impl NativeUpdateManager {
         })?;
         Ok(self.snapshot())
     }
+
+    pub fn queue_manual_rollback(&self) -> Result<NativeUpdateSnapshot, String> {
+        let marker = self.data_dir.join("updates/last-transaction.json");
+        if !marker.is_file() {
+            return Err("Точка восстановления предыдущей версии не найдена".into());
+        }
+        let rollback: Rollback = read_json(&marker)?;
+        let source_plan_path = rollback.transaction_root.join("apply-plan.json");
+        let mut plan: ApplyPlan = read_json(&source_plan_path)?;
+        validate_manual_rollback(&plan, &rollback)?;
+
+        let current =
+            env::current_exe().map_err(|error| format!("resolve current executable: {error}"))?;
+        let current_root = fs::canonicalize(
+            current
+                .parent()
+                .ok_or_else(|| "current executable has no parent".to_owned())?,
+        )
+        .map_err(|error| format!("canonicalize current install root: {error}"))?;
+        let planned_root = fs::canonicalize(&plan.install_root)
+            .map_err(|error| format!("canonicalize rollback install root: {error}"))?;
+        if current_root != planned_root
+            || current.file_name().and_then(OsStr::to_str) != Some(&plan.launch_executable)
+        {
+            return Err("Точка восстановления относится к другой установке".into());
+        }
+
+        plan.parent_pid = std::process::id();
+        plan.health_marker = plan.transaction_root.join("manual-rollback-health.ok");
+        plan.health_token = Uuid::new_v4().to_string();
+        plan.status_path = plan.transaction_root.join("manual-rollback-status.json");
+        plan.startup_timeout_seconds = 30;
+        let plan_path = plan
+            .transaction_root
+            .join(format!("manual-rollback-plan-{}.json", Uuid::new_v4()));
+        write_json(&plan_path, &plan)?;
+
+        let helper = maintenance_helper(&plan.install_root)?;
+        let runner = plan.transaction_root.join(format!(
+            "labelpilot-maintenance-rollback-runner-{}{}",
+            Uuid::new_v4(),
+            env::consts::EXE_SUFFIX
+        ));
+        copy_file(&helper, &runner)?;
+        Command::new(runner)
+            .arg("rollback")
+            .arg("--plan")
+            .arg(plan_path)
+            .spawn()
+            .map_err(|error| format!("start rollback helper: {error}"))?;
+        self.edit(|value| {
+            value.state = "rollback-pending".into();
+            value.status = "Ручное восстановление подготовлено; приложение перезапускается".into();
+            value.last_error.clear();
+        })?;
+        Ok(self.snapshot())
+    }
 }
 
 fn parse_manifest(bytes: &[u8]) -> Result<NativeUpdateManifest, String> {
@@ -638,14 +706,18 @@ struct Rollback {
 struct RollbackEntry {
     relative_path: PathBuf,
     existed: bool,
+    #[serde(default)]
+    sha256: String,
 }
 
 pub fn run_maintenance_cli() -> Result<(), String> {
     let mut args = env::args_os().skip(1);
-    if args.next().as_deref() != Some(OsStr::new("apply"))
-        || args.next().as_deref() != Some(OsStr::new("--plan"))
-    {
-        return Err("usage: labelpilot-maintenance apply --plan <path>".into());
+    let action = args
+        .next()
+        .and_then(|value| value.into_string().ok())
+        .ok_or_else(|| maintenance_usage().to_owned())?;
+    if args.next().as_deref() != Some(OsStr::new("--plan")) {
+        return Err(maintenance_usage().into());
     }
     let path = args
         .next()
@@ -654,13 +726,38 @@ pub fn run_maintenance_cli() -> Result<(), String> {
     if args.next().is_some() {
         return Err("unexpected maintenance arguments".into());
     }
-    apply_plan(&read_json(&path)?)
+    let plan: ApplyPlan = read_json(&path)?;
+    match action.as_str() {
+        "apply" => apply_plan(&plan),
+        "rollback" => apply_manual_rollback(&plan),
+        _ => Err(maintenance_usage().into()),
+    }
+}
+
+fn maintenance_usage() -> &'static str {
+    "usage: labelpilot-maintenance <apply|rollback> --plan <path>"
 }
 
 fn apply_plan(plan: &ApplyPlan) -> Result<(), String> {
     validate_plan(plan)?;
     status(plan, "waiting", "Ожидание завершения приложения")?;
     wait_for_exit(plan.parent_pid, Duration::from_secs(45))?;
+    status(
+        plan,
+        "safeguarding",
+        "Фиксация точки восстановления после закрытия базы",
+    )?;
+    if let Err(error) = backup_data(&plan.data_root, &plan.data_backup)
+        .and_then(|_| verify_database_snapshot(&plan.data_backup))
+    {
+        let _ = status(
+            plan,
+            "backup-failed",
+            "Точка восстановления не создана; установка отменена",
+        );
+        let _ = restart_restored_application(plan);
+        return Err(format!("create consistent pre-update backup: {error}"));
+    }
     status(plan, "verifying", "Повторная проверка подписи пакета")?;
     if let Err(error) = verify_plan_package(plan) {
         let _ = restore_data(&plan.data_backup, &plan.data_root);
@@ -682,6 +779,8 @@ fn apply_plan(plan: &ApplyPlan) -> Result<(), String> {
             return Err(error);
         }
     };
+    let rollback_marker = plan.data_root.join("updates/last-transaction.json");
+    write_json(&rollback_marker, &rollback)?;
     let executable = plan.install_root.join(&plan.launch_executable);
     let mut child = match Command::new(&executable)
         .arg(format!("--update-health-token={}", plan.health_token))
@@ -693,6 +792,10 @@ fn apply_plan(plan: &ApplyPlan) -> Result<(), String> {
         Err(error) => {
             rollback_files(plan, &rollback)?;
             restore_data(&plan.data_backup, &plan.data_root)?;
+            if rollback_marker.is_file() {
+                fs::remove_file(&rollback_marker)
+                    .map_err(|error| format!("clear automatic rollback marker: {error}"))?;
+            }
             status(plan, "rolling-back", "Новая версия не запустилась")?;
             restart_restored_application(plan)?;
             status(plan, "rolled-back", "Предыдущая версия восстановлена")?;
@@ -702,10 +805,6 @@ fn apply_plan(plan: &ApplyPlan) -> Result<(), String> {
     match wait_for_health(plan, &mut child) {
         Ok(true) => {
             status(plan, "confirmed", "Обновление запущено и подтверждено")?;
-            write_json(
-                &plan.data_root.join("updates/last-transaction.json"),
-                &rollback,
-            )?;
             Ok(())
         }
         health => {
@@ -714,6 +813,10 @@ fn apply_plan(plan: &ApplyPlan) -> Result<(), String> {
             status(plan, "rolling-back", "Новая версия не подтвердила запуск")?;
             rollback_files(plan, &rollback)?;
             restore_data(&plan.data_backup, &plan.data_root)?;
+            if rollback_marker.is_file() {
+                fs::remove_file(&rollback_marker)
+                    .map_err(|error| format!("clear automatic rollback marker: {error}"))?;
+            }
             restart_restored_application(plan)?;
             status(plan, "rolled-back", "Предыдущая версия восстановлена")?;
             match health {
@@ -725,6 +828,244 @@ fn apply_plan(plan: &ApplyPlan) -> Result<(), String> {
             }
         }
     }
+}
+
+fn apply_manual_rollback(plan: &ApplyPlan) -> Result<(), String> {
+    let marker = plan.data_root.join("updates/last-transaction.json");
+    let rollback: Rollback = read_json(&marker)?;
+    validate_manual_rollback(plan, &rollback)?;
+    status(plan, "rollback-waiting", "Ожидание завершения приложения")?;
+    wait_for_exit(plan.parent_pid, Duration::from_secs(45))?;
+
+    status(
+        plan,
+        "rollback-safeguarding",
+        "Сохранение текущего состояния перед ручным восстановлением",
+    )?;
+    let safety_root = plan
+        .transaction_root
+        .join(format!("manual-rollback-safety-{}", Uuid::new_v4()));
+    let safety = match restore_manual_snapshot(plan, &rollback, &safety_root) {
+        Ok(safety) => safety,
+        Err(error) => {
+            let _ = status(
+                plan,
+                "rollback-cancelled",
+                "Ручное восстановление отменено; текущее состояние сохранено",
+            );
+            let _ = restart_restored_application(plan);
+            return Err(error);
+        }
+    };
+    let safety_data = safety_root.join("data-backup");
+
+    status(
+        plan,
+        "rollback-starting",
+        "Проверка запуска восстановленной версии",
+    )?;
+    let executable = plan.install_root.join(&plan.launch_executable);
+    let mut child = match Command::new(&executable)
+        .arg(format!("--update-health-token={}", plan.health_token))
+        .env("LABELPILOT_UPDATE_HEALTH_FILE", &plan.health_marker)
+        .env("LABELPILOT_UPDATE_HEALTH_TOKEN", &plan.health_token)
+        .env("LABELPILOT_MANUAL_ROLLBACK_IN_PROGRESS", "1")
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(error) => {
+            restore_manual_safety(plan, &safety, &safety_data)?;
+            status(
+                plan,
+                "rollback-cancelled",
+                "Предыдущая версия не запустилась; текущее состояние возвращено",
+            )?;
+            restart_restored_application(plan)?;
+            return Err(format!("start manually restored application: {error}"));
+        }
+    };
+
+    match wait_for_health(plan, &mut child) {
+        Ok(true) => {
+            let receipt = plan.data_root.join("updates/last-manual-rollback.json");
+            write_json(
+                &receipt,
+                &serde_json::json!({
+                    "schema": SCHEMA,
+                    "restoredFromVersion": rollback.version,
+                    "restoredAt": unix_time(),
+                    "sourceTransaction": rollback.transaction_root,
+                    "safetyBackup": safety_root,
+                }),
+            )?;
+            if marker.is_file() {
+                fs::remove_file(&marker)
+                    .map_err(|error| format!("clear completed rollback marker: {error}"))?;
+            }
+            status(
+                plan,
+                "manually-rolled-back",
+                "Предыдущая версия и данные восстановлены",
+            )?;
+            Ok(())
+        }
+        health => {
+            let _ = child.kill();
+            let _ = child.wait();
+            restore_manual_safety(plan, &safety, &safety_data)?;
+            status(
+                plan,
+                "rollback-cancelled",
+                "Восстановленная версия не прошла проверку; текущее состояние возвращено",
+            )?;
+            restart_restored_application(plan)?;
+            match health {
+                Ok(false) => Err("manually restored application did not confirm startup".into()),
+                Err(error) => Err(format!("manual rollback health check failed: {error}")),
+                Ok(true) => unreachable!(),
+            }
+        }
+    }
+}
+
+fn validate_manual_rollback(plan: &ApplyPlan, rollback: &Rollback) -> Result<(), String> {
+    if plan.schema != SCHEMA || rollback.schema != SCHEMA {
+        return Err("unsupported rollback schema".into());
+    }
+    single_file_name(&plan.launch_executable)?;
+    if plan.health_token.len() < 16 || plan.health_token.len() > 128 {
+        return Err("invalid rollback health token".into());
+    }
+    let data = fs::canonicalize(&plan.data_root)
+        .map_err(|error| format!("canonicalize rollback data root: {error}"))?;
+    let transaction = fs::canonicalize(&plan.transaction_root)
+        .map_err(|error| format!("canonicalize rollback transaction: {error}"))?;
+    let rollback_transaction = fs::canonicalize(&rollback.transaction_root)
+        .map_err(|error| format!("canonicalize saved rollback transaction: {error}"))?;
+    let data_backup = fs::canonicalize(&plan.data_backup)
+        .map_err(|error| format!("canonicalize rollback data backup: {error}"))?;
+    let install = fs::canonicalize(&plan.install_root)
+        .map_err(|error| format!("canonicalize rollback install root: {error}"))?;
+    if transaction != rollback_transaction
+        || !transaction.starts_with(data.join("updates").join("transactions"))
+        || data_backup != transaction.join("data-backup")
+        || !install.is_dir()
+        || rollback.entries.is_empty()
+    {
+        return Err("rollback transaction boundaries are invalid".into());
+    }
+
+    verify_database_snapshot(&plan.data_backup)?;
+    let binary_backup = transaction.join("binary-backup");
+    let mut unique = BTreeSet::new();
+    for entry in &rollback.entries {
+        validate_relative_file(&entry.relative_path)?;
+        if !unique.insert(entry.relative_path.clone()) {
+            return Err("rollback contains duplicate file entries".into());
+        }
+        if entry.existed {
+            let source = binary_backup.join(&entry.relative_path);
+            if !source.is_file() {
+                return Err(format!(
+                    "rollback binary backup is incomplete: {}",
+                    entry.relative_path.display()
+                ));
+            }
+            if !entry.sha256.is_empty() && !sha256(&source)?.eq_ignore_ascii_case(&entry.sha256) {
+                return Err(format!(
+                    "rollback binary checksum mismatch: {}",
+                    entry.relative_path.display()
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_relative_file(path: &Path) -> Result<(), String> {
+    let mut count = 0usize;
+    for component in path.components() {
+        if !matches!(component, Component::Normal(_)) {
+            return Err(format!("unsafe rollback path: {}", path.display()));
+        }
+        count += 1;
+    }
+    if count == 0 || count > 8 {
+        return Err(format!("invalid rollback path: {}", path.display()));
+    }
+    Ok(())
+}
+
+fn restore_manual_snapshot(
+    plan: &ApplyPlan,
+    rollback: &Rollback,
+    safety_root: &Path,
+) -> Result<Rollback, String> {
+    fs::create_dir_all(safety_root)
+        .map_err(|error| format!("create manual rollback safety directory: {error}"))?;
+    let safety_data = safety_root.join("data-backup");
+    backup_data(&plan.data_root, &safety_data)?;
+    let safety = snapshot_current_binaries(plan, &rollback.entries, safety_root)?;
+    write_json(&safety_root.join("rollback.json"), &safety)?;
+
+    if let Err(error) = rollback_files(plan, rollback)
+        .and_then(|_| restore_data(&plan.data_backup, &plan.data_root))
+    {
+        let binary_recovery = rollback_files(plan, &safety);
+        let data_recovery = restore_data(&safety_data, &plan.data_root);
+        return match (binary_recovery, data_recovery) {
+            (Ok(()), Ok(())) => Err(format!(
+                "manual rollback failed and current state was restored: {error}"
+            )),
+            (binary, data) => Err(format!(
+                "manual rollback failed: {error}; safety restore: binary={binary:?}, data={data:?}"
+            )),
+        };
+    }
+    Ok(safety)
+}
+
+fn snapshot_current_binaries(
+    plan: &ApplyPlan,
+    entries: &[RollbackEntry],
+    safety_root: &Path,
+) -> Result<Rollback, String> {
+    let backup = safety_root.join("binary-backup");
+    fs::create_dir_all(&backup)
+        .map_err(|error| format!("create current binary backup: {error}"))?;
+    let mut snapshot = Rollback {
+        schema: SCHEMA,
+        version: env!("CARGO_PKG_VERSION").into(),
+        transaction_root: safety_root.to_path_buf(),
+        entries: Vec::with_capacity(entries.len()),
+    };
+    for entry in entries {
+        validate_relative_file(&entry.relative_path)?;
+        let target = plan.install_root.join(&entry.relative_path);
+        let existed = target.is_file();
+        if existed {
+            copy_file(&target, &backup.join(&entry.relative_path))?;
+        }
+        snapshot.entries.push(RollbackEntry {
+            relative_path: entry.relative_path.clone(),
+            existed,
+            sha256: if existed {
+                sha256(&backup.join(&entry.relative_path))?
+            } else {
+                String::new()
+            },
+        });
+    }
+    Ok(snapshot)
+}
+
+fn restore_manual_safety(
+    plan: &ApplyPlan,
+    safety: &Rollback,
+    safety_data: &Path,
+) -> Result<(), String> {
+    rollback_files(plan, safety)?;
+    restore_data(safety_data, &plan.data_root)
 }
 
 fn restart_restored_application(plan: &ApplyPlan) -> Result<(), String> {
@@ -812,6 +1153,11 @@ fn apply_archive(plan: &ApplyPlan) -> Result<Rollback, String> {
         rollback.entries.push(RollbackEntry {
             relative_path: relative.clone(),
             existed,
+            sha256: if existed {
+                sha256(&backup.join(relative))?
+            } else {
+                String::new()
+            },
         });
     }
     write_json(&plan.transaction_root.join("rollback.json"), &rollback)?;
@@ -867,7 +1213,14 @@ fn rollback_files(plan: &ApplyPlan, rollback: &Rollback) -> Result<(), String> {
     for entry in rollback.entries.iter().rev() {
         let target = plan.install_root.join(&entry.relative_path);
         if entry.existed {
-            replace_file(&backup.join(&entry.relative_path), &target)?;
+            let source = backup.join(&entry.relative_path);
+            if !entry.sha256.is_empty() && !sha256(&source)?.eq_ignore_ascii_case(&entry.sha256) {
+                return Err(format!(
+                    "rollback binary checksum mismatch: {}",
+                    entry.relative_path.display()
+                ));
+            }
+            replace_file(&source, &target)?;
         } else if target.is_file() {
             fs::remove_file(target).map_err(|error| error.to_string())?;
         }
@@ -916,32 +1269,86 @@ pub fn confirm_startup_health() -> Result<bool, String> {
     Ok(true)
 }
 
+fn verify_database_snapshot(backup: &Path) -> Result<(), String> {
+    let database = backup.join("client_data.db");
+    if !database.is_file() {
+        return Ok(());
+    }
+    let parent = backup
+        .parent()
+        .ok_or_else(|| "database backup has no parent".to_owned())?;
+    let validation = parent.join(format!("database-validation-{}", Uuid::new_v4()));
+    fs::create_dir_all(&validation)
+        .map_err(|error| format!("create database validation directory: {error}"))?;
+    let outcome = (|| -> Result<(), String> {
+        for name in ["client_data.db", "client_data.db-wal", "client_data.db-shm"] {
+            let source = backup.join(name);
+            if source.is_file() {
+                copy_file(&source, &validation.join(name))?;
+            }
+        }
+        let connection = Connection::open_with_flags(
+            validation.join("client_data.db"),
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .map_err(|error| format!("open database recovery snapshot: {error}"))?;
+        let check: String = connection
+            .query_row("PRAGMA quick_check(1)", [], |row| row.get(0))
+            .map_err(|error| format!("check database recovery snapshot: {error}"))?;
+        if check.eq_ignore_ascii_case("ok") {
+            Ok(())
+        } else {
+            Err(format!(
+                "database recovery snapshot failed integrity check: {check}"
+            ))
+        }
+    })();
+    let cleanup = fs::remove_dir_all(&validation)
+        .map_err(|error| format!("remove database validation directory: {error}"));
+    match (outcome, cleanup) {
+        (Err(error), _) => Err(error),
+        (Ok(()), Err(error)) => Err(error),
+        (Ok(()), Ok(())) => Ok(()),
+    }
+}
+
 fn backup_data(data: &Path, backup: &Path) -> Result<(), String> {
     fs::create_dir_all(backup).map_err(|error| error.to_string())?;
     for name in DATA_FILES {
         let source = data.join(name);
+        let destination = backup.join(name);
         if source.is_file() {
-            copy_file(&source, &backup.join(name))?;
+            copy_file(&source, &destination)?;
+        } else if destination.is_file() {
+            fs::remove_file(&destination).map_err(|error| error.to_string())?;
         }
     }
-    if data.join("outbox").is_dir() {
-        copy_directory(&data.join("outbox"), &backup.join("outbox"))?;
-    }
-    Ok(())
+    replace_directory_snapshot(&data.join("outbox"), &backup.join("outbox"))
 }
 
 fn restore_data(backup: &Path, data: &Path) -> Result<(), String> {
     if !backup.is_dir() {
-        return Ok(());
+        return Err("rollback data backup is missing".into());
     }
+    verify_database_snapshot(backup)?;
     for name in DATA_FILES {
         let source = backup.join(name);
+        let destination = data.join(name);
         if source.is_file() {
-            replace_file(&source, &data.join(name))?;
+            replace_file(&source, &destination)?;
+        } else if destination.is_file() {
+            fs::remove_file(&destination).map_err(|error| error.to_string())?;
         }
     }
-    if backup.join("outbox").is_dir() {
-        copy_directory(&backup.join("outbox"), &data.join("outbox"))?;
+    replace_directory_snapshot(&backup.join("outbox"), &data.join("outbox"))
+}
+
+fn replace_directory_snapshot(source: &Path, target: &Path) -> Result<(), String> {
+    if target.exists() {
+        fs::remove_dir_all(target).map_err(|error| error.to_string())?;
+    }
+    if source.is_dir() {
+        copy_directory(source, target)?;
     }
     Ok(())
 }
@@ -1094,6 +1501,32 @@ mod tests {
         }
     }
 
+    fn write_fixture_database(path: &Path, value: &str) {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        let connection = Connection::open(path).unwrap();
+        connection
+            .execute(
+                "CREATE TABLE IF NOT EXISTS recovery_fixture (value TEXT NOT NULL)",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute("DELETE FROM recovery_fixture", [])
+            .unwrap();
+        connection
+            .execute("INSERT INTO recovery_fixture(value) VALUES (?1)", [value])
+            .unwrap();
+    }
+
+    fn read_fixture_database(path: &Path) -> String {
+        Connection::open(path)
+            .unwrap()
+            .query_row("SELECT value FROM recovery_fixture", [], |row| row.get(0))
+            .unwrap()
+    }
+
     fn manifest(format: &str, hash: &str) -> NativeUpdateManifest {
         NativeUpdateManifest {
             schema: SCHEMA,
@@ -1235,12 +1668,121 @@ mod tests {
         let data = root.0.join("data");
         let backup = root.0.join("backup");
         fs::create_dir_all(data.join("outbox")).unwrap();
-        fs::write(data.join("client_data.db"), b"before").unwrap();
+        write_fixture_database(&data.join("client_data.db"), "before");
         fs::write(data.join("outbox/job.lpr"), b"queued").unwrap();
         backup_data(&data, &backup).unwrap();
-        fs::write(data.join("client_data.db"), b"after").unwrap();
+        write_fixture_database(&data.join("client_data.db"), "after");
+        fs::write(data.join("client_data.db-wal"), b"stale").unwrap();
+        fs::write(data.join("outbox/new.lpr"), b"new").unwrap();
         restore_data(&backup, &data).unwrap();
-        assert_eq!(fs::read(data.join("client_data.db")).unwrap(), b"before");
+        assert_eq!(
+            read_fixture_database(&data.join("client_data.db")),
+            "before"
+        );
         assert_eq!(fs::read(data.join("outbox/job.lpr")).unwrap(), b"queued");
+        assert!(!data.join("client_data.db-wal").exists());
+        assert!(!data.join("outbox/new.lpr").exists());
+    }
+
+    #[test]
+    fn manual_snapshot_restores_previous_state_and_keeps_emergency_copy() {
+        let root = Temp::new("manual-rollback");
+        let install = root.0.join("install");
+        let data = root.0.join("data");
+        let transaction = data.join("updates/transactions/2.1.0-fixture");
+        let data_backup = transaction.join("data-backup");
+        let binary_backup = transaction.join("binary-backup");
+        fs::create_dir_all(&install).unwrap();
+        fs::create_dir_all(data_backup.join("outbox")).unwrap();
+        fs::create_dir_all(&binary_backup).unwrap();
+        fs::write(install.join("labelpilot-slint.exe"), b"current-binary").unwrap();
+        fs::write(
+            binary_backup.join("labelpilot-slint.exe"),
+            b"previous-binary",
+        )
+        .unwrap();
+        write_fixture_database(&data.join("client_data.db"), "current-database");
+        fs::write(data.join("last-operator.json"), b"current-operator").unwrap();
+        fs::create_dir_all(data.join("outbox")).unwrap();
+        fs::write(data.join("outbox/current.lpr"), b"current-job").unwrap();
+        write_fixture_database(&data_backup.join("client_data.db"), "previous-database");
+        fs::write(data_backup.join("last-operator.json"), b"previous-operator").unwrap();
+        fs::write(data_backup.join("outbox/previous.lpr"), b"previous-job").unwrap();
+
+        let plan = ApplyPlan {
+            schema: SCHEMA,
+            package_version: "2.1.0".into(),
+            package_signature: "fixture".into(),
+            package_sha256: "a".repeat(64),
+            package_size: 1,
+            archive_path: root.0.join("unused.lpupdate"),
+            install_root: install.clone(),
+            launch_executable: "labelpilot-slint.exe".into(),
+            health_marker: transaction.join("manual-health.ok"),
+            health_token: Uuid::new_v4().to_string(),
+            status_path: transaction.join("manual-status.json"),
+            transaction_root: transaction.clone(),
+            data_root: data.clone(),
+            data_backup: data_backup.clone(),
+            parent_pid: 0,
+            startup_timeout_seconds: 5,
+        };
+        let rollback = Rollback {
+            schema: SCHEMA,
+            version: "2.1.0".into(),
+            transaction_root: transaction.clone(),
+            entries: vec![RollbackEntry {
+                relative_path: PathBuf::from("labelpilot-slint.exe"),
+                existed: true,
+                sha256: sha256(&binary_backup.join("labelpilot-slint.exe")).unwrap(),
+            }],
+        };
+        validate_manual_rollback(&plan, &rollback).unwrap();
+        let safety_root = transaction.join("manual-safety-test");
+        let safety = restore_manual_snapshot(&plan, &rollback, &safety_root).unwrap();
+
+        assert_eq!(
+            fs::read(install.join("labelpilot-slint.exe")).unwrap(),
+            b"previous-binary"
+        );
+        assert_eq!(
+            read_fixture_database(&data.join("client_data.db")),
+            "previous-database"
+        );
+        assert_eq!(
+            fs::read(data.join("last-operator.json")).unwrap(),
+            b"previous-operator"
+        );
+        assert!(!data.join("client_data.db-wal").exists());
+        assert!(data.join("outbox/previous.lpr").is_file());
+        assert!(!data.join("outbox/current.lpr").exists());
+
+        restore_manual_safety(&plan, &safety, &safety_root.join("data-backup")).unwrap();
+        assert_eq!(
+            fs::read(install.join("labelpilot-slint.exe")).unwrap(),
+            b"current-binary"
+        );
+        assert_eq!(
+            read_fixture_database(&data.join("client_data.db")),
+            "current-database"
+        );
+        assert!(data.join("outbox/current.lpr").is_file());
+        assert!(!data.join("outbox/previous.lpr").exists());
+    }
+
+    #[test]
+    fn corrupted_database_recovery_point_is_rejected_before_restore() {
+        let root = Temp::new("corrupt-database-backup");
+        let backup = root.0.join("backup");
+        fs::create_dir_all(&backup).unwrap();
+        fs::write(backup.join("client_data.db"), b"not-a-sqlite-database").unwrap();
+        assert!(verify_database_snapshot(&backup).is_err());
+    }
+
+    #[test]
+    fn manual_rollback_rejects_paths_outside_installation() {
+        assert!(validate_relative_file(Path::new("../outside.exe")).is_err());
+        assert!(validate_relative_file(Path::new("C:\\outside.exe")).is_err());
+        assert!(validate_relative_file(Path::new("bin/labelpilot.exe")).is_ok());
     }
 }

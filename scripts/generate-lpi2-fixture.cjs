@@ -1,14 +1,16 @@
-﻿'use strict';
+'use strict';
 
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
 const root = path.resolve(__dirname, '..');
-const seed = Buffer.from('000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f', 'hex');
+// Deterministic TEST-ONLY key for the cross-language golden fixture. Its public key is
+// intentionally different from the production key embedded in the application.
+const fixtureSeed = Buffer.from('000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f', 'hex');
 const pkcs8Prefix = Buffer.from('302e020100300506032b657004220420', 'hex');
 const privateKey = crypto.createPrivateKey({
-    key: Buffer.concat([pkcs8Prefix, seed]),
+    key: Buffer.concat([pkcs8Prefix, fixtureSeed]),
     format: 'der',
     type: 'pkcs8',
 });
@@ -16,10 +18,14 @@ const publicDer = crypto.createPublicKey(privateKey).export({ format: 'der', typ
 const publicKey = publicDer.subarray(publicDer.length - 32);
 const licensePayload = {
     customer: 'Fixture Factory',
-    license_id: 'fixture-license-2026',
-    key_version: 3,
     edition: 'test',
+    expires: '2099-12-31',
     features: ['sync', 'printing'],
+    issued: '2026-01-01',
+    key_version: 3,
+    license_id: 'fixture-license-2026',
+    machine_id: '0123456789abcdef0123456789abcdef',
+    max_stations: 1,
 };
 const payloadBytes = Buffer.from(JSON.stringify(licensePayload));
 const token = `${payloadBytes.toString('base64url')}.${crypto.sign(null, payloadBytes, privateKey).toString('base64url')}`;

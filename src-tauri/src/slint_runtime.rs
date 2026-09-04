@@ -10,6 +10,7 @@ use crate::{
     },
     native_update::{NativeUpdateManager, NativeUpdateSnapshot},
     persisted::PersistedState,
+    runtime_selector::append_runtime_log,
 };
 use serde_json::{json, Value};
 use slint::{ModelRc, VecModel};
@@ -18,17 +19,26 @@ use std::{
     env,
     path::PathBuf,
     rc::Rc,
-    sync::mpsc::{self, TryRecvError},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        mpsc::{self, TryRecvError},
+        Arc,
+    },
     thread,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 slint::include_modules!();
 
+const CATALOG_PAGE_SIZE: usize = 50;
+
 enum UiMessage {
     Core(CoreEvent),
     Hydrated(Result<NativeWeighingSnapshot, String>),
-    ProductsLoaded(Result<Vec<NativeUiProduct>, String>),
+    ProductSearchLoaded {
+        generation: u64,
+        outcome: Result<Vec<NativeUiProduct>, String>,
+    },
     ProductionFinished {
         action: String,
         outcome: Result<crate::native_print::NativePrintOutcome, String>,
@@ -51,6 +61,7 @@ enum UiMessage {
         snapshot: Result<NativePrinterQueueSnapshot, String>,
     },
     DiagnosticsLoaded(Result<Vec<NativePrinterDiagnostic>, String>),
+    PrinterHealthChecked(Result<NativePrinterDiagnostic, String>),
     PrinterSettingsLoaded(Result<NativePrinterSettingsSnapshot, String>),
     PrinterSettingsSaved(Result<NativePrinterSettingsSnapshot, String>),
     PrinterSettingsDetected {
@@ -63,6 +74,7 @@ enum UiMessage {
     ScaleSettingsTested(Result<crate::scale::ScaleProbeResult, String>),
     FixedWeightLoaded(Result<NativeFixedWeightSnapshot, String>),
     FixedWeightPrinted {
+        automatic: bool,
         outcome: Result<crate::native_print::NativePrintOutcome, String>,
         snapshot: Result<NativeFixedWeightSnapshot, String>,
     },
@@ -175,18 +187,63 @@ enum AutoPrintDecision {
     Fire,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AutoPrintTarget {
+    ProductionPack(i64),
+    FixedWeightPack(i64),
+}
+
+#[allow(clippy::too_many_arguments)]
+fn select_auto_print_target(
+    active_page: i32,
+    production_product_id: Option<i64>,
+    production_has_template: bool,
+    fixed_product_id: Option<i64>,
+    fixed_has_template: bool,
+    fixed_control_in_range: bool,
+    fixed_verify_mode: bool,
+    fixed_busy: bool,
+    printer_ready: bool,
+) -> Option<AutoPrintTarget> {
+    match active_page {
+        0 => production_product_id
+            .filter(|_| production_has_template)
+            .map(AutoPrintTarget::ProductionPack),
+        5 if fixed_has_template
+            && fixed_control_in_range
+            && fixed_verify_mode
+            && !fixed_busy
+            && printer_ready =>
+        {
+            fixed_product_id.map(AutoPrintTarget::FixedWeightPack)
+        }
+        _ => None,
+    }
+}
+
 #[derive(Debug, Default)]
 struct AutoPrintGate {
     enabled: bool,
     ready: bool,
     fired: bool,
     printing: bool,
+    /// Set when an auto attempt failed; blocks further fires until the
+    /// operator actually clears the scale, so a dead printer cannot loop
+    /// failed packs and error alerts while the product sits on the scale.
+    failed: bool,
+    below_since: Option<Instant>,
+    rearm_hold: Duration,
 }
+
+/// A single zero frame between stable readings (serial/TCP glitch or reconnect)
+/// must not rearm the gate; the scale has to read empty for this long.
+const REARM_HOLD: Duration = Duration::from_millis(1_500);
 
 impl AutoPrintGate {
     fn new(enabled: bool) -> Self {
         Self {
             enabled,
+            rearm_hold: REARM_HOLD,
             ..Self::default()
         }
     }
@@ -195,14 +252,24 @@ impl AutoPrintGate {
         self.ready = true;
     }
 
+    fn mark_failed(&mut self) {
+        self.failed = self.enabled;
+    }
+
     fn set_enabled(&mut self, enabled: bool, current_weight_kg: f64) {
         if self.enabled == enabled {
             return;
         }
         self.enabled = enabled;
         self.fired = enabled && current_weight_kg > 0.010;
-        if !enabled {
+        if enabled {
+            // A gate enabled after startup has no readiness timer. It is safe
+            // to arm now: an item already on the scale is latched as fired.
+            self.ready = true;
+        } else {
             self.printing = false;
+            self.failed = false;
+            self.below_since = None;
         }
     }
 
@@ -223,20 +290,28 @@ impl AutoPrintGate {
 
     fn observe(&mut self, weight_kg: f64, stable: bool, printable: bool) -> AutoPrintDecision {
         if weight_kg < 0.010 {
-            let was_fired = self.fired;
+            let now = Instant::now();
+            let below_since = *self.below_since.get_or_insert(now);
+            let was_blocked = self.fired || self.failed;
+            if now.duration_since(below_since) < self.rearm_hold {
+                return AutoPrintDecision::None;
+            }
             self.fired = false;
-            return if was_fired {
+            self.failed = false;
+            return if was_blocked {
                 AutoPrintDecision::Rearmed
             } else {
                 AutoPrintDecision::None
             };
         }
+        self.below_since = None;
         if weight_kg <= 0.010
             || !self.enabled
             || !self.ready
             || !stable
             || !printable
             || self.fired
+            || self.failed
             || self.printing
         {
             return AutoPrintDecision::None;
@@ -274,6 +349,146 @@ fn native_runtime_enabled() -> bool {
 
 fn live_weight_enabled() -> bool {
     has_argument("--live-weight") || env::var_os("LABELPILOT_SLINT_LIVE_WEIGHT").is_some()
+}
+
+fn normalized_ui_language(language: Option<&str>) -> &'static str {
+    match language {
+        Some("en") => "en",
+        Some("de") => "de",
+        Some("uk") => "uk",
+        _ => "ru",
+    }
+}
+
+const TOUCH_SEARCH_MAX_CHARS: usize = 96;
+const FIXED_COPIES_MAX: i64 = 5_000;
+const PRODUCT_SEARCH_DEBOUNCE: Duration = Duration::from_millis(70);
+
+fn edit_touch_text(current: &str, key: &str, uppercase: bool) -> String {
+    let mut result = current
+        .chars()
+        .take(TOUCH_SEARCH_MAX_CHARS)
+        .collect::<String>();
+    match key {
+        "__BACKSPACE__" => {
+            result.pop();
+            result
+        }
+        "__CLEAR__" => String::new(),
+        _ => {
+            let key = if uppercase {
+                key.to_uppercase()
+            } else {
+                key.to_lowercase()
+            };
+            let remaining = TOUCH_SEARCH_MAX_CHARS.saturating_sub(result.chars().count());
+            result.extend(key.chars().take(remaining));
+            result
+        }
+    }
+}
+
+fn edit_fixed_copies(current: &str, key: &str) -> String {
+    let mut digits = current
+        .chars()
+        .filter(char::is_ascii_digit)
+        .take(4)
+        .collect::<String>();
+    match key {
+        "__BACKSPACE__" => {
+            digits.pop();
+            digits
+        }
+        "__CLEAR__" => String::new(),
+        digit if digit.len() == 1 && digit.as_bytes()[0].is_ascii_digit() => {
+            if digits.is_empty() && digit == "0" {
+                return digits;
+            }
+            if digits.len() >= 4 {
+                return digits;
+            }
+            let mut candidate = digits.clone();
+            candidate.push_str(digit);
+            match candidate.parse::<i64>() {
+                Ok(value) if (1..=FIXED_COPIES_MAX).contains(&value) => candidate,
+                _ => digits,
+            }
+        }
+        _ => digits,
+    }
+}
+
+fn step_fixed_copies(current: &str, delta: i32) -> String {
+    let current = current
+        .trim()
+        .parse::<i64>()
+        .unwrap_or(1)
+        .clamp(1, FIXED_COPIES_MAX);
+    current
+        .saturating_add(i64::from(delta).clamp(-100, 100))
+        .clamp(1, FIXED_COPIES_MAX)
+        .to_string()
+}
+#[cfg(test)]
+mod touch_keyboard_tests {
+    use super::{
+        edit_fixed_copies, edit_touch_text, step_fixed_copies, FIXED_COPIES_MAX,
+        TOUCH_SEARCH_MAX_CHARS,
+    };
+
+    #[test]
+    fn edits_unicode_text_without_splitting_characters() {
+        assert_eq!(edit_touch_text("мрамор", "Ә", false), "мраморә");
+        assert_eq!(edit_touch_text("мраморә", "__BACKSPACE__", false), "мрамор");
+        assert_eq!(edit_touch_text("abc", "Q", false), "abcq");
+        assert_eq!(edit_touch_text("abc", "q", true), "abcQ");
+        assert_eq!(edit_touch_text("abc", "__CLEAR__", false), "");
+    }
+
+    #[test]
+    fn bounds_touch_search_input() {
+        let full = "я".repeat(TOUCH_SEARCH_MAX_CHARS);
+        assert_eq!(edit_touch_text(&full, "Ю", true), full);
+        assert_eq!(
+            edit_touch_text(
+                &"x".repeat(TOUCH_SEARCH_MAX_CHARS + 8),
+                "__BACKSPACE__",
+                false
+            )
+            .chars()
+            .count(),
+            TOUCH_SEARCH_MAX_CHARS - 1
+        );
+    }
+
+    #[test]
+    fn edits_touch_quantity_with_production_bounds() {
+        assert_eq!(edit_fixed_copies("", "0"), "");
+        assert_eq!(edit_fixed_copies("", "5"), "5");
+        assert_eq!(edit_fixed_copies("5", "0"), "50");
+        assert_eq!(edit_fixed_copies("500", "0"), "5000");
+        assert_eq!(edit_fixed_copies("5000", "1"), "5000");
+        assert_eq!(edit_fixed_copies("4999", "9"), "4999");
+        assert_eq!(edit_fixed_copies("50", "__BACKSPACE__"), "5");
+        assert_eq!(edit_fixed_copies("50", "__CLEAR__"), "");
+        assert_eq!(step_fixed_copies("1", -1), "1");
+        assert_eq!(step_fixed_copies("25", 1), "26");
+        assert_eq!(step_fixed_copies("5000", 1), FIXED_COPIES_MAX.to_string());
+    }
+}
+#[cfg(test)]
+mod ui_language_tests {
+    use super::normalized_ui_language;
+
+    #[test]
+    fn supports_all_four_client_locales_with_russian_fallback() {
+        assert_eq!(normalized_ui_language(Some("ru")), "ru");
+        assert_eq!(normalized_ui_language(Some("en")), "en");
+        assert_eq!(normalized_ui_language(Some("de")), "de");
+        assert_eq!(normalized_ui_language(Some("uk")), "uk");
+        assert_eq!(normalized_ui_language(Some("fr")), "ru");
+        assert_eq!(normalized_ui_language(None), "ru");
+    }
 }
 
 fn scale_config() -> Value {
@@ -411,6 +626,42 @@ fn apply_warmup_status(ui: &WeighingPrototype, outcome: Result<Value, String>) {
     }
 }
 
+fn pack_printer_ui_state(device: &NativePrinterDiagnostic) -> (bool, &'static str) {
+    if device.status == "unconfigured" {
+        return (false, "Принтер: не настроен");
+    }
+    if !device.reachable {
+        return (false, "Принтер: недоступен");
+    }
+    match device.status.as_str() {
+        "ready" | "reachable" => (true, "Принтер: готов"),
+        "printing" => (true, "Принтер: печатает"),
+        "paused" => (false, "Принтер: пауза"),
+        "head-open" => (false, "Принтер: открыта крышка"),
+        "paper-out" => (false, "Принтер: нет бумаги"),
+        "paper-jam" => (false, "Принтер: замятие"),
+        "offline" | "unreachable" => (false, "Принтер: недоступен"),
+        "error" => (false, "Принтер: ошибка"),
+        _ => (true, "Принтер: готов"),
+    }
+}
+
+fn apply_pack_printer_diagnostic(ui: &WeighingPrototype, device: &NativePrinterDiagnostic) {
+    let (ready, status) = pack_printer_ui_state(device);
+    ui.set_printer_ready(ready);
+    ui.set_printer_status(status.into());
+}
+
+fn printer_health_poll_due(tick: u8, configured: bool, ready: bool) -> bool {
+    if !configured {
+        tick % 6 == 0
+    } else if ready {
+        tick % 3 == 0
+    } else {
+        true
+    }
+}
+
 fn schedule_runtime_refresh(
     coordinator: &Rc<RefCell<RefreshCoordinator>>,
     runtime: &NativeUiRuntime,
@@ -446,6 +697,23 @@ fn schedule_runtime_refresh(
             printer_config,
             warmup,
         });
+    });
+}
+
+fn schedule_printer_health_refresh(
+    gate: &Rc<RefCell<RefreshGate>>,
+    runtime: &NativeUiRuntime,
+    message_tx: &mpsc::Sender<UiMessage>,
+) {
+    if !gate.borrow_mut().request() {
+        return;
+    }
+    let runtime = runtime.clone();
+    let message_tx = message_tx.clone();
+    thread::spawn(move || {
+        let _ = message_tx.send(UiMessage::PrinterHealthChecked(
+            runtime.probe_pack_printer(),
+        ));
     });
 }
 
@@ -560,6 +828,7 @@ fn schedule_catalog_refresh(
     message_tx: &mpsc::Sender<UiMessage>,
     selected_product_id: Option<i64>,
     search: Option<String>,
+    limit: usize,
 ) {
     if !gate.borrow_mut().request() {
         return;
@@ -568,7 +837,7 @@ fn schedule_catalog_refresh(
     let message_tx = message_tx.clone();
     thread::spawn(move || {
         let _ = message_tx.send(UiMessage::CatalogLoaded(
-            runtime.catalog_snapshot(selected_product_id, search.as_deref()),
+            runtime.catalog_snapshot_with_limit(selected_product_id, search.as_deref(), limit),
         ));
     });
 }
@@ -907,7 +1176,9 @@ fn printer_settings_input(
 ) -> Result<NativePrinterRoleSettingsInput, String> {
     Ok(NativePrinterRoleSettingsInput {
         role: ui.get_settings_selected_role().to_string(),
-        active: ui.get_settings_active(),
+        // A configured printer is always enabled. The operator controls only
+        // automatic printing after weight stabilization.
+        active: true,
         name: ui.get_settings_name().to_string(),
         connection: ui.get_settings_connection().to_string(),
         protocol: ui.get_settings_protocol().to_string(),
@@ -1027,6 +1298,131 @@ fn production_dates() -> (String, String) {
     )
 }
 
+fn parse_display_date(value: &str) -> Option<time::Date> {
+    let mut parts = value.trim().split('.');
+    let day = parts.next()?.parse::<u8>().ok()?;
+    let month = parts.next()?.parse::<u8>().ok()?;
+    let year = parts.next()?.parse::<i32>().ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    time::Date::from_calendar_date(year, time::Month::try_from(month).ok()?, day).ok()
+}
+
+fn first_day_of_month(date: time::Date) -> time::Date {
+    time::Date::from_calendar_date(date.year(), date.month(), 1)
+        .expect("the first day of an existing month is valid")
+}
+
+fn offset_calendar_month(date: time::Date, delta: i32) -> Option<time::Date> {
+    let month_index = date.year().checked_mul(12)? + i32::from(date.month() as u8) - 1 + delta;
+    let year = month_index.div_euclid(12);
+    let month = u8::try_from(month_index.rem_euclid(12) + 1).ok()?;
+    time::Date::from_calendar_date(year, time::Month::try_from(month).ok()?, 1).ok()
+}
+
+fn calendar_month_label(date: time::Date, language: &str) -> String {
+    const RU: [&str; 12] = [
+        "Январь",
+        "Февраль",
+        "Март",
+        "Апрель",
+        "Май",
+        "Июнь",
+        "Июль",
+        "Август",
+        "Сентябрь",
+        "Октябрь",
+        "Ноябрь",
+        "Декабрь",
+    ];
+    const EN: [&str; 12] = [
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+    ];
+    const DE: [&str; 12] = [
+        "Januar",
+        "Februar",
+        "März",
+        "April",
+        "Mai",
+        "Juni",
+        "Juli",
+        "August",
+        "September",
+        "Oktober",
+        "November",
+        "Dezember",
+    ];
+    const UK: [&str; 12] = [
+        "Січень",
+        "Лютий",
+        "Березень",
+        "Квітень",
+        "Травень",
+        "Червень",
+        "Липень",
+        "Серпень",
+        "Вересень",
+        "Жовтень",
+        "Листопад",
+        "Грудень",
+    ];
+    let names = match language {
+        "en" => &EN,
+        "de" => &DE,
+        "uk" => &UK,
+        _ => &RU,
+    };
+    format!(
+        "{} {}",
+        names[usize::from(date.month() as u8) - 1],
+        date.year()
+    )
+}
+
+fn calendar_day_rows(visible_month: time::Date, selected: time::Date) -> Vec<CalendarDayRow> {
+    let visible_month = first_day_of_month(visible_month);
+    let today = time::OffsetDateTime::now_utc().date();
+    let grid_start = visible_month
+        - time::Duration::days(i64::from(visible_month.weekday().number_days_from_monday()));
+    (0..42)
+        .map(|offset| {
+            let date = grid_start + time::Duration::days(offset);
+            CalendarDayRow {
+                label: date.day().to_string().into(),
+                date: format_date(date).into(),
+                in_current_month: date.month() == visible_month.month()
+                    && date.year() == visible_month.year(),
+                selected: date == selected,
+                today: date == today,
+            }
+        })
+        .collect()
+}
+
+fn apply_calendar(ui: &WeighingPrototype, visible_month: time::Date) {
+    let today = time::OffsetDateTime::now_utc().date();
+    let selected = parse_display_date(ui.get_labeling_date().as_str()).unwrap_or(today);
+    ui.set_calendar_month_label(
+        calendar_month_label(visible_month, ui.get_ui_language().as_str()).into(),
+    );
+    ui.set_calendar_days(ModelRc::new(VecModel::from(calendar_day_rows(
+        visible_month,
+        selected,
+    ))));
+}
+
 fn product_rows(products: &[NativeUiProduct]) -> Vec<ProductRow> {
     products
         .iter()
@@ -1133,14 +1529,10 @@ fn set_production_counters(ui: &WeighingPrototype, counters: &crate::native_ui::
         counters
             .current_box_number
             .clone()
-            .or_else(|| {
-                (counters.last_box_number != "0").then_some(counters.last_box_number.clone())
-            })
             .unwrap_or_else(|| "—".to_owned())
             .into(),
     );
 }
-
 fn selected_fixed_product(
     products: &[NativeUiProduct],
     selected_product_id: Option<i64>,
@@ -1484,13 +1876,14 @@ fn apply_catalog_snapshot(
     ui.set_catalog_total(clamp_i32(snapshot.total_matching.max(0)));
     ui.set_catalog_truncated(snapshot.truncated);
     ui.set_catalog_status(
-        if snapshot.truncated {
-            format!("Найдено {} · показаны первые 50", snapshot.total_matching)
-        } else {
-            format!("Загружено товаров: {}", snapshot.products.len())
-        }
+        format!(
+            "Загружено {} из {}",
+            snapshot.products.len(),
+            snapshot.total_matching
+        )
         .into(),
     );
+    ui.set_catalog_error(false);
     apply_catalog_product(ui, product);
     selected.set(selected_id);
     *store.borrow_mut() = snapshot.products;
@@ -1582,6 +1975,55 @@ fn format_update_bytes(bytes: u64) -> String {
     }
 }
 
+fn update_user_message(error: &str) -> String {
+    let normalized = error.to_ascii_lowercase();
+    if normalized.contains("request update manifest") {
+        if normalized.contains("timed out") || normalized.contains("timeout") {
+            return "Сервер обновлений не ответил вовремя. Проверьте подключение и повторите попытку."
+                .to_owned();
+        }
+        if normalized.contains("404") || normalized.contains("not found") {
+            return "На сервере пока нет опубликованного обновления.".to_owned();
+        }
+        return "Нет связи с сервером обновлений. Проверьте подключение к сети и повторите попытку."
+            .to_owned();
+    }
+    if normalized.contains("download update package") {
+        if normalized.contains("timed out") || normalized.contains("timeout") {
+            return "Загрузка обновления прервана по тайм-ауту. Повторите попытку.".to_owned();
+        }
+        return "Не удалось загрузить пакет обновления. Проверьте подключение и повторите попытку."
+            .to_owned();
+    }
+    redact_update_links(error)
+}
+
+fn redact_update_links(error: &str) -> String {
+    let mut result = String::with_capacity(error.len());
+    let mut remaining = error;
+    loop {
+        let lower = remaining.to_ascii_lowercase();
+        let position = [lower.find("https://"), lower.find("http://")]
+            .into_iter()
+            .flatten()
+            .min();
+        let Some(position) = position else {
+            result.push_str(remaining);
+            break;
+        };
+        result.push_str(&remaining[..position]);
+        result.push_str("[адрес сервера скрыт]");
+        remaining = &remaining[position..];
+        let end = remaining
+            .find(|character: char| {
+                character.is_whitespace() || matches!(character, ')' | ']' | '}' | '>' | ',' | ';')
+            })
+            .unwrap_or(remaining.len());
+        remaining = &remaining[end..];
+    }
+    result
+}
+
 fn apply_update_snapshot(ui: &WeighingPrototype, snapshot: &NativeUpdateSnapshot) {
     let available = !snapshot.available_version.is_empty()
         && matches!(
@@ -1617,7 +2059,14 @@ fn apply_update_snapshot(ui: &WeighingPrototype, snapshot: &NativeUpdateSnapshot
     ui.set_update_available(available);
     ui.set_update_ready(ready);
     ui.set_update_rollback_available(snapshot.rollback_available);
-    ui.set_update_error(snapshot.last_error.clone().into());
+    ui.set_update_error(
+        if snapshot.last_error.is_empty() {
+            String::new()
+        } else {
+            update_user_message(&snapshot.last_error)
+        }
+        .into(),
+    );
     ui.set_update_busy(matches!(
         snapshot.state.as_str(),
         "checking" | "downloading" | "installing"
@@ -1759,6 +2208,7 @@ fn apply_snapshot(
     product_store: &Rc<RefCell<Vec<NativeUiProduct>>>,
     operator_store: &Rc<RefCell<Vec<NativeUiOperator>>>,
     selected_product: &Rc<Cell<Option<i64>>>,
+    selected_product_details: &Rc<RefCell<Option<NativeUiProduct>>>,
 ) {
     let selected_id = snapshot.selected_product_id;
     let selected = selected_id.and_then(|id| {
@@ -1777,19 +2227,10 @@ fn apply_snapshot(
             .unwrap_or_else(|| "--".to_owned())
             .into(),
     );
-    ui.set_server_online(snapshot.station.provisioned);
-    ui.set_server_status(
-        if snapshot.station.provisioned {
-            if snapshot.station.last_sync_time.is_some() {
-                "Синхронизировано"
-            } else {
-                "Локальные данные"
-            }
-        } else {
-            "Не настроен"
-        }
-        .into(),
-    );
+    if !snapshot.station.provisioned {
+        ui.set_server_online(false);
+        ui.set_server_status("Не настроен".into());
+    }
     let has_operator = snapshot.current_operator.is_some();
     ui.set_operator_name(
         snapshot
@@ -1813,11 +2254,14 @@ fn apply_snapshot(
         ui.set_operator_login_visible(true);
     }
     let (today, yesterday) = production_dates();
-    ui.set_labeling_date(today.clone().into());
+    if parse_display_date(ui.get_labeling_date().as_str()).is_none() {
+        ui.set_labeling_date(today.clone().into());
+    }
     ui.set_today_date(today.into());
     ui.set_previous_date(yesterday.into());
 
     selected_product.set(selected_id);
+    *selected_product_details.borrow_mut() = selected.clone();
     apply_selected_product(ui, selected.as_ref());
     apply_products(ui, snapshot.products, product_store);
 
@@ -1932,6 +2376,8 @@ struct AdaptiveLayout {
     compact: bool,
     narrow: bool,
     short: bool,
+    wide: bool,
+    tall: bool,
 }
 
 fn adaptive_layout(physical_width: u32, physical_height: u32, scale_factor: f32) -> AdaptiveLayout {
@@ -1942,6 +2388,8 @@ fn adaptive_layout(physical_width: u32, physical_height: u32, scale_factor: f32)
         compact: logical_width < 1280.0,
         narrow: logical_width < 1120.0,
         short: logical_height < 720.0,
+        wide: logical_width >= 1600.0,
+        tall: logical_height >= 900.0,
     }
 }
 
@@ -1951,6 +2399,8 @@ fn sync_adaptive_layout(ui: &WeighingPrototype) {
     ui.set_compact(layout.compact);
     ui.set_narrow(layout.narrow);
     ui.set_short(layout.short);
+    ui.set_wide(layout.wide);
+    ui.set_tall(layout.tall);
 }
 
 pub fn run() -> Result<(), String> {
@@ -1977,8 +2427,10 @@ pub fn run() -> Result<(), String> {
     sync_adaptive_layout(&ui);
     let (message_tx, message_rx) = mpsc::channel::<UiMessage>();
     let product_store = Rc::new(RefCell::new(Vec::<NativeUiProduct>::new()));
+    let product_search_generation = Arc::new(AtomicU64::new(0));
     let operator_store = Rc::new(RefCell::new(Vec::<NativeUiOperator>::new()));
     let selected_product = Rc::new(Cell::new(None::<i64>));
+    let selected_product_details = Rc::new(RefCell::new(None::<NativeUiProduct>));
     let fixed_product_store = Rc::new(RefCell::new(Vec::<NativeUiProduct>::new()));
     let selected_fixed_product = Rc::new(Cell::new(None::<i64>));
     let production_job_store = Rc::new(RefCell::new(Vec::<NativeProductionPrintJob>::new()));
@@ -1990,7 +2442,7 @@ pub fn run() -> Result<(), String> {
 
     let active_printer_config;
     let native_updater;
-    let auto_print_enabled;
+    let mut auto_print_enabled;
     let runtime = if native_runtime_enabled() {
         let persisted = PersistedState::resolve()
             .map_err(|error| format!("resolve LabelPilot data directory: {error}"))?;
@@ -2006,6 +2458,14 @@ pub fn run() -> Result<(), String> {
             persisted.load_scale_config()
         };
         let persisted_printer_config = persisted.load_printer_config();
+        ui.set_ui_language(
+            normalized_ui_language(
+                persisted_printer_config
+                    .get("language")
+                    .and_then(Value::as_str),
+            )
+            .into(),
+        );
         auto_print_enabled = persisted_printer_config
             .get("autoPrintOnStable")
             .and_then(Value::as_bool)
@@ -2019,54 +2479,89 @@ pub fn run() -> Result<(), String> {
                 .unwrap_or_else(printer_config)
         };
         let callback_tx = message_tx.clone();
-        let runtime = NativeUiRuntime::with_persisted(persisted, move |event| {
+        let initialized = NativeUiRuntime::with_persisted(persisted, move |event| {
             let _ = callback_tx.send(UiMessage::Core(event));
         })
-        .map_err(|error| format!("initialize native Slint runtime: {error}"))?;
-        let snapshot = runtime
-            .weighing_snapshot(None, None)
-            .map_err(|error| format!("hydrate native weighing state: {error}"))?;
-        apply_snapshot(
-            &ui,
-            snapshot,
-            &product_store,
-            &operator_store,
-            &selected_product,
-        );
-        if env::var_os("LABELPILOT_SLINT_SKIP_OPERATOR_PROMPT").is_some() {
-            ui.set_operator_bypass_active(true);
-            ui.set_operator_login_visible(false);
-        }
+        .and_then(|runtime| {
+            runtime
+                .weighing_snapshot(None, None)
+                .map(|snapshot| (runtime, snapshot))
+        });
+        match initialized {
+            Ok((runtime, snapshot)) => {
+                apply_snapshot(
+                    &ui,
+                    snapshot,
+                    &product_store,
+                    &operator_store,
+                    &selected_product,
+                    &selected_product_details,
+                );
+                if env::var_os("LABELPILOT_SLINT_SKIP_OPERATOR_PROMPT").is_some() {
+                    ui.set_operator_bypass_active(true);
+                    ui.set_operator_login_visible(false);
+                }
 
-        let configured = printer_is_configured(&active_printer_config);
-        ui.set_printer_ready(configured);
-        ui.set_printer_status(
-            if configured {
-                "Принтер: настроен"
-            } else {
-                "Принтер: не настроен"
+                let configured = printer_is_configured(&active_printer_config);
+                ui.set_printer_ready(configured);
+                ui.set_printer_status(
+                    if configured {
+                        "Принтер: настроен"
+                    } else {
+                        "Принтер: не настроен"
+                    }
+                    .into(),
+                );
+                ui.set_scale_status("Весы: подключение".into());
+                if let Err(error) = runtime.connect_scale(scale_config) {
+                    ui.set_scale_status("Весы: ошибка".into());
+                    let _ = message_tx.send(UiMessage::Core(CoreEvent::Log {
+                        subsystem: "scale".to_owned(),
+                        level: "ERROR".to_owned(),
+                        message: error,
+                    }));
+                }
+                if let Err(error) = runtime.start_station_ingress() {
+                    ui.set_server_online(false);
+                    ui.set_server_status("Синхронизация: резервный режим".into());
+                    let _ = message_tx.send(UiMessage::Core(CoreEvent::Log {
+                        subsystem: "ingress".to_owned(),
+                        level: "INFO".to_owned(),
+                        message: error,
+                    }));
+                }
+                Some(runtime)
             }
-            .into(),
-        );
-        ui.set_scale_status("Весы: подключение".into());
-        if let Err(error) = runtime.connect_scale(scale_config) {
-            ui.set_scale_status("Весы: ошибка".into());
-            let _ = message_tx.send(UiMessage::Core(CoreEvent::Log {
-                subsystem: "scale".to_owned(),
-                level: "ERROR".to_owned(),
-                message: error,
-            }));
+            Err(error)
+                if native_updater
+                    .as_ref()
+                    .is_some_and(|updater| updater.snapshot().rollback_available) =>
+            {
+                append_runtime_log(&format!(
+                    "native runtime initialization failed; entering recovery mode: {error}"
+                ));
+                auto_print_enabled = false;
+                ui.set_active_page(9);
+                ui.set_operator_login_visible(false);
+                ui.set_server_online(false);
+                ui.set_scale_online(false);
+                ui.set_printer_ready(false);
+                ui.set_update_state("recovery".into());
+                ui.set_update_status("Режим восстановления".into());
+                ui.set_update_error(
+                    "Рабочие данные не открылись. Восстановите предыдущую версию и базу из сохранённой точки."
+                        .into(),
+                );
+                show_alert(
+                    &ui,
+                    "Рабочая база данных не открылась. Доступно ручное восстановление предыдущей версии.",
+                );
+                None
+            }
+            Err(error) => {
+                return Err(format!("initialize native Slint runtime: {error}"));
+            }
         }
-        if let Err(error) = runtime.start_station_ingress() {
-            ui.set_server_online(false);
-            ui.set_server_status("Синхронизация: резервный режим".into());
-            let _ = message_tx.send(UiMessage::Core(CoreEvent::Log {
-                subsystem: "ingress".to_owned(),
-                level: "INFO".to_owned(),
-                message: error,
-            }));
-        }
-        Some(runtime)
     } else {
         active_printer_config = Value::Null;
         auto_print_enabled = false;
@@ -2074,6 +2569,34 @@ pub fn run() -> Result<(), String> {
         None
     };
 
+    if env::var_os("LABELPILOT_SLINT_SHOW_PRODUCT_PICKER").is_some() {
+        ui.set_operator_login_visible(false);
+        ui.set_product_modal_visible(true);
+        ui.set_touch_keyboard_visible(true);
+        ui.set_touch_keyboard_layout(0);
+        ui.set_touch_keyboard_uppercase(false);
+    }
+    if env::var_os("LABELPILOT_SLINT_PRODUCT_SEARCH_TEST").is_some() {
+        ui.set_operator_login_visible(false);
+        ui.set_product_modal_visible(true);
+        ui.set_touch_keyboard_visible(false);
+        ui.set_products(ModelRc::new(VecModel::from(
+            (1..=12)
+                .map(|index| ProductRow {
+                    id: index,
+                    name: format!("Тестовый товар {index:02} / Product {index:02}").into(),
+                    article: format!("ART-{index:04}").into(),
+                    details: format!("арт. ART-{index:04} · срок 45 дн.").into(),
+                })
+                .collect::<Vec<_>>(),
+        )));
+    }
+    if env::var_os("LABELPILOT_SLINT_SIDEBAR_INFO_TEST").is_some() {
+        ui.set_operator_login_visible(false);
+        ui.set_station_number("02".into());
+        ui.set_operator_name("Fedorovskyi".into());
+        ui.set_server_online(env::var_os("LABELPILOT_SLINT_SIDEBAR_INFO_OFFLINE").is_none());
+    }
     let auto_print_gate = Rc::new(RefCell::new(AutoPrintGate::new(auto_print_enabled)));
     ui.set_auto_print_enabled(auto_print_enabled);
     ui.set_auto_print_status(
@@ -2084,6 +2607,15 @@ pub fn run() -> Result<(), String> {
         }
         .into(),
     );
+    if env::var_os("LABELPILOT_SLINT_STATUS_HEADER_TEST").is_some() {
+        ui.set_auto_print_enabled(true);
+        ui.set_auto_print_status("СНИМИТЕ ТОВАР".into());
+        ui.set_scale_online(false);
+        ui.set_scale_status("Весы: отключены".into());
+        ui.set_printer_ready(false);
+        ui.set_printer_status("Принтер: не готов".into());
+    }
+
     if auto_print_enabled {
         let weak = ui.as_weak();
         let gate = Rc::clone(&auto_print_gate);
@@ -2101,12 +2633,23 @@ pub fn run() -> Result<(), String> {
     let refresh_coordinator = Rc::new(RefCell::new(RefreshCoordinator::default()));
     let queue_refresh_gate = Rc::new(RefCell::new(RefreshGate::default()));
     let diagnostics_refresh_gate = Rc::new(RefCell::new(RefreshGate::default()));
+    let printer_health_refresh_gate = Rc::new(RefCell::new(RefreshGate::default()));
+    let pack_printer_configured = Rc::new(Cell::new(printer_is_configured(&active_printer_config)));
     let printer_settings_refresh_gate = Rc::new(RefCell::new(RefreshGate::default()));
     let scale_settings_refresh_gate = Rc::new(RefCell::new(RefreshGate::default()));
     let fixed_weight_refresh_gate = Rc::new(RefCell::new(RefreshGate::default()));
     let production_jobs_refresh_gate = Rc::new(RefCell::new(RefreshGate::default()));
     let catalog_refresh_gate = Rc::new(RefCell::new(RefreshGate::default()));
     let server_license_refresh_gate = Rc::new(RefCell::new(RefreshGate::default()));
+    if env::var_os("LABELPILOT_SLINT_SIDEBAR_INFO_TEST").is_none() {
+        if let Some(server_runtime) = runtime.as_ref() {
+            schedule_server_license_refresh(
+                &server_license_refresh_gate,
+                server_runtime,
+                &message_tx,
+            );
+        }
+    }
     if let Some(warmup_runtime) = runtime.clone() {
         if printer_is_configured(&active_printer_config) {
             ui.set_printer_ready(false);
@@ -2120,27 +2663,109 @@ pub fn run() -> Result<(), String> {
         });
     }
 
+    let today = time::OffsetDateTime::now_utc().date();
+    if parse_display_date(ui.get_labeling_date().as_str()).is_none() {
+        ui.set_labeling_date(format_date(today).into());
+    }
+    let (today_label, previous_label) = production_dates();
+    ui.set_today_date(today_label.into());
+    ui.set_previous_date(previous_label.into());
+    let calendar_month = Rc::new(Cell::new(first_day_of_month(today)));
+    apply_calendar(&ui, calendar_month.get());
+    if env::var_os("LABELPILOT_SLINT_SESSION_CARD_TEST").is_some() {
+        ui.set_active_page(0);
+        ui.set_batch_number("240831".into());
+        ui.set_labeling_date("31.08.2026".into());
+        ui.set_pack_number("02000604".into());
+        ui.set_box_number("0277".into());
+        ui.set_units_in_box(6);
+        ui.set_box_limit(10);
+        ui.set_boxes_on_pallet(33);
+        ui.set_total_units(604);
+        apply_calendar(&ui, calendar_month.get());
+    }
+    if env::var_os("LABELPILOT_SLINT_CALENDAR_TEST").is_some() {
+        ui.set_date_modal_visible(true);
+    }
+
+    ui.on_open_date_calendar({
+        let weak = ui.as_weak();
+        let calendar_month = Rc::clone(&calendar_month);
+        move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let selected = parse_display_date(ui.get_labeling_date().as_str())
+                .unwrap_or_else(|| time::OffsetDateTime::now_utc().date());
+            let visible_month = first_day_of_month(selected);
+            calendar_month.set(visible_month);
+            apply_calendar(&ui, visible_month);
+        }
+    });
+    ui.on_shift_calendar_month({
+        let weak = ui.as_weak();
+        let calendar_month = Rc::clone(&calendar_month);
+        move |delta| {
+            let Some(ui) = weak.upgrade() else { return };
+            let Some(visible_month) =
+                offset_calendar_month(calendar_month.get(), delta.clamp(-1, 1))
+            else {
+                return;
+            };
+            calendar_month.set(visible_month);
+            apply_calendar(&ui, visible_month);
+        }
+    });
+
+    ui.on_edit_touch_text(|current, key, uppercase| {
+        edit_touch_text(current.as_str(), key.as_str(), uppercase).into()
+    });
+    ui.on_edit_fixed_copies(|current, key| {
+        edit_fixed_copies(current.as_str(), key.as_str()).into()
+    });
+    ui.on_step_fixed_copies(|current, delta| step_fixed_copies(current.as_str(), delta).into());
     ui.on_search_products({
+        let weak = ui.as_weak();
         let runtime = runtime.clone();
         let message_tx = message_tx.clone();
+        let product_search_generation = Arc::clone(&product_search_generation);
         move |query| {
             let Some(runtime) = runtime.clone() else {
                 return;
             };
-            let query = query.to_string();
+            let generation = product_search_generation.fetch_add(1, Ordering::AcqRel) + 1;
+            if let Some(ui) = weak.upgrade() {
+                ui.set_product_search_busy(true);
+            }
+            let query = query
+                .trim()
+                .chars()
+                .take(TOUCH_SEARCH_MAX_CHARS)
+                .collect::<String>();
             let message_tx = message_tx.clone();
+            let product_search_generation = Arc::clone(&product_search_generation);
             thread::spawn(move || {
-                let search = (!query.trim().is_empty()).then_some(query.trim());
-                let _ = message_tx.send(UiMessage::ProductsLoaded(runtime.products(search)));
+                thread::sleep(PRODUCT_SEARCH_DEBOUNCE);
+                if product_search_generation.load(Ordering::Acquire) != generation {
+                    return;
+                }
+                let search = (!query.is_empty()).then_some(query.as_str());
+                let outcome = runtime.products(search);
+                if product_search_generation.load(Ordering::Acquire) == generation {
+                    let _ = message_tx.send(UiMessage::ProductSearchLoaded {
+                        generation,
+                        outcome,
+                    });
+                }
             });
         }
     });
 
     ui.on_select_product({
+        let weak = ui.as_weak();
         let runtime = runtime.clone();
         let product_store = Rc::clone(&product_store);
         let message_tx = message_tx.clone();
         move |index| {
+            let Some(ui) = weak.upgrade() else { return };
             let Some(runtime) = runtime.clone() else {
                 return;
             };
@@ -2150,10 +2775,12 @@ pub fn run() -> Result<(), String> {
             else {
                 return;
             };
+            let search = ui.get_product_search().trim().to_owned();
             let message_tx = message_tx.clone();
             thread::spawn(move || {
+                let search = (!search.is_empty()).then_some(search.as_str());
                 let _ = message_tx.send(UiMessage::Hydrated(
-                    runtime.weighing_snapshot(Some(product_id), None),
+                    runtime.weighing_snapshot(Some(product_id), search),
                 ));
             });
         }
@@ -2366,7 +2993,14 @@ pub fn run() -> Result<(), String> {
         move || {
             let Some(ui) = weak.upgrade() else { return };
             if let Some(runtime) = runtime.clone() {
-                let Some(product_id) = selected_product.get() else {
+                let from_production_job =
+                    ui.get_active_page() == 6 && ui.get_selected_production_product_id() > 0;
+                let selected_id = if from_production_job {
+                    Some(i64::from(ui.get_selected_production_product_id()))
+                } else {
+                    selected_product.get()
+                };
+                let Some(product_id) = selected_id else {
                     show_alert(&ui, "Выберите товар перед закрытием короба");
                     return;
                 };
@@ -2374,8 +3008,33 @@ pub fn run() -> Result<(), String> {
                     show_alert(&ui, "В текущем коробе ещё нет упаковок");
                     return;
                 }
-                let batch_number = ui.get_batch_number().to_string();
-                let production_date = ui.get_labeling_date().to_string();
+                let job_batch = ui.get_selected_production_job_batch().to_string();
+                let batch_number =
+                    if from_production_job && !job_batch.trim().is_empty() && job_batch != "—" {
+                        job_batch
+                    } else {
+                        ui.get_batch_number().to_string()
+                    };
+                let job_date = ui.get_selected_production_job_date().to_string();
+                let production_date = if from_production_job
+                    && !job_date.trim().is_empty()
+                    && job_date != "—"
+                    && job_date != "текущая дата"
+                {
+                    job_date
+                } else {
+                    ui.get_labeling_date().to_string()
+                };
+                if from_production_job {
+                    ui.set_production_jobs_busy(true);
+                    ui.set_production_jobs_status(
+                        format!(
+                            "Закрытие короба по заданию #{}…",
+                            ui.get_selected_production_job_id()
+                        )
+                        .into(),
+                    );
+                }
                 show_toast(&ui, "Закрытие короба и формирование этикетки…");
                 let message_tx = message_tx.clone();
                 thread::spawn(move || {
@@ -2409,7 +3068,17 @@ pub fn run() -> Result<(), String> {
         move || {
             let Some(ui) = weak.upgrade() else { return };
             if let Some(runtime) = runtime.clone() {
-                let selected_id = selected_product.get();
+                let from_production_job =
+                    ui.get_active_page() == 6 && ui.get_selected_production_product_id() > 0;
+                let selected_id = if from_production_job {
+                    Some(i64::from(ui.get_selected_production_product_id()))
+                } else {
+                    selected_product.get()
+                };
+                if from_production_job {
+                    ui.set_production_jobs_busy(true);
+                    ui.set_production_jobs_status("Формирование паллетного листа…".into());
+                }
                 show_toast(&ui, "Формирование паллетного листа…");
                 let message_tx = message_tx.clone();
                 thread::spawn(move || {
@@ -2795,6 +3464,7 @@ pub fn run() -> Result<(), String> {
         let weak = ui.as_weak();
         let runtime = runtime.clone();
         let selected = Rc::clone(&selected_fixed_product);
+        let auto_print_gate = Rc::clone(&auto_print_gate);
         let message_tx = message_tx.clone();
         move || {
             let Some(ui) = weak.upgrade() else { return };
@@ -2818,6 +3488,10 @@ pub fn run() -> Result<(), String> {
                 .replace(',', ".")
                 .parse::<f64>()
                 .unwrap_or(0.0);
+            if !auto_print_gate.borrow_mut().begin_manual_print(measured) {
+                show_toast(&ui, "Печать уже выполняется");
+                return;
+            }
             let batch = ui.get_batch_number().to_string();
             let date = ui.get_labeling_date().to_string();
             ui.set_fixed_busy(true);
@@ -2826,7 +3500,11 @@ pub fn run() -> Result<(), String> {
             thread::spawn(move || {
                 let outcome = runtime.print_fixed_weight_pack(product_id, measured, batch, date);
                 let snapshot = runtime.fixed_weight_snapshot(Some(product_id), None);
-                let _ = message_tx.send(UiMessage::FixedWeightPrinted { outcome, snapshot });
+                let _ = message_tx.send(UiMessage::FixedWeightPrinted {
+                    automatic: false,
+                    outcome,
+                    snapshot,
+                });
             });
         }
     });
@@ -2919,13 +3597,45 @@ pub fn run() -> Result<(), String> {
             let Some(runtime) = runtime.as_ref() else {
                 return;
             };
-            let Some(job_id) = usize::try_from(index)
+            let Some(job) = usize::try_from(index)
                 .ok()
-                .and_then(|index| store.borrow().get(index).map(|job| job.job_id))
+                .and_then(|index| store.borrow().get(index).cloned())
             else {
                 return;
             };
+            let job_id = job.job_id;
+            let format_quantity = |value: f64| {
+                if job.quantity_unit == "kg" {
+                    format!("{value:.3} кг")
+                } else {
+                    format!("{:.0} шт.", value.floor())
+                }
+            };
             selected.set(Some(job_id));
+            ui.set_selected_production_job_id(clamp_i32(job.job_id));
+            ui.set_selected_production_product_id(clamp_i32(job.product_id));
+            ui.set_selected_production_job_product(job.product_name.clone().into());
+            ui.set_selected_production_job_article(job.product_article.clone().into());
+            ui.set_selected_production_job_quantity(format_quantity(job.quantity).into());
+            ui.set_selected_production_job_printed(format_quantity(job.printed_quantity).into());
+            ui.set_selected_production_job_remaining(
+                format_quantity((job.quantity - job.printed_quantity).max(0.0)).into(),
+            );
+            ui.set_selected_production_job_progress(if job.quantity > 0.0 {
+                (job.printed_quantity / job.quantity).clamp(0.0, 1.0) as f32
+            } else {
+                0.0
+            });
+            ui.set_selected_production_job_unit(job.quantity_unit.clone().into());
+            ui.set_selected_production_job_batch(job.batch_number.clone().into());
+            ui.set_selected_production_job_date(
+                job.marking_date
+                    .clone()
+                    .unwrap_or_else(|| "текущая дата".to_owned())
+                    .into(),
+            );
+            ui.set_selected_production_job_status(job.status.clone().into());
+            ui.set_production_job_weight_valid(false);
             ui.set_production_jobs_busy(true);
             schedule_production_jobs_refresh(
                 &gate,
@@ -2986,6 +3696,18 @@ pub fn run() -> Result<(), String> {
                 return;
             };
             let Some(job_id) = selected.get() else { return };
+            if ui.get_units_in_box() > 0 {
+                let box_number = ui.get_box_number();
+                show_alert(
+                    &ui,
+                    &format!(
+                        "Перед завершением задания закройте короб {} · {} упаковок",
+                        box_number,
+                        ui.get_units_in_box()
+                    ),
+                );
+                return;
+            }
             ui.set_production_jobs_busy(true);
             let message_tx = message_tx.clone();
             thread::spawn(move || {
@@ -3011,6 +3733,7 @@ pub fn run() -> Result<(), String> {
                 return;
             };
             let Some(job_id) = selected.get() else { return };
+
             ui.set_production_jobs_busy(true);
             let message_tx = message_tx.clone();
             thread::spawn(move || {
@@ -3038,10 +3761,12 @@ pub fn run() -> Result<(), String> {
             let Some(ui) = weak.upgrade() else { return };
             let Some(runtime) = runtime.as_ref() else {
                 ui.set_catalog_busy(false);
+                ui.set_catalog_error(true);
                 ui.set_catalog_status("Нативный runtime не подключен".into());
                 return;
             };
             ui.set_catalog_busy(true);
+            ui.set_catalog_error(false);
             ui.set_catalog_status("Чтение локального каталога…".into());
             let query = ui.get_catalog_search().to_string();
             schedule_catalog_refresh(
@@ -3050,6 +3775,7 @@ pub fn run() -> Result<(), String> {
                 &message_tx,
                 selected.get(),
                 (!query.trim().is_empty()).then_some(query.trim().to_owned()),
+                ui.get_catalog_limit().max(CATALOG_PAGE_SIZE as i32) as usize,
             );
         }
     });
@@ -3063,12 +3789,15 @@ pub fn run() -> Result<(), String> {
         move |query| {
             let Some(ui) = weak.upgrade() else { return };
             let Some(runtime) = runtime.as_ref() else {
+                ui.set_catalog_error(true);
                 ui.set_catalog_status("Нативный runtime не подключен".into());
                 return;
             };
             let query = query.to_string();
             ui.set_catalog_search(query.clone().into());
+            ui.set_catalog_limit(CATALOG_PAGE_SIZE as i32);
             ui.set_catalog_busy(true);
+            ui.set_catalog_error(false);
             ui.set_catalog_status("Поиск в локальном каталоге…".into());
             schedule_catalog_refresh(
                 &gate,
@@ -3076,6 +3805,42 @@ pub fn run() -> Result<(), String> {
                 &message_tx,
                 selected.get(),
                 (!query.trim().is_empty()).then_some(query.trim().to_owned()),
+                CATALOG_PAGE_SIZE,
+            );
+        }
+    });
+
+    ui.on_load_more_catalog({
+        let weak = ui.as_weak();
+        let runtime = runtime.clone();
+        let gate = Rc::clone(&catalog_refresh_gate);
+        let selected = Rc::clone(&selected_catalog_product);
+        let message_tx = message_tx.clone();
+        move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let Some(runtime) = runtime.as_ref() else {
+                ui.set_catalog_error(true);
+                ui.set_catalog_status("Нативный runtime не подключен".into());
+                return;
+            };
+            let current = ui.get_catalog_limit().max(CATALOG_PAGE_SIZE as i32) as usize;
+            let total = ui.get_catalog_total().max(0) as usize;
+            if current >= total {
+                return;
+            }
+            let next = current.saturating_add(CATALOG_PAGE_SIZE).min(total);
+            ui.set_catalog_limit(next.min(i32::MAX as usize) as i32);
+            ui.set_catalog_busy(true);
+            ui.set_catalog_error(false);
+            ui.set_catalog_status("Загрузка следующей части каталога…".into());
+            let query = ui.get_catalog_search().to_string();
+            schedule_catalog_refresh(
+                &gate,
+                runtime,
+                &message_tx,
+                selected.get(),
+                (!query.trim().is_empty()).then_some(query.trim().to_owned()),
+                next,
             );
         }
     });
@@ -3232,6 +3997,30 @@ pub fn run() -> Result<(), String> {
                 let result = updater.queue_install();
                 let _ = tx.send(UiMessage::UpdateFinished {
                     action: "install".to_owned(),
+                    result,
+                });
+            });
+        }
+    });
+
+    ui.on_rollback_update({
+        let weak = ui.as_weak();
+        let updater = native_updater.clone();
+        let message_tx = message_tx.clone();
+        move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let Some(updater) = updater.clone() else {
+                ui.set_update_error("Нативный updater не подключен".into());
+                return;
+            };
+            ui.set_update_busy(true);
+            ui.set_update_error("".into());
+            ui.set_update_status("Подготовка ручного восстановления…".into());
+            let tx = message_tx.clone();
+            thread::spawn(move || {
+                let result = updater.queue_manual_rollback();
+                let _ = tx.send(UiMessage::UpdateFinished {
+                    action: "rollback".to_owned(),
                     result,
                 });
             });
@@ -3399,11 +4188,14 @@ pub fn run() -> Result<(), String> {
         let product_store = Rc::clone(&product_store);
         let operator_store = Rc::clone(&operator_store);
         let selected_product = Rc::clone(&selected_product);
+        let event_selected_product_details = Rc::clone(&selected_product_details);
         let auto_print_gate = Rc::clone(&auto_print_gate);
         let event_revision = Rc::clone(&runtime_revision);
         let event_refresh_coordinator = Rc::clone(&refresh_coordinator);
         let event_queue_gate = Rc::clone(&queue_refresh_gate);
         let event_diagnostics_gate = Rc::clone(&diagnostics_refresh_gate);
+        let event_printer_health_gate = Rc::clone(&printer_health_refresh_gate);
+        let event_pack_printer_configured = Rc::clone(&pack_printer_configured);
         let event_settings_gate = Rc::clone(&printer_settings_refresh_gate);
         let event_scale_settings_gate = Rc::clone(&scale_settings_refresh_gate);
         let event_fixed_weight_gate = Rc::clone(&fixed_weight_refresh_gate);
@@ -3419,6 +4211,7 @@ pub fn run() -> Result<(), String> {
         let event_catalog_product_store = Rc::clone(&catalog_product_store);
         let event_selected_catalog_product = Rc::clone(&selected_catalog_product);
         let event_message_tx = message_tx.clone();
+        let event_product_search_generation = Arc::clone(&product_search_generation);
         event_timer.start(
             slint::TimerMode::Repeated,
             Duration::from_millis(30),
@@ -3533,6 +4326,7 @@ pub fn run() -> Result<(), String> {
                                     event_selected_catalog_product.get(),
                                     (!query.trim().is_empty())
                                         .then_some(query.trim().to_owned()),
+                                    ui.get_catalog_limit().max(CATALOG_PAGE_SIZE as i32) as usize,
                                 );
                             }
                             if queue_changed && ui.get_active_page() == 1 {
@@ -3582,13 +4376,48 @@ pub fn run() -> Result<(), String> {
                                 }
                             }
                             if let Some((weight, stable)) = reading {
-                                let selected_id = selected_product.get();
-                                let printable = ui.get_active_page() == 0
-                                    && selected_id.is_some_and(|id| {
-                                    product_store.borrow().iter().any(|product| {
-                                        product.id == id && product.pack_label_id.is_some()
-                                    })
-                                });
+                                let active_page = ui.get_active_page();
+                                let production_selected_id = selected_product.get();
+                                let production_has_template =
+                                    production_selected_id.is_some_and(|id| {
+                                        event_selected_product_details
+                                            .borrow()
+                                            .as_ref()
+                                            .is_some_and(|product| {
+                                                product.id == id
+                                                    && product.pack_label_id.is_some()
+                                            })
+                                    });
+                                let fixed_selected_id = event_selected_fixed_product.get();
+                                let fixed_product = {
+                                    let products = event_fixed_product_store.borrow();
+                                    self::selected_fixed_product(
+                                        products.as_slice(),
+                                        fixed_selected_id,
+                                    )
+                                };
+                                let fixed_has_template = fixed_product
+                                    .as_ref()
+                                    .is_some_and(|product| product.pack_label_id.is_some());
+                                let fixed_control_in_range = weight_is_valid_for_product(
+                                    fixed_product.as_ref(),
+                                    weight,
+                                    stable,
+                                    true,
+                                );
+                                let fixed_verify_mode = ui.get_fixed_mode().as_str() == "verify";
+                                let target = select_auto_print_target(
+                                    active_page,
+                                    production_selected_id,
+                                    production_has_template,
+                                    fixed_selected_id,
+                                    fixed_has_template,
+                                    fixed_control_in_range,
+                                    fixed_verify_mode,
+                                    ui.get_fixed_busy(),
+                                    ui.get_printer_ready(),
+                                );
+                                let printable = target.is_some();
                                 let decision = auto_print_gate
                                     .borrow_mut()
                                     .observe(weight, stable, printable);
@@ -3599,39 +4428,92 @@ pub fn run() -> Result<(), String> {
                                             && ui.get_auto_print_enabled()
                                             && !printable
                                         {
-                                            ui.set_auto_print_status(
-                                                "АВТОПЕЧАТЬ: НЕТ ШАБЛОНА".into(),
-                                            );
+                                            let status = match active_page {
+                                                0 if production_selected_id.is_none() => {
+                                                    "АВТОПЕЧАТЬ: ВЫБЕРИТЕ ТОВАР"
+                                                }
+                                                0 if !production_has_template => {
+                                                    "АВТОПЕЧАТЬ: НЕТ ШАБЛОНА"
+                                                }
+                                                5 if !fixed_verify_mode => {
+                                                    "АВТОПЕЧАТЬ: РЕЖИМ ПАРТИИ"
+                                                }
+                                                5 if fixed_selected_id.is_none() => {
+                                                    "АВТОПЕЧАТЬ: ВЫБЕРИТЕ ТОВАР"
+                                                }
+                                                5 if !fixed_has_template => {
+                                                    "АВТОПЕЧАТЬ: НЕТ ШАБЛОНА"
+                                                }
+                                                5 if !fixed_control_in_range => {
+                                                    "АВТОПЕЧАТЬ: ВНЕ ДОПУСКА"
+                                                }
+                                                5 if !ui.get_printer_ready() => {
+                                                    "АВТОПЕЧАТЬ: ПРИНТЕР НЕДОСТУПЕН"
+                                                }
+                                                _ => "АВТОПЕЧАТЬ: ОЖИДАНИЕ",
+                                            };
+                                            ui.set_auto_print_status(status.into());
                                         }
                                     }
                                     AutoPrintDecision::Rearmed => {
                                         ui.set_auto_print_status("АВТОПЕЧАТЬ: ГОТОВА".into())
                                     }
                                     AutoPrintDecision::Fire => {
-                                        let Some(product_id) = selected_id else {
-                                            continue;
-                                        };
                                         ui.set_auto_print_status("АВТОПЕЧАТЬ…".into());
                                         let batch_number = ui.get_batch_number().to_string();
                                         let production_date = ui.get_labeling_date().to_string();
                                         let runtime = event_runtime.clone();
                                         let message_tx = event_message_tx.clone();
-                                        thread::spawn(move || {
-                                            let outcome = runtime.print_production_pack(
-                                                product_id,
-                                                weight,
-                                                batch_number,
-                                                production_date,
-                                            );
-                                            let snapshot =
-                                                runtime.weighing_snapshot(Some(product_id), None);
-                                            let _ =
-                                                message_tx.send(UiMessage::ProductionFinished {
-                                                    action: "auto-pack".to_owned(),
-                                                    outcome,
-                                                    snapshot: Box::new(snapshot),
+                                        match target {
+                                            Some(AutoPrintTarget::ProductionPack(product_id)) => {
+                                                thread::spawn(move || {
+                                                    let outcome = runtime.print_production_pack(
+                                                        product_id,
+                                                        weight,
+                                                        batch_number,
+                                                        production_date,
+                                                    );
+                                                    let snapshot = runtime
+                                                        .weighing_snapshot(Some(product_id), None);
+                                                    let _ = message_tx.send(
+                                                        UiMessage::ProductionFinished {
+                                                            action: "auto-pack".to_owned(),
+                                                            outcome,
+                                                            snapshot: Box::new(snapshot),
+                                                        },
+                                                    );
                                                 });
-                                        });
+                                            }
+                                            Some(AutoPrintTarget::FixedWeightPack(product_id)) => {
+                                                ui.set_fixed_busy(true);
+                                                ui.set_fixed_status(
+                                                    "Вес стабилен и в допуске · автопечать…"
+                                                        .into(),
+                                                );
+                                                thread::spawn(move || {
+                                                    let outcome = runtime.print_fixed_weight_pack(
+                                                        product_id,
+                                                        weight,
+                                                        batch_number,
+                                                        production_date,
+                                                    );
+                                                    let snapshot = runtime.fixed_weight_snapshot(
+                                                        Some(product_id),
+                                                        None,
+                                                    );
+                                                    let _ = message_tx.send(
+                                                        UiMessage::FixedWeightPrinted {
+                                                            automatic: true,
+                                                            outcome,
+                                                            snapshot,
+                                                        },
+                                                    );
+                                                });
+                                            }
+                                            None => {
+                                                auto_print_gate.borrow_mut().finish_print();
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -3640,6 +4522,32 @@ pub fn run() -> Result<(), String> {
                     Ok(UiMessage::WarmupFinished(outcome)) => {
                         let Some(ui) = weak.upgrade() else { return };
                         apply_warmup_status(&ui, outcome);
+                    }
+                    Ok(UiMessage::PrinterHealthChecked(outcome)) => {
+                        let pending = event_printer_health_gate.borrow_mut().complete();
+                        let Some(ui) = weak.upgrade() else { return };
+                        match outcome {
+                            Ok(device) => {
+                                event_pack_printer_configured
+                                    .set(device.status != "unconfigured");
+                                apply_pack_printer_diagnostic(&ui, &device);
+                            }
+                            Err(_) if event_pack_printer_configured.get() => {
+                                ui.set_printer_ready(false);
+                                ui.set_printer_status("Принтер: недоступен".into());
+                            }
+                            Err(_) => {
+                                ui.set_printer_ready(false);
+                                ui.set_printer_status("Принтер: не настроен".into());
+                            }
+                        }
+                        if pending {
+                            schedule_printer_health_refresh(
+                                &event_printer_health_gate,
+                                &event_runtime,
+                                &event_message_tx,
+                            );
+                        }
                     }
                     Ok(UiMessage::RuntimeRefreshed {
                         revision,
@@ -3662,6 +4570,7 @@ pub fn run() -> Result<(), String> {
                                     &product_store,
                                     &operator_store,
                                     &selected_product,
+                                    &selected_product_details,
                                 ),
                                 Some(Err(error)) => {
                                     show_alert(&ui, &format!("Обновление данных: {error}"))
@@ -3672,6 +4581,9 @@ pub fn run() -> Result<(), String> {
                         if printer_changed {
                             match printer_config {
                                 Some(Ok(config)) => {
+                                    event_pack_printer_configured.set(printer_is_configured(
+                                        &effective_pack_printer(&config),
+                                    ));
                                     apply_refreshed_printer_config(&ui, &auto_print_gate, &config)
                                 }
                                 Some(Err(error)) => {
@@ -3706,12 +4618,21 @@ pub fn run() -> Result<(), String> {
                                 &product_store,
                                 &operator_store,
                                 &selected_product,
+                                &selected_product_details,
                             ),
                             Err(error) => show_alert(&ui, &format!("Данные: {error}")),
                         }
                     }
-                    Ok(UiMessage::ProductsLoaded(outcome)) => {
+                    Ok(UiMessage::ProductSearchLoaded {
+                        generation,
+                        outcome,
+                    }) => {
+                        if event_product_search_generation.load(Ordering::Acquire) != generation {
+                            continue;
+                        }
                         let Some(ui) = weak.upgrade() else { return };
+                        ui.set_product_search_busy(false);
+                        ui.set_product_scroll_y(0.0);
                         match outcome {
                             Ok(products) => apply_products(&ui, products, &product_store),
                             Err(error) => show_alert(&ui, &format!("Поиск товаров: {error}")),
@@ -3723,6 +4644,9 @@ pub fn run() -> Result<(), String> {
                         snapshot,
                     }) => {
                         let Some(ui) = weak.upgrade() else { return };
+                        if matches!(action.as_str(), "box" | "pallet") {
+                            ui.set_production_jobs_busy(false);
+                        }
                         if matches!(action.as_str(), "pack" | "auto-pack") {
                             auto_print_gate.borrow_mut().finish_print();
                         }
@@ -3733,6 +4657,7 @@ pub fn run() -> Result<(), String> {
                                 &product_store,
                                 &operator_store,
                                 &selected_product,
+                                &selected_product_details,
                             );
                         }
                         match outcome {
@@ -3771,6 +4696,9 @@ pub fn run() -> Result<(), String> {
                                 {
                                     ui.set_auto_print_status("ОШИБКА ПЕЧАТИ".into());
                                 }
+                                // Latch the gate: without a working printer the same
+                                // product must not loop failed packs and alerts.
+                                auto_print_gate.borrow_mut().mark_failed();
                                 ui.set_printer_ready(false);
                                 ui.set_printer_status("Принтер: ошибка".into());
                                 show_alert(&ui, &format!("Операция {action}: {error}"));
@@ -3786,6 +4714,7 @@ pub fn run() -> Result<(), String> {
                                 &product_store,
                                 &operator_store,
                                 &selected_product,
+                                &selected_product_details,
                             );
                         }
                         match outcome {
@@ -3846,7 +4775,16 @@ pub fn run() -> Result<(), String> {
                         let Some(ui) = weak.upgrade() else { return };
                         ui.set_diagnostics_busy(false);
                         match outcome {
-                            Ok(devices) => apply_diagnostics(&ui, devices),
+                            Ok(devices) => {
+                                if let Some(pack) =
+                                    devices.iter().find(|device| device.role == "pack")
+                                {
+                                    event_pack_printer_configured
+                                        .set(pack.status != "unconfigured");
+                                    apply_pack_printer_diagnostic(&ui, pack);
+                                }
+                                apply_diagnostics(&ui, devices);
+                            }
                             Err(error) => {
                                 ui.set_diagnostics_status("Ошибка проверки оборудования".into());
                                 show_alert(&ui, &format!("Диагностика: {error}"));
@@ -4063,8 +5001,13 @@ pub fn run() -> Result<(), String> {
                             );
                         }
                     }
-                    Ok(UiMessage::FixedWeightPrinted { outcome, snapshot }) => {
+                    Ok(UiMessage::FixedWeightPrinted {
+                        automatic,
+                        outcome,
+                        snapshot,
+                    }) => {
                         let Some(ui) = weak.upgrade() else { return };
+                        auto_print_gate.borrow_mut().finish_print();
                         ui.set_fixed_busy(false);
                         if let Ok(snapshot) = snapshot {
                             apply_fixed_weight_snapshot(
@@ -4081,19 +5024,51 @@ pub fn run() -> Result<(), String> {
                                 );
                                 ui.set_fixed_status(
                                     if result.auto_closed_box {
-                                        "Этикетка напечатана · короб автоматически закрыт"
+                                        if automatic {
+                                            "Автопечать выполнена · короб автоматически закрыт"
+                                        } else {
+                                            "Этикетка напечатана · короб автоматически закрыт"
+                                        }
+                                    } else if automatic {
+                                        "Вес стабилен · этикетка автоматически напечатана"
                                     } else {
                                         "Контроль пройден · этикетка принята принтером"
                                     }
                                     .into(),
                                 );
                                 ui.set_printer_ready(true);
-                                show_toast(&ui, "Этикетка фиксированного веса напечатана");
+                                ui.set_printer_status("Принтер: готов".into());
+                                if ui.get_auto_print_enabled() {
+                                    ui.set_auto_print_status("СНИМИТЕ ТОВАР".into());
+                                }
+                                show_toast(
+                                    &ui,
+                                    if automatic {
+                                        "Автопечать фиксированного веса выполнена"
+                                    } else {
+                                        "Этикетка фиксированного веса напечатана"
+                                    },
+                                );
                             }
                             Err(error) => {
+                                auto_print_gate.borrow_mut().mark_failed();
                                 ui.set_fixed_status("Ошибка печати".into());
+                                if ui.get_auto_print_enabled() {
+                                    ui.set_auto_print_status("ОШИБКА ПЕЧАТИ".into());
+                                }
                                 ui.set_printer_ready(false);
-                                show_alert(&ui, &format!("Фиксированный вес: {error}"));
+                                ui.set_printer_status("Принтер: ошибка".into());
+                                show_alert(
+                                    &ui,
+                                    &format!(
+                                        "{}: {error}",
+                                        if automatic {
+                                            "Автопечать фиксированного веса"
+                                        } else {
+                                            "Фиксированный вес"
+                                        }
+                                    ),
+                                );
                             }
                         }
                     }
@@ -4235,14 +5210,18 @@ pub fn run() -> Result<(), String> {
                             );
                         }
                         match outcome {
-                            Ok(_) => show_toast(
-                                &ui,
-                                if action == "delete" {
-                                    "Задание удалено"
-                                } else {
-                                    "Задание завершено"
-                                },
-                            ),
+                            Ok(_) => {
+                                ui.set_production_job_marking_visible(false);
+                                ui.set_production_jobs_scroll_y(0.0);
+                                show_toast(
+                                    &ui,
+                                    if action == "delete" {
+                                        "Задание удалено"
+                                    } else {
+                                        "Задание завершено"
+                                    },
+                                );
+                            }
                             Err(error) => {
                                 show_alert(&ui, &format!("Операция с заданием: {error}"))
                             }
@@ -4261,6 +5240,7 @@ pub fn run() -> Result<(), String> {
                                 &event_selected_catalog_product,
                             ),
                             Err(error) => {
+                                ui.set_catalog_error(true);
                                 ui.set_catalog_status("Ошибка чтения каталога".into());
                                 show_alert(&ui, &format!("Каталог товаров: {error}"));
                             }
@@ -4274,6 +5254,7 @@ pub fn run() -> Result<(), String> {
                                 &event_message_tx,
                                 event_selected_catalog_product.get(),
                                 (!query.trim().is_empty()).then_some(query.trim().to_owned()),
+                                ui.get_catalog_limit().max(CATALOG_PAGE_SIZE as i32) as usize,
                             );
                         }
                     }
@@ -4338,14 +5319,34 @@ pub fn run() -> Result<(), String> {
                                             },
                                         );
                                     }
+                                    "rollback" => {
+                                        show_toast(&ui, "Перезапуск для восстановления…");
+                                        slint::Timer::single_shot(
+                                            Duration::from_millis(700),
+                                            || {
+                                                let _ = slint::quit_event_loop();
+                                            },
+                                        );
+                                    }
                                     _ => {}
                                 }
                             }
                             Err(error) => {
+                                append_runtime_log(&format!(
+                                    "native updater action={action} failed: {error}"
+                                ));
+                                let message = update_user_message(&error);
                                 ui.set_update_state("error".into());
-                                ui.set_update_status("Операция обновления завершилась с ошибкой".into());
-                                ui.set_update_error(error.clone().into());
-                                show_alert(&ui, &format!("Обновление: {error}"));
+                                let operation = if action == "rollback" {
+                                    "Восстановление"
+                                } else {
+                                    "Обновление"
+                                };
+                                ui.set_update_status(
+                                    format!("{operation} завершилось с ошибкой").into(),
+                                );
+                                ui.set_update_error(message.clone().into());
+                                show_alert(&ui, &format!("{operation}: {message}"));
                             }
                         }
                     }
@@ -4363,6 +5364,7 @@ pub fn run() -> Result<(), String> {
                                 &product_store,
                                 &operator_store,
                                 &selected_product,
+                                &selected_product_details,
                             );
                         }
                         match outcome {
@@ -4472,6 +5474,27 @@ pub fn run() -> Result<(), String> {
         );
     }
 
+    let printer_health_timer = slint::Timer::default();
+    if let Some(printer_health_runtime) = runtime.clone() {
+        let weak = ui.as_weak();
+        let gate = Rc::clone(&printer_health_refresh_gate);
+        let configured = Rc::clone(&pack_printer_configured);
+        let health_tx = message_tx.clone();
+        let tick = Cell::new(0_u8);
+        printer_health_timer.start(
+            slint::TimerMode::Repeated,
+            Duration::from_secs(5),
+            move || {
+                let Some(ui) = weak.upgrade() else { return };
+                let next = tick.get().wrapping_add(1) % 6;
+                tick.set(next);
+                if printer_health_poll_due(next, configured.get(), ui.get_printer_ready()) {
+                    schedule_printer_health_refresh(&gate, &printer_health_runtime, &health_tx);
+                }
+            },
+        );
+    }
+
     let license_live_timer = slint::Timer::default();
     if let Some(license_runtime) = runtime.clone() {
         let weak = ui.as_weak();
@@ -4484,8 +5507,8 @@ pub fn run() -> Result<(), String> {
                 let Some(ui) = weak.upgrade() else { return };
                 if ui.get_active_page() == 8 {
                     ui.set_license_busy(true);
-                    schedule_server_license_refresh(&gate, &license_runtime, &license_tx);
                 }
+                schedule_server_license_refresh(&gate, &license_runtime, &license_tx);
             },
         );
     }
@@ -4582,8 +5605,10 @@ pub fn run() -> Result<(), String> {
         });
     }
 
-    crate::native_update::confirm_startup_health()
-        .map_err(|error| format!("confirm updater startup health: {error}"))?;
+    if runtime.is_some() {
+        crate::native_update::confirm_startup_health()
+            .map_err(|error| format!("confirm updater startup health: {error}"))?;
+    }
     let result = ui.run();
     if let Some(runtime) = &runtime {
         runtime.shutdown();
@@ -4606,11 +5631,68 @@ fn chrono_like_time() -> String {
 }
 
 #[cfg(test)]
+mod calendar_tests {
+    use super::{
+        calendar_day_rows, calendar_month_label, first_day_of_month, format_date,
+        offset_calendar_month, parse_display_date,
+    };
+
+    fn date(year: i32, month: time::Month, day: u8) -> time::Date {
+        time::Date::from_calendar_date(year, month, day).unwrap()
+    }
+
+    #[test]
+    fn parses_and_formats_display_dates_strictly() {
+        let parsed = parse_display_date("31.08.2026").unwrap();
+        assert_eq!(format_date(parsed), "31.08.2026");
+        assert!(parse_display_date("2026-08-31").is_none());
+        assert!(parse_display_date("31.02.2026").is_none());
+    }
+
+    #[test]
+    fn calendar_is_a_monday_first_six_week_grid() {
+        let selected = date(2026, time::Month::August, 31);
+        let rows = calendar_day_rows(first_day_of_month(selected), selected);
+        assert_eq!(rows.len(), 42);
+        assert_eq!(rows[0].date.as_str(), "27.07.2026");
+        assert_eq!(rows[41].date.as_str(), "06.09.2026");
+        assert_eq!(rows.iter().filter(|row| row.selected).count(), 1);
+        assert!(
+            rows.iter()
+                .find(|row| row.selected)
+                .unwrap()
+                .in_current_month
+        );
+    }
+
+    #[test]
+    fn month_navigation_wraps_year_boundaries() {
+        let january = date(2026, time::Month::January, 1);
+        let december = offset_calendar_month(january, -1).unwrap();
+        assert_eq!(format_date(december), "01.12.2025");
+        assert_eq!(
+            format_date(offset_calendar_month(december, 1).unwrap()),
+            "01.01.2026"
+        );
+    }
+
+    #[test]
+    fn month_caption_supports_all_four_ui_locales() {
+        let august = date(2026, time::Month::August, 1);
+        assert_eq!(calendar_month_label(august, "ru"), "Август 2026");
+        assert_eq!(calendar_month_label(august, "en"), "August 2026");
+        assert_eq!(calendar_month_label(august, "de"), "August 2026");
+        assert_eq!(calendar_month_label(august, "uk"), "Серпень 2026");
+    }
+}
+
+#[cfg(test)]
 mod refresh_coordinator_tests {
     use super::{
         diagnostic_status_label, direct_refresh_flags, format_optional_setting,
-        parse_optional_settings_f64, parse_settings_i32, queue_action_label, queue_state_label,
-        CoreEvent, RefreshCoordinator, RefreshGate,
+        pack_printer_ui_state, parse_optional_settings_f64, parse_settings_i32,
+        printer_health_poll_due, queue_action_label, queue_state_label, CoreEvent,
+        NativePrinterDiagnostic, RefreshCoordinator, RefreshGate,
     };
     use serde_json::{json, Value};
 
@@ -4644,6 +5726,60 @@ mod refresh_coordinator_tests {
         assert_eq!(diagnostic_status_label("paper-out"), "НЕТ БУМАГИ");
         assert_eq!(diagnostic_status_label("unconfigured"), "НЕ НАСТРОЕН");
     }
+    fn printer_diagnostic(reachable: bool, status: &str) -> NativePrinterDiagnostic {
+        NativePrinterDiagnostic {
+            role: "pack".to_owned(),
+            role_label: "Этикетка упаковки".to_owned(),
+            printer_id: "pack".to_owned(),
+            printer_name: "Test printer".to_owned(),
+            endpoint: "127.0.0.1:9100".to_owned(),
+            protocol: "zpl".to_owned(),
+            connection: "tcp".to_owned(),
+            reachable,
+            status: status.to_owned(),
+            details: String::new(),
+            queried_at_ms: 1,
+        }
+    }
+
+    #[test]
+    fn maps_pack_printer_health_across_all_transport_states() {
+        assert_eq!(
+            pack_printer_ui_state(&printer_diagnostic(true, "ready")),
+            (true, "Принтер: готов")
+        );
+        assert_eq!(
+            pack_printer_ui_state(&printer_diagnostic(true, "reachable")),
+            (true, "Принтер: готов")
+        );
+        assert_eq!(
+            pack_printer_ui_state(&printer_diagnostic(true, "printing")),
+            (true, "Принтер: печатает")
+        );
+        assert_eq!(
+            pack_printer_ui_state(&printer_diagnostic(true, "paper-out")),
+            (false, "Принтер: нет бумаги")
+        );
+        assert_eq!(
+            pack_printer_ui_state(&printer_diagnostic(false, "unreachable")),
+            (false, "Принтер: недоступен")
+        );
+        assert_eq!(
+            pack_printer_ui_state(&printer_diagnostic(false, "unconfigured")),
+            (false, "Принтер: не настроен")
+        );
+    }
+
+    #[test]
+    fn polls_unavailable_printer_fast_and_throttles_healthy_or_unconfigured() {
+        assert!(printer_health_poll_due(1, true, false));
+        assert!(printer_health_poll_due(2, true, false));
+        assert!(!printer_health_poll_due(1, true, true));
+        assert!(printer_health_poll_due(3, true, true));
+        assert!(!printer_health_poll_due(5, false, false));
+        assert!(printer_health_poll_due(0, false, false));
+    }
+
     #[test]
     fn parses_touch_form_numbers_and_keeps_optional_values_compact() {
         assert_eq!(parse_settings_i32("DPI", " 300 ").unwrap(), 300);
@@ -4695,41 +5831,84 @@ mod adaptive_layout_tests {
     use super::{adaptive_layout, AdaptiveLayout};
 
     #[test]
-    fn classifies_reference_touch_resolutions_in_logical_pixels() {
-        assert_eq!(
-            adaptive_layout(1366, 768, 1.0),
-            AdaptiveLayout {
-                compact: false,
-                narrow: false,
-                short: false,
-            }
-        );
-        assert_eq!(
-            adaptive_layout(1920, 1020, 1.25),
-            AdaptiveLayout {
-                compact: false,
-                narrow: false,
-                short: false,
-            }
-        );
-        assert_eq!(
-            adaptive_layout(1280, 720, 1.0),
-            AdaptiveLayout {
-                compact: false,
-                narrow: false,
-                short: false,
-            }
-        );
+    fn classifies_supported_touch_resolutions() {
+        let cases = [
+            (
+                (1024, 600, 1.0),
+                AdaptiveLayout {
+                    compact: true,
+                    narrow: true,
+                    short: true,
+                    wide: false,
+                    tall: false,
+                },
+            ),
+            (
+                (1280, 720, 1.0),
+                AdaptiveLayout {
+                    compact: false,
+                    narrow: false,
+                    short: false,
+                    wide: false,
+                    tall: false,
+                },
+            ),
+            (
+                (1366, 768, 1.0),
+                AdaptiveLayout {
+                    compact: false,
+                    narrow: false,
+                    short: false,
+                    wide: false,
+                    tall: false,
+                },
+            ),
+            (
+                (1600, 900, 1.0),
+                AdaptiveLayout {
+                    compact: false,
+                    narrow: false,
+                    short: false,
+                    wide: true,
+                    tall: true,
+                },
+            ),
+            (
+                (1920, 1080, 1.0),
+                AdaptiveLayout {
+                    compact: false,
+                    narrow: false,
+                    short: false,
+                    wide: true,
+                    tall: true,
+                },
+            ),
+            (
+                (2560, 1440, 1.0),
+                AdaptiveLayout {
+                    compact: false,
+                    narrow: false,
+                    short: false,
+                    wide: true,
+                    tall: true,
+                },
+            ),
+        ];
+        for ((width, height, scale), expected) in cases {
+            assert_eq!(adaptive_layout(width, height, scale), expected);
+        }
     }
 
     #[test]
-    fn enters_compact_modes_only_after_dpi_normalization() {
+    fn normalizes_breakpoints_by_per_monitor_dpi() {
         assert_eq!(
-            adaptive_layout(1200, 700, 1.0),
+            adaptive_layout(1920, 1080, 1.5),
             AdaptiveLayout {
-                compact: true,
+                compact: false,
                 narrow: false,
-                short: true,
+                short: false,
+                wide: false,
+                tall: false
             }
         );
         assert_eq!(
@@ -4738,14 +5917,62 @@ mod adaptive_layout_tests {
                 compact: true,
                 narrow: true,
                 short: true,
+                wide: false,
+                tall: false
             }
         );
     }
 }
-
 #[cfg(test)]
 mod auto_print_gate_tests {
-    use super::{AutoPrintDecision, AutoPrintGate};
+    use super::{select_auto_print_target, AutoPrintDecision, AutoPrintGate, AutoPrintTarget};
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn routes_fixed_weight_only_when_every_print_precondition_is_true() {
+        let ready =
+            select_auto_print_target(5, None, false, Some(42), true, true, true, false, true);
+        assert_eq!(ready, Some(AutoPrintTarget::FixedWeightPack(42)));
+
+        let blocked = [
+            select_auto_print_target(5, None, false, Some(42), false, true, true, false, true),
+            select_auto_print_target(5, None, false, Some(42), true, false, true, false, true),
+            select_auto_print_target(5, None, false, Some(42), true, true, false, false, true),
+            select_auto_print_target(5, None, false, Some(42), true, true, true, true, true),
+            select_auto_print_target(5, None, false, Some(42), true, true, true, false, false),
+            select_auto_print_target(5, None, false, None, true, true, true, false, true),
+        ];
+        assert!(blocked.into_iter().all(|target| target.is_none()));
+    }
+
+    #[test]
+    fn preserves_the_main_weighing_auto_print_route() {
+        assert_eq!(
+            select_auto_print_target(0, Some(7), true, None, false, false, false, true, false,),
+            Some(AutoPrintTarget::ProductionPack(7))
+        );
+        assert_eq!(
+            select_auto_print_target(0, Some(7), false, None, false, false, false, false, true,),
+            None
+        );
+    }
+
+    #[test]
+    fn enabling_after_startup_arms_an_empty_scale_without_a_second_timer() {
+        let mut gate = AutoPrintGate::new(false);
+        gate.set_enabled(true, 0.0);
+        assert_eq!(gate.observe(0.170, true, true), AutoPrintDecision::Fire);
+
+        let mut occupied = AutoPrintGate::new(false);
+        occupied.rearm_hold = Duration::ZERO;
+        occupied.set_enabled(true, 0.170);
+        assert_eq!(occupied.observe(0.170, true, true), AutoPrintDecision::None);
+        assert_eq!(
+            occupied.observe(0.0, true, true),
+            AutoPrintDecision::Rearmed
+        );
+        assert_eq!(occupied.observe(0.170, true, true), AutoPrintDecision::Fire);
+    }
 
     #[test]
     fn waits_for_startup_readiness_and_stable_positive_weight() {
@@ -4762,6 +5989,7 @@ mod auto_print_gate_tests {
     fn fires_once_per_placed_product_and_rearms_below_threshold() {
         let mut gate = AutoPrintGate::new(true);
         gate.mark_ready();
+        gate.rearm_hold = Duration::ZERO;
 
         assert_eq!(gate.observe(1.250, true, true), AutoPrintDecision::Fire);
         gate.finish_print();
@@ -4774,6 +6002,7 @@ mod auto_print_gate_tests {
     fn manual_print_marks_current_product_as_already_printed() {
         let mut gate = AutoPrintGate::new(true);
         gate.mark_ready();
+        gate.rearm_hold = Duration::ZERO;
 
         assert!(gate.begin_manual_print(2.100));
         assert!(!gate.begin_manual_print(2.100));
@@ -4799,6 +6028,82 @@ mod auto_print_gate_tests {
         assert_eq!(
             missing_template.observe(4.000, true, false),
             AutoPrintDecision::None
+        );
+    }
+
+    #[test]
+    fn single_zero_frame_between_stable_readings_does_not_rearm() {
+        let mut gate = AutoPrintGate::new(true);
+        gate.mark_ready();
+
+        assert_eq!(gate.observe(1.250, true, true), AutoPrintDecision::Fire);
+        gate.finish_print();
+        // One dropped frame between stable readings must not rearm the gate.
+        assert_eq!(gate.observe(0.0, true, true), AutoPrintDecision::None);
+        assert_eq!(gate.observe(1.250, true, true), AutoPrintDecision::None);
+        // A scale that reads empty for the whole hold window rearms.
+        gate.below_since = Some(Instant::now() - Duration::from_millis(2_000));
+        assert_eq!(gate.observe(0.0, true, true), AutoPrintDecision::Rearmed);
+        assert_eq!(gate.observe(1.250, true, true), AutoPrintDecision::Fire);
+    }
+
+    #[test]
+    fn failed_auto_pack_latches_until_scale_is_cleared() {
+        let mut gate = AutoPrintGate::new(true);
+        gate.mark_ready();
+
+        assert_eq!(gate.observe(2.400, true, true), AutoPrintDecision::Fire);
+        gate.finish_print();
+        gate.mark_failed();
+        // Printer still down and the scale blips a zero: no new attempts and
+        // the latch survives until the scale reads empty for the hold window.
+        assert_eq!(gate.observe(0.0, true, true), AutoPrintDecision::None);
+        assert_eq!(gate.observe(2.400, true, true), AutoPrintDecision::None);
+        // The operator clears the scale: sustained empty readings clear the
+        // latch and the next product can print.
+        gate.below_since = Some(Instant::now() - Duration::from_millis(2_000));
+        assert_eq!(gate.observe(0.0, true, true), AutoPrintDecision::Rearmed);
+        assert_eq!(gate.observe(2.400, true, true), AutoPrintDecision::Fire);
+    }
+
+    #[test]
+    fn disabling_the_gate_clears_the_failure_latch() {
+        let mut gate = AutoPrintGate::new(true);
+        gate.mark_ready();
+        gate.rearm_hold = Duration::ZERO;
+        assert_eq!(gate.observe(2.400, true, true), AutoPrintDecision::Fire);
+        gate.finish_print();
+        gate.mark_failed();
+        gate.set_enabled(false, 2.400);
+        gate.set_enabled(true, 2.400);
+        assert_eq!(gate.observe(2.400, true, true), AutoPrintDecision::None);
+    }
+}
+
+#[cfg(test)]
+mod update_error_presentation_tests {
+    use super::{redact_update_links, update_user_message};
+
+    #[test]
+    fn hides_manifest_endpoint_from_operator_messages() {
+        let raw = "request update manifest: error sending request for url (https://example.invalid/releases/latest/download/native-latest.json)";
+        let message = update_user_message(raw);
+        assert_eq!(
+            message,
+            "Нет связи с сервером обновлений. Проверьте подключение к сети и повторите попытку."
+        );
+        assert!(!message.contains("http"));
+        assert!(!message.contains("example.invalid"));
+    }
+
+    #[test]
+    fn redacts_links_from_unclassified_updater_errors() {
+        let message = redact_update_links(
+            "unexpected response from https://example.invalid/private/path; retry",
+        );
+        assert_eq!(
+            message,
+            "unexpected response from [адрес сервера скрыт]; retry"
         );
     }
 }

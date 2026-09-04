@@ -38,3 +38,6 @@ supabase/.temp/
 # Generated Tauri external binaries
 src-tauri/binaries/*.exe
 experiments/**/target/
+
+# Local Codex verification artifacts
+.zcode/
