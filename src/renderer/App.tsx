@@ -1,14 +1,23 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import Sidebar from './components/Sidebar';
-import WeighingStation from './components/WeighingStation';
-import FixedWeightStation from './components/FixedWeightStation';
-import PrintJobStation from './components/PrintJobStation';
-import Products from './components/Products';
-import Settings from './components/Settings';
-import PrintView from './components/PrintView';
-import DatabaseViewer from './components/DatabaseViewer';
+import OperatorLoginScreen from './components/OperatorLoginScreen';
+import { SessionProvider } from './components/SessionProvider';
+import type { CurrentOperator } from './components/SessionProvider';
 import { useTranslation } from './i18n';
 import { ThemeProvider } from './components/ThemeProvider';
+
+// Heavy, non-station tabs: code-split so they don't bloat the initial chunk and are
+// only mounted (and their effects/IPC run) when actually opened.
+const WeighingStation = lazy(() => import('./components/WeighingStation'));
+const FixedWeightStation = lazy(() => import('./components/FixedWeightStation'));
+const PrintJobStation = lazy(() => import('./components/PrintJobStation'));
+const Products = lazy(() => import('./components/Products'));
+const Settings = lazy(() => import('./components/Settings'));
+const LicensePanel = lazy(() => import('./components/LicensePanel'));
+const PrintQueueMonitor = lazy(() => import('./components/PrintQueueMonitor'));
+const PrinterDiagnostics = lazy(() => import('./components/PrinterDiagnostics'));
+const stationTabs = new Set(['weighing', 'fixedWeight', 'printJob']);
+const stationFallback = <div className="flex h-full items-center justify-center text-lg text-neutral-500">Loading...</div>;
 
 const App = () => {
     const { t } = useTranslation();
@@ -18,6 +27,39 @@ const App = () => {
     const [stationNumber, setStationNumber] = useState<number | null>(null);
     const [loadingIdentity, setLoadingIdentity] = useState(true);
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+    const [mountedStationTabs, setMountedStationTabs] = useState<Set<string>>(() => new Set(['weighing']));
+
+    const selectTab = (tab: string) => {
+        setActiveTab(tab);
+        if (!stationTabs.has(tab)) return;
+        setMountedStationTabs(previous => {
+            if (previous.has(tab)) return previous;
+            const next = new Set(previous);
+            next.add(tab);
+            return next;
+        });
+    };
+
+    // --- Operator login gate state ---
+    // stationUuid: null until identity loads. provisioned = identity exists (has a uuid).
+    // isDemo: sourced primarily from the DURABLE demo flag (demo.flag file in main, read via
+    // the 'demo:status' IPC), with the station-uuid "demo-" prefix kept only as a
+    // belt-and-suspenders fallback. currentOperator mirrors the ephemeral main-process
+    // session. enteredAnyway: the user chose "continue without operator".
+    const [stationUuid, setStationUuid] = useState<string | null>(null);
+    const [provisioned, setProvisioned] = useState(false);
+    const [durableDemo, setDurableDemo] = useState(false);
+    const [currentOperator, setCurrentOperator] = useState<CurrentOperator | null>(null);
+    const [enteredAnyway, setEnteredAnyway] = useState(false);
+
+    // Durable flag is authoritative; uuid prefix is a fallback for legacy/transition cases.
+    const isDemo = durableDemo || (!!stationUuid && stationUuid.startsWith('demo-'));
+    // Synthetic operator for DEMO — bypasses the real login entirely. Prefer the
+    // station uuid when present, but fall back to a stable id so the synthetic
+    // operator is never null when demo is sourced from the durable flag alone.
+    const demoOperator: CurrentOperator | null = isDemo
+        ? { uuid: stationUuid || 'demo-operator', full_name: t('operator.demoOperator'), short_code: '00' }
+        : null;
 
     // Global Sync Listener
     useEffect(() => {
@@ -26,16 +68,40 @@ const App = () => {
         const loadStationInfo = async () => {
             try {
                 // Check for Identity (Physical Station ID)
-                const id = await window.electron.invoke('get-identity');
+                const id = await window.desktopBridge.invoke('get-identity');
                 if (id) {
-                    setStationNumber(parseInt(id.station_number));
+                    // station_number can be missing/garbage (e.g. unprovisioned / not yet synced);
+                    // guard parseInt so the sidebar shows "--" instead of "NaN".
+                    const n = parseInt(id.station_number, 10);
+                    setStationNumber(Number.isFinite(n) ? n : null);
+                    setStationUuid(id.station_uuid || null);
+                    setProvisioned(!!id.station_uuid);
+                } else {
+                    setStationUuid(null);
+                    setProvisioned(false);
+                }
+
+                // Durable demo flag (main-process owned, survives uuid changes).
+                try {
+                    const demoStatus = await window.desktopBridge.invoke('demo:status');
+                    setDurableDemo(!!demoStatus?.isDemo);
+                } catch {
+                    setDurableDemo(false);
+                }
+
+                // Current operator session (ephemeral, main-process owned).
+                try {
+                    const op = await window.desktopBridge.invoke('session:get');
+                    setCurrentOperator(op ?? null);
+                } catch {
+                    setCurrentOperator(null);
                 }
 
                 // Also get config for legacy support or other settings
-                await window.electron.invoke('get-scale-config');
+                await window.desktopBridge.invoke('get-scale-config');
 
                 // Initial Server Status fetch
-                const status = await window.electron.invoke('get-server-status');
+                const status = await window.desktopBridge.invoke('get-server-status');
                 if (status) setServerStatus(status);
             } catch (err) {
                 console.error('App: Failed to load station config/status', err);
@@ -44,7 +110,7 @@ const App = () => {
             }
         };
 
-        const removeSyncListener = window.electron.on('sync-complete', (data: any) => {
+        const removeSyncListener = window.desktopBridge.on('sync-complete', (data: any) => {
             if (data.success) {
                 setToast({
                     msg: t('app.syncComplete'),
@@ -54,17 +120,32 @@ const App = () => {
             }
         });
 
-        const removeWeightListener = window.electron.on('scale-weight', (_data: any) => {
+        // Demo seeding and real provisioning both broadcast 'data-updated' — re-read
+        // station info (incl. the durable demo flag) so the gate reflects the new state.
+        const removeDataUpdatedListener = window.desktopBridge.on('data-updated', () => {
+            loadStationInfo();
+        });
+
+        const removeWeightListener = window.desktopBridge.on('scale-weight', (_data: any) => {
             // scaleStatus removed from sidebar
         });
 
-        const removeStatusListener = window.electron.on('server-status-updated', (data: any) => {
+        const removeStatusListener = window.desktopBridge.on('server-status-updated', (data: any) => {
             if (data.status) {
                 setServerStatus(data.status);
             }
         });
 
-        const removeDiscoveryListener = window.electron.on('discovery-event', (data: any) => {
+        // Keep the gate in sync when the operator logs in / out (broadcast from main).
+        const removeSessionListener = window.desktopBridge.on('session-changed', (op: CurrentOperator | null) => {
+            setCurrentOperator(op ?? null);
+            // Any explicit session change resets the "continue without operator" choice:
+            // a real login supersedes it, and a logout ("switch operator") must re-open
+            // the login gate — a stale flag here made the switch button appear dead.
+            setEnteredAnyway(false);
+        });
+
+        const removeDiscoveryListener = window.desktopBridge.on('discovery-event', (data: any) => {
             // Priority 1: Background polling status from ServerStatusManager (fallback)
             if (data.status) {
                 setServerStatus(data.status);
@@ -80,15 +161,17 @@ const App = () => {
         });
 
         // Signal to main that renderer is ready for events
-        window.electron.send('renderer-ready', {});
+        window.desktopBridge.send('renderer-ready', {});
 
         loadStationInfo();
 
         return () => {
             removeSyncListener();
+            removeDataUpdatedListener();
             removeWeightListener();
             removeDiscoveryListener();
             removeStatusListener();
+            removeSessionListener();
             clearTimeout(serverTimeout);
         };
     }, []);
@@ -100,48 +183,84 @@ const App = () => {
             return () => clearTimeout(timer);
         }
     }, [toast]);
-
-    // Check if this is a print-only window
-    const isPrintWindow = new URLSearchParams(window.location.search).get('print') === 'true';
-
-    if (isPrintWindow) {
-        return <PrintView />;
-    }
-
     if (loadingIdentity) {
         return <div className="h-screen w-full bg-neutral-50 dark:bg-neutral-950 flex items-center justify-center text-neutral-900 dark:text-white">Loading...</div>;
     }
 
+    // --- Operator login GATE ---
+    // needsLogin = the station is PROVISIONED, is NOT a demo station, the user hasn't already
+    // chosen to continue without an operator, AND no operator is currently logged in.
+    // FAIL-OPEN cases handled elsewhere:
+    //   • DEMO (durable demo flag, or uuid starts with "demo-") → bypass login, use a
+    //     synthetic "Демо оператор".
+    //   • UNPROVISIONED (no identity) → login is never reached (provisioned === false).
+    //   • NO-OPERATORS-YET → the login screen shows an empty state (Sync / Continue without).
+    const needsLogin = provisioned && !isDemo && !currentOperator && !enteredAnyway;
+
+    if (needsLogin) {
+        return (
+            <ThemeProvider defaultTheme="system" storageKey="app-theme">
+                <SessionProvider>
+                    <OperatorLoginScreen onLoggedIn={() => setEnteredAnyway(true)} />
+                </SessionProvider>
+            </ThemeProvider>
+        );
+    }
+
     return (
         <ThemeProvider defaultTheme="system" storageKey="app-theme">
+            <SessionProvider demoOperator={demoOperator}>
             <div className="flex w-full h-screen bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-white font-sans overflow-hidden relative transition-colors duration-200">
                 <Sidebar
                     activeTab={activeTab}
-                    setActiveTab={setActiveTab}
+                    setActiveTab={selectTab}
                     serverStatus={serverStatus}
                     stationNumber={stationNumber}
                     isCollapsed={isSidebarCollapsed}
                     toggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
                 />
                 <main className="flex-1 overflow-auto p-6 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-white via-neutral-50 to-neutral-100 dark:from-emerald-900/20 dark:via-neutral-900 dark:to-neutral-950 transition-colors duration-200">
-                    <div style={{ display: activeTab === 'weighing' ? 'block' : 'none', height: '100%' }}>
-                        <WeighingStation activeTab={activeTab} />
-                    </div>
-                    <div style={{ display: activeTab === 'fixedWeight' ? 'block' : 'none', height: '100%' }}>
-                        <FixedWeightStation activeTab={activeTab} />
-                    </div>
-                    <div style={{ display: activeTab === 'printJob' ? 'block' : 'none', height: '100%' }}>
-                        <PrintJobStation activeTab={activeTab} />
-                    </div>
-                    <div style={{ display: activeTab === 'products' ? 'block' : 'none', height: '100%' }}>
-                        <Products />
-                    </div>
-                    <div style={{ display: activeTab === 'database' ? 'block' : 'none', height: '100%' }}>
-                        <DatabaseViewer />
-                    </div>
-                    <div style={{ display: activeTab === 'settings' ? 'block' : 'none', height: '100%' }}>
-                        <Settings />
-                    </div>
+                    {mountedStationTabs.has('weighing') && (
+                        <div data-station-tab="weighing" style={{ display: activeTab === 'weighing' ? 'block' : 'none', height: '100%' }}>
+                            <Suspense fallback={stationFallback}><WeighingStation activeTab={activeTab} /></Suspense>
+                        </div>
+                    )}
+                    {mountedStationTabs.has('fixedWeight') && (
+                        <div data-station-tab="fixedWeight" style={{ display: activeTab === 'fixedWeight' ? 'block' : 'none', height: '100%' }}>
+                            <Suspense fallback={stationFallback}><FixedWeightStation activeTab={activeTab} /></Suspense>
+                        </div>
+                    )}
+                    {mountedStationTabs.has('printJob') && (
+                        <div data-station-tab="printJob" style={{ display: activeTab === 'printJob' ? 'block' : 'none', height: '100%' }}>
+                            <Suspense fallback={stationFallback}><PrintJobStation activeTab={activeTab} /></Suspense>
+                        </div>
+                    )}
+                    {/* Station modules mount on first use and then remain mounted so an
+                        active weighing/print session survives tab switches. */}
+                    {activeTab === 'printQueue' && (
+                        <div style={{ height: '100%' }}>
+                            <Suspense fallback={null}><PrintQueueMonitor /></Suspense>
+                        </div>
+                    )}                    {activeTab === 'printerDiagnostics' && (
+                        <div style={{ height: '100%' }}>
+                            <Suspense fallback={null}><PrinterDiagnostics /></Suspense>
+                        </div>
+                    )}
+                    {activeTab === 'products' && (
+                        <div style={{ height: '100%' }}>
+                            <Suspense fallback={null}><Products /></Suspense>
+                        </div>
+                    )}
+                    {activeTab === 'license' && (
+                        <div style={{ height: '100%' }}>
+                            <Suspense fallback={null}><LicensePanel /></Suspense>
+                        </div>
+                    )}
+                    {activeTab === 'settings' && (
+                        <div style={{ height: '100%' }}>
+                            <Suspense fallback={null}><Settings onNavigate={selectTab} /></Suspense>
+                        </div>
+                    )}
                 </main>
 
                 {/* Global Toast Notification */}
@@ -158,6 +277,7 @@ const App = () => {
                     )
                 }
             </div>
+            </SessionProvider>
         </ThemeProvider>
     );
 };

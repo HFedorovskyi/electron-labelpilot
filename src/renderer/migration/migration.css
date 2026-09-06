@@ -1,0 +1,69 @@
+.migration-shell {
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    padding: 18px;
+    background: radial-gradient(circle at top left, #e8fff6, #f4f7f9 55%, #e9eef2);
+    color: #13211b;
+}
+
+.migration-card {
+    width: min(100%, 1100px);
+    padding: 24px;
+    border: 1px solid #d4ddd9;
+    border-radius: 22px;
+    background: rgba(255, 255, 255, 0.96);
+    box-shadow: 0 24px 70px rgba(20, 48, 37, 0.12);
+}
+
+.migration-heading { display: flex; gap: 18px; align-items: flex-start; }
+.migration-heading h1 { margin: 2px 0 6px; font-size: clamp(27px, 3vw, 40px); line-height: 1.05; }
+.migration-heading p { margin: 0; max-width: 780px; color: #56635e; font-size: 16px; line-height: 1.4; }
+.migration-heading .migration-eyebrow { color: #087b50; font-size: 13px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.migration-icon { display: grid; place-items: center; flex: 0 0 58px; height: 58px; border-radius: 17px; background: #0c8b5a; color: white; }
+
+.migration-status { min-height: 54px; margin: 19px 0 16px; padding: 12px 16px; display: flex; align-items: center; gap: 11px; border-radius: 14px; background: #edf9f3; color: #086a47; font-size: 16px; font-weight: 750; }
+.migration-spin { animation: migration-spin 1s linear infinite; }
+@keyframes migration-spin { to { transform: rotate(360deg); } }
+
+.migration-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+.migration-grid article { min-height: 86px; display: flex; flex-direction: column; justify-content: center; padding: 14px; border-radius: 15px; background: #f3f5f6; }
+.migration-grid strong { display: flex; align-items: center; gap: 7px; font-size: 25px; line-height: 1; }
+.migration-grid span { margin-top: 7px; color: #68736e; font-weight: 650; }
+.migration-grid .migration-online { background: #e7f8ef; color: #08764f; }
+
+.migration-section { margin-top: 18px; }
+.migration-section h2 { margin: 0 0 9px; font-size: 17px; }
+.migration-split { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.migration-tags { display: flex; flex-wrap: wrap; gap: 7px; }
+.migration-storage span { border-color: #9fc9b5; background: #ecfbf3; }
+.migration-network span { border-color: #a9c5d2; background: #eef9fc; color: #155b72; }
+.migration-operational span { border-color: #d5b988; background: #fff8e9; color: #76520f; }
+.migration-scale span { border-color: #93b8df; background: #edf6ff; color: #245b91; }
+.migration-printer span { border-color: #e6a86e; background: #fff4e8; color: #844514; }
+.migration-ingress span { border-color: #c2b4df; background: #f6f1ff; color: #5c3687; }
+.migration-tags span { padding: 7px 11px; border: 1px solid #b9d8ca; border-radius: 999px; background: #f4fff9; color: #086a47; font: 600 13px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; }
+
+.migration-commands { padding-top: 2px; }
+.migration-commands summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; color: #3d4c46; font-size: 15px; font-weight: 750; touch-action: manipulation; }
+.migration-commands[open] summary { margin-bottom: 9px; }
+
+.migration-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+.migration-actions button { min-height: 52px; padding: 0 19px; display: inline-flex; align-items: center; justify-content: center; gap: 9px; border: 0; border-radius: 14px; background: #17201c; color: white; font-size: 15px; font-weight: 800; cursor: pointer; touch-action: manipulation; }
+.migration-actions button:disabled { opacity: .55; cursor: wait; }
+.migration-actions .migration-danger { background: #a73333; }
+
+@media (max-width: 900px) {
+    .migration-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .migration-split { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 680px) {
+    .migration-shell { place-items: start center; padding: 10px; }
+    .migration-card { padding: 17px; }
+    .migration-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .migration-split { grid-template-columns: 1fr; }
+    .migration-heading { flex-direction: column; }
+    .migration-actions { flex-direction: column; }
+    .migration-actions button { width: 100%; }
+}

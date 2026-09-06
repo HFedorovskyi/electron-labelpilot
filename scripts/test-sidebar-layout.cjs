@@ -1,0 +1,16 @@
+'use strict';
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const sidebar = fs.readFileSync('src/renderer/components/Sidebar.tsx', 'utf8');
+assert.match(sidebar, /isCollapsed \? "justify-center" : "gap-2"/);
+assert.match(sidebar, /flex min-w-0 flex-1 items-center gap-2/);
+assert.match(sidebar, /sidebar-logo\.svg[^\n]+w-9 h-9/);
+assert.match(sidebar, /shrink-0 whitespace-nowrap text-\[1\.35rem\] leading-none/);
+assert.doesNotMatch(sidebar, /gap-1\.5 overflow-hidden/);
+const sidebarInnerPx = 256 - 32;
+const collapseButtonPx = 32;
+const interItemGapPx = 8;
+const brandBudgetPx = sidebarInnerPx - collapseButtonPx - interItemGapPx;
+const estimatedBrandPx = 36 + 8 + 112;
+assert.ok(estimatedBrandPx <= brandBudgetPx, `${estimatedBrandPx}px exceeds ${brandBudgetPx}px`);
+console.log(`sidebar-layout: brand ${estimatedBrandPx}px <= ${brandBudgetPx}px at 256px sidebar`);

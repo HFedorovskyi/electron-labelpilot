@@ -1,0 +1,26 @@
+{
+  "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+  "token": "eyJjdXN0b21lciI6IkZpeHR1cmUgRmFjdG9yeSIsImVkaXRpb24iOiJ0ZXN0IiwiZXhwaXJlcyI6IjIwOTktMTItMzEiLCJmZWF0dXJlcyI6WyJzeW5jIiwicHJpbnRpbmciXSwiaXNzdWVkIjoiMjAyNi0wMS0wMSIsImtleV92ZXJzaW9uIjozLCJsaWNlbnNlX2lkIjoiZml4dHVyZS1saWNlbnNlLTIwMjYiLCJtYWNoaW5lX2lkIjoiMDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWYiLCJtYXhfc3RhdGlvbnMiOjF9.025EvNzR588j8n1CmdO2Azg-DR6O_1AXqlvTWyng3Ab9gMLxPHc-i10IzBKl75Im2YEUkxO8yFkmp-DaNVyABA",
+  "iv_hex": "000102030405060708090a0b0c0d0e0f",
+  "blob_base64": "TFBJMgpleUpqZFhOMGIyMWxjaUk2SWtacGVIUjFjbVVnUm1GamRHOXllU0lzSW1Wa2FYUnBiMjRpT2lKMFpYTjBJaXdpWlhod2FYSmxjeUk2SWpJd09Ua3RNVEl0TXpFaUxDSm1aV0YwZFhKbGN5STZXeUp6ZVc1aklpd2ljSEpwYm5ScGJtY2lYU3dpYVhOemRXVmtJam9pTWpBeU5pMHdNUzB3TVNJc0ltdGxlVjkyWlhKemFXOXVJam96TENKc2FXTmxibk5sWDJsa0lqb2labWw0ZEhWeVpTMXNhV05sYm5ObExUSXdNallpTENKdFlXTm9hVzVsWDJsa0lqb2lNREV5TXpRMU5qYzRPV0ZpWTJSbFpqQXhNak0wTlRZM09EbGhZbU5rWldZaUxDSnRZWGhmYzNSaGRHbHZibk1pT2pGOS4wMjVFdk56UjU4OGo4bjFDbWRPMkF6Zy1EUjZPXzFBWHFsdlRXeW5nM0FiOWdNTHhQSGMtaTEwSXpCS2w3NUltMllFVWt4Tzh5RmttcC1EYU5WeUFCQQoAAQIDBAUGBwgJCgsMDQ4PECKnaHsO6EgvxiwMasRHGtPlCMywUxPWMieYHtKLli/S52TgqbQFaNv1JgNOjbWSj+Y9hdzkppCJmdbhwi/Z2e4XfOjE1yxZvWKWuEZXvGame7FGFGXCAH83g0PgPamGsnKCbUGh/jVcravgI/Qr6cRgulWPHKbLI2aF1o4KwIhJkrWupM73TWbDi7M+GYQGVu6k6/wqGRLzkoPQuDKEM9DflOwKgG37FrkF2tNXwcHrAxOQNxWUV/9pXl2HNZaBgSi3mqICjKjcoTeFGVabF0ECaNJZagz2YURLX4x2h0GW9ivp/L7lXow3tS6E74HUPSNuG7JesvvMuhKDognzQVHUlkXTPClmsLLk9q5AQ8LrhOU9xlM7/QaQpfRHP7B4fozA7UCgh2VNAa9XQpbzJw==",
+  "plaintext": {
+    "station": {
+      "uuid": "fixture-station",
+      "number": 7,
+      "name": "Fixture station",
+      "server_url": "http://192.0.2.25:8000"
+    },
+    "payload": {
+      "nomenclature": [],
+      "containers": [],
+      "barcodes": [],
+      "labels": [],
+      "operators": []
+    },
+    "meta": {
+      "type": "FULL_SYNC",
+      "generated_at": "2026-08-13T20:00:00Z",
+      "min_client_version": "1.3.0"
+    }
+  }
+}

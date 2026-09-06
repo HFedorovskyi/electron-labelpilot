@@ -1,0 +1,271 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "zpl-advanced-203",
+      "config": {
+        "id": "golden-zpl",
+        "active": true,
+        "name": "Golden ZPL",
+        "connection": "tcp",
+        "protocol": "zpl",
+        "ip": "127.0.0.1",
+        "port": 9100,
+        "dpi": 203,
+        "darkness": 18,
+        "printSpeed": 6,
+        "compatibilityMode": "advanced"
+      },
+      "doc": {
+        "widthMm": 58,
+        "heightMm": 40,
+        "canvas": {
+          "width": 400,
+          "height": 300
+        },
+        "elements": [
+          {
+            "id": "title",
+            "type": "text",
+            "x": 10,
+            "y": 8,
+            "w": 180,
+            "h": 24,
+            "fontSize": 16,
+            "textAlign": "center",
+            "text": "Партия {{ BATCH }}"
+          },
+          {
+            "id": "side",
+            "type": "text",
+            "x": 205,
+            "y": 8,
+            "w": 0,
+            "h": 20,
+            "fontSize": 12,
+            "rotation": 90,
+            "text": "SIDE"
+          },
+          {
+            "id": "frame",
+            "type": "rect",
+            "x": 4,
+            "y": 4,
+            "w": 392,
+            "h": 292,
+            "borderWidth": 2,
+            "borderRadius": 4
+          },
+          {
+            "id": "fill",
+            "type": "rect",
+            "x": 220,
+            "y": 10,
+            "w": 18,
+            "h": 30,
+            "rotation": 90,
+            "fill": "#000000"
+          },
+          {
+            "id": "c128",
+            "type": "barcode",
+            "x": 10,
+            "y": 55,
+            "w": 175,
+            "h": 48,
+            "barcodeType": "23",
+            "value": "{{ code }}",
+            "showText": true
+          },
+          {
+            "id": "ean",
+            "type": "barcode",
+            "x": 10,
+            "y": 112,
+            "w": 175,
+            "h": 48,
+            "barcodeType": "ean13_kz",
+            "value": "4820001234567",
+            "showText": true
+          },
+          {
+            "id": "qr",
+            "type": "barcode",
+            "x": 205,
+            "y": 55,
+            "w": 70,
+            "h": 70,
+            "barcodeType": "qr",
+            "value": "https://label.test/A1"
+          },
+          {
+            "id": "dm",
+            "type": "barcode",
+            "x": 290,
+            "y": 55,
+            "w": 70,
+            "h": 70,
+            "barcodeType": "dm",
+            "value": "DM-A1"
+          },
+          {
+            "id": "code39",
+            "type": "barcode",
+            "x": 10,
+            "y": 175,
+            "w": 175,
+            "h": 44,
+            "barcodeType": "code-39",
+            "value": "LOT-A1"
+          },
+          {
+            "id": "itf",
+            "type": "barcode",
+            "x": 205,
+            "y": 175,
+            "w": 175,
+            "h": 44,
+            "barcodeType": "itf14",
+            "value": "12345678901231",
+            "rotation": 180
+          }
+        ]
+      },
+      "data": {
+        "batch": "A1",
+        "code": "ABC123"
+      },
+      "expectedBase64": "XlhBCl5QVzQ2NApeTEwzMjAKXlBPTgpeTUQxOApeUFI2Cl5DSTI4Cl5GTzEyLDleRkIyMDksMjAsMCxDLDBeQTBOLDE3LDE3XkZE0J/QsNGA0YLQuNGPIEExXkZTCl5GTzIzOCw5XkEwUiwxMywxM15GRFNJREVeRlMKXkZPNSw0XkdCNDU1LDMxMSwyLEIsNV5GUwpeRk8yNTUsMTFeR0IzMiwyMSwyMSxCLDBeRlMKXkZPMTIsNTleQlkyLDMuMCw1MV5CQ04sNTEsWSxOLE5eRkRBQkMxMjNeRlMKXkZPMTIsMTE5XkJZMiwzLjAsNTFeQkVOLDUxLFksTl5GRDQ4MjAwMDEyMzQ1NjdeRlMKXkZPMjM4LDU5XkJRTiwyLDNeRkRRQSxodHRwczovL2xhYmVsLnRlc3QvQTFeRlMKXkZPMzM2LDU5XkJYTiwzLDIwMF5GRERNLUExXkZTCl5GTzEyLDE4N15CWTIsMy4wLDQ3XkIzTixOLDQ3LE4sTl5GRExPVC1BMV5GUwpeRk8yMzgsMTg3XkJZMiwzLjAsNDdeQjJJLDQ3LE4sTixOXkZEMTIzNDU2Nzg5MDEyMzFeRlMKXlha",
+      "expectedBytes": 456
+    },
+    {
+      "name": "tspl2-native-300",
+      "config": {
+        "id": "golden-tspl",
+        "active": true,
+        "name": "Golden TSPL",
+        "connection": "tcp",
+        "protocol": "tspl",
+        "ip": "127.0.0.1",
+        "port": 9100,
+        "dpi": 300,
+        "darkness": 24,
+        "printSpeed": 8,
+        "gapMm": 3.5,
+        "compatibilityMode": "advanced"
+      },
+      "doc": {
+        "widthMm": 80,
+        "heightMm": 50,
+        "canvas": {
+          "width": 500,
+          "height": 320
+        },
+        "elements": [
+          {
+            "id": "title",
+            "type": "text",
+            "x": 10,
+            "y": 8,
+            "w": 190,
+            "h": 24,
+            "fontSize": 16,
+            "textAlign": "center",
+            "text": "LOT {{ batch }}"
+          },
+          {
+            "id": "side",
+            "type": "text",
+            "x": 210,
+            "y": 8,
+            "w": 80,
+            "h": 20,
+            "fontSize": 12,
+            "rotation": 90,
+            "text": "SIDE"
+          },
+          {
+            "id": "frame",
+            "type": "rect",
+            "x": 4,
+            "y": 4,
+            "w": 492,
+            "h": 312,
+            "borderWidth": 2,
+            "borderRadius": 5
+          },
+          {
+            "id": "fill",
+            "type": "rect",
+            "x": 300,
+            "y": 8,
+            "w": 20,
+            "h": 30,
+            "fill": "#000000"
+          },
+          {
+            "id": "c128",
+            "type": "barcode",
+            "x": 10,
+            "y": 55,
+            "w": 210,
+            "h": 55,
+            "barcodeType": "code128",
+            "value": "{{ code }}",
+            "showText": true
+          },
+          {
+            "id": "ean8",
+            "type": "barcode",
+            "x": 10,
+            "y": 125,
+            "w": 180,
+            "h": 48,
+            "barcodeType": "22",
+            "value": "12345670",
+            "showText": true
+          },
+          {
+            "id": "qr",
+            "type": "barcode",
+            "x": 250,
+            "y": 55,
+            "w": 80,
+            "h": 80,
+            "barcodeType": "qrcode",
+            "value": "TSPL-A1",
+            "moduleWidth": 4
+          },
+          {
+            "id": "dm",
+            "type": "barcode",
+            "x": 350,
+            "y": 55,
+            "w": 80,
+            "h": 80,
+            "barcodeType": "datamatrix",
+            "value": "DM-A1",
+            "moduleWidth": 5
+          },
+          {
+            "id": "itf",
+            "type": "barcode",
+            "x": 210,
+            "y": 160,
+            "w": 220,
+            "h": 50,
+            "barcodeType": "interleaved2of5",
+            "value": "12345678901231",
+            "rotation": 270
+          }
+        ]
+      },
+      "data": {
+        "batch": "B7",
+        "code": "TSPL123"
+      },
+      "expectedBase64": "U0laRSA4MCBtbSw1MCBtbQ0KR0FQIDMuNSBtbSwwIG1tDQpESVJFQ1RJT04gMQ0KUkVGRVJFTkNFIDAsMA0KU1BFRUQgOA0KREVOU0lUWSAxMg0KQ0xTDQpURVhUIDE5LDE1LCIwIiwwLDEyLDEyLDIsIkxPVCBCNyINClRFWFQgMzk3LDE1LCIwIiw5MCw5LDksMSwiU0lERSINCkJPWCA4LDcsOTM4LDU4Myw0LDkNCkJBUiA1NjcsMTUsMzgsNTUNCkJBUkNPREUgMTksMTAyLCIxMjgiLDEwMiwxLDAsMyw2LCJUU1BMMTIzIg0KQkFSQ09ERSAxOSwyMzEsIkVBTjgiLDg5LDEsMCw1LDEwLCIxMjM0NTY3MCINClFSQ09ERSA0NzMsMTAyLE0sNCxBLDAsTTIsUzcsIlRTUEwtQTEiDQpETUFUUklYIDY2MiwxMDIsMTUxLDE0OCxjMTI2LHg1LHIwLCJETS1BMSINCkJBUkNPREUgMzk3LDI5NiwiMjUiLDkyLDAsMjcwLDEsMiwiMTIzNDU2Nzg5MDEyMzEiDQpQUklOVCAxLDENCg==",
+      "expectedBytes": 433
+    }
+  ]
+}

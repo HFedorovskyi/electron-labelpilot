@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, memo } from 'react';
 import { Delete, ArrowUp, Globe } from 'lucide-react';
 
 interface VirtualKeyboardProps {
@@ -80,7 +80,7 @@ const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({ value, onChange }) =>
                     {rowIndex === 0 && (
                         <button
                             onClick={handleBackspace}
-                            className="flex-[1.5] py-5 bg-neutral-200 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400 rounded-xl flex items-center justify-center border border-neutral-300 dark:border-transparent shadow-sm active:scale-95 transition-all"
+                            className="flex-[1.5] py-5 bg-neutral-200 dark:bg-neutral-700 text-neutral-500 dark:text-neutral-400 rounded-xl flex items-center justify-center border border-neutral-300 dark:border-transparent shadow-sm active:scale-95 transition-all"
                         >
                             <Delete className="w-8 h-8" />
                         </button>
@@ -92,7 +92,7 @@ const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({ value, onChange }) =>
             <div className="flex justify-center gap-2 mt-1">
                 <button
                     onClick={() => setLang(lang === 'ru' ? 'en' : 'ru')}
-                    className="flex-[1] py-5 bg-neutral-200 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400 rounded-xl flex items-center justify-center border border-neutral-300 dark:border-transparent shadow-sm active:scale-95 transition-all font-bold uppercase text-2xl"
+                    className="flex-[1] py-5 bg-neutral-200 dark:bg-neutral-700 text-neutral-500 dark:text-neutral-400 rounded-xl flex items-center justify-center border border-neutral-300 dark:border-transparent shadow-sm active:scale-95 transition-all font-bold uppercase text-2xl"
                 >
                     <Globe className="w-8 h-8 mr-3" />
                     {lang}
@@ -105,7 +105,7 @@ const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({ value, onChange }) =>
                 </button>
                 <button
                     onClick={handleBackspace}
-                    className="flex-[1.5] py-5 bg-neutral-200 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400 rounded-xl flex items-center justify-center border border-neutral-300 dark:border-transparent shadow-sm active:scale-95 transition-all"
+                    className="flex-[1.5] py-5 bg-neutral-200 dark:bg-neutral-700 text-neutral-500 dark:text-neutral-400 rounded-xl flex items-center justify-center border border-neutral-300 dark:border-transparent shadow-sm active:scale-95 transition-all"
                 >
                     <Delete className="w-8 h-8" />
                 </button>
@@ -114,4 +114,4 @@ const VirtualKeyboard: React.FC<VirtualKeyboardProps> = ({ value, onChange }) =>
     );
 };
 
-export default VirtualKeyboard;
+export default memo(VirtualKeyboard);

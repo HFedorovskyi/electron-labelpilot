@@ -2,13 +2,17 @@ import React, { useEffect, useState } from 'react';
 import { X, Trash2, Box, Layers, RefreshCw } from 'lucide-react';
 import { useTranslation } from '../i18n';
 
-interface DeleteItemsModalProps {
+export interface DeleteItemsModalProps {
     isOpen: boolean;
     onClose: () => void;
     onDeleted: () => void; // Callback to refresh parent state
+    // The station's current product — scopes 'current box' to THIS product's open box.
+    // Without it the modal shows the most-recent open box of ANY product, so an operator
+    // could delete a pack from a different product's box.
+    nomenclatureId?: number | null;
 }
 
-const DeleteItemsModal: React.FC<DeleteItemsModalProps> = ({ isOpen, onClose, onDeleted }) => {
+const DeleteItemsModal: React.FC<DeleteItemsModalProps> = ({ isOpen, onClose, onDeleted, nomenclatureId }) => {
     const { t } = useTranslation();
     const [activeTab, setActiveTab] = useState<'packs' | 'boxes'>('packs');
     const [data, setData] = useState<any>(null);
@@ -32,7 +36,7 @@ const DeleteItemsModal: React.FC<DeleteItemsModalProps> = ({ isOpen, onClose, on
         setLoading(true);
         setError(null);
         try {
-            const content = await window.electron.invoke('get-open-pallet-content');
+            const content = await window.desktopBridge.invoke('get-open-pallet-content', nomenclatureId ?? undefined);
             setData(content);
         } catch (err: any) {
             console.error("Error loading deletion data:", err);
@@ -50,7 +54,7 @@ const DeleteItemsModal: React.FC<DeleteItemsModalProps> = ({ isOpen, onClose, on
         if (isOpen) {
             loadData();
         }
-    }, [isOpen]);
+    }, [isOpen, nomenclatureId]);
 
     const handleDeletePackClick = (packId: number) => {
         setConfirmModal({
@@ -75,9 +79,9 @@ const DeleteItemsModal: React.FC<DeleteItemsModalProps> = ({ isOpen, onClose, on
 
         try {
             if (confirmModal.type === 'pack') {
-                await window.electron.invoke('delete-pack', confirmModal.id);
+                await window.desktopBridge.invoke('delete-pack', confirmModal.id);
             } else {
-                await window.electron.invoke('delete-box', confirmModal.id);
+                await window.desktopBridge.invoke('delete-box', confirmModal.id);
             }
             await loadData();
             onDeleted();
@@ -102,7 +106,7 @@ const DeleteItemsModal: React.FC<DeleteItemsModalProps> = ({ isOpen, onClose, on
                     </h2>
                     <button
                         onClick={onClose}
-                        className="p-2 hover:bg-neutral-200 dark:hover:bg-neutral-800 rounded-full transition-colors"
+                        className="p-2 hover:bg-neutral-200 dark:hover:bg-neutral-600 rounded-full transition-colors"
                     >
                         <X size={28} className="text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white" />
                     </button>
@@ -113,8 +117,8 @@ const DeleteItemsModal: React.FC<DeleteItemsModalProps> = ({ isOpen, onClose, on
                     <button
                         onClick={() => setActiveTab('packs')}
                         className={`flex-1 p-4 text-lg font-medium flex items-center justify-center gap-2 transition-colors relative ${activeTab === 'packs'
-                            ? 'text-neutral-900 dark:text-white bg-white dark:bg-neutral-800/50'
-                            : 'text-neutral-500 dark:text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 hover:bg-neutral-200/50 dark:hover:bg-neutral-800/30'
+                            ? 'text-neutral-900 dark:text-white bg-white dark:bg-neutral-700'
+                            : 'text-neutral-500 dark:text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 hover:bg-neutral-200/50 dark:hover:bg-neutral-600/30'
                             }`}
                     >
                         <Box size={20} />
@@ -126,8 +130,8 @@ const DeleteItemsModal: React.FC<DeleteItemsModalProps> = ({ isOpen, onClose, on
                     <button
                         onClick={() => setActiveTab('boxes')}
                         className={`flex-1 p-4 text-lg font-medium flex items-center justify-center gap-2 transition-colors relative ${activeTab === 'boxes'
-                            ? 'text-neutral-900 dark:text-white bg-white dark:bg-neutral-800/50'
-                            : 'text-neutral-500 dark:text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 hover:bg-neutral-200/50 dark:hover:bg-neutral-800/30'
+                            ? 'text-neutral-900 dark:text-white bg-white dark:bg-neutral-700'
+                            : 'text-neutral-500 dark:text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 hover:bg-neutral-200/50 dark:hover:bg-neutral-600/30'
                             }`}
                     >
                         <Layers size={20} />
@@ -158,7 +162,7 @@ const DeleteItemsModal: React.FC<DeleteItemsModalProps> = ({ isOpen, onClose, on
                                         </div>
                                     ) : (
                                         <>
-                                            <div className="bg-white dark:bg-neutral-800/50 p-3 rounded-lg flex justify-between items-center mb-4 border border-neutral-200 dark:border-neutral-700 shadow-sm dark:shadow-none">
+                                            <div className="bg-white dark:bg-neutral-700 p-3 rounded-lg flex justify-between items-center mb-4 border border-neutral-200 dark:border-neutral-700 shadow-sm dark:shadow-none">
                                                 <div className="text-neutral-600 dark:text-neutral-400">{t('delete.currentBox')} <span className="text-neutral-900 dark:text-white font-mono text-xl ml-2">{data.openBox.number}</span></div>
                                                 <div className="text-sm text-neutral-500">{t('delete.totalPacks')} {data.packsInCurrentBox?.length || 0}</div>
                                             </div>
@@ -168,7 +172,7 @@ const DeleteItemsModal: React.FC<DeleteItemsModalProps> = ({ isOpen, onClose, on
                                                         key={pack.id}
                                                         className={`flex items-center justify-between p-4 rounded-xl border transition-all shadow-sm dark:shadow-none ${pack.status === 'Deleted'
                                                             ? 'bg-red-50 dark:bg-red-900/10 border-red-200 dark:border-red-900/30 opacity-60'
-                                                            : 'bg-white dark:bg-neutral-800 border-neutral-200 dark:border-neutral-700 hover:border-neutral-300 dark:hover:border-neutral-600'
+                                                            : 'bg-white dark:bg-neutral-700 border-neutral-200 dark:border-neutral-700 hover:border-neutral-300 dark:hover:border-neutral-600'
                                                             }`}
                                                     >
                                                         <div className="flex flex-col">
@@ -207,7 +211,7 @@ const DeleteItemsModal: React.FC<DeleteItemsModalProps> = ({ isOpen, onClose, on
                                         </div>
                                     ) : (
                                         <>
-                                            <div className="bg-white dark:bg-neutral-800/50 p-3 rounded-lg flex justify-between items-center mb-4 border border-neutral-200 dark:border-neutral-700 shadow-sm dark:shadow-none">
+                                            <div className="bg-white dark:bg-neutral-700 p-3 rounded-lg flex justify-between items-center mb-4 border border-neutral-200 dark:border-neutral-700 shadow-sm dark:shadow-none">
                                                 <div className="text-neutral-600 dark:text-neutral-400">{t('delete.currentPallet')} <span className="text-neutral-900 dark:text-white font-mono text-xl ml-2">{data.pallet.number}</span></div>
                                                 <div className="text-sm text-neutral-500">{t('delete.totalBoxes')} {data.boxesInPallet?.length || 0}</div>
                                             </div>
@@ -219,7 +223,7 @@ const DeleteItemsModal: React.FC<DeleteItemsModalProps> = ({ isOpen, onClose, on
                                                             ? 'bg-red-50 dark:bg-red-900/10 border-red-200 dark:border-red-900/30 opacity-60'
                                                             : box.status === 'Open'
                                                                 ? 'bg-emerald-50 dark:bg-emerald-900/10 border-emerald-200 dark:border-emerald-900/30'
-                                                                : 'bg-white dark:bg-neutral-800 border-neutral-200 dark:border-neutral-700 hover:border-neutral-300 dark:hover:border-neutral-600'
+                                                                : 'bg-white dark:bg-neutral-700 border-neutral-200 dark:border-neutral-700 hover:border-neutral-300 dark:hover:border-neutral-600'
                                                             }`}
                                                     >
                                                         <div className="flex flex-col">
@@ -272,7 +276,7 @@ const DeleteItemsModal: React.FC<DeleteItemsModalProps> = ({ isOpen, onClose, on
                         <div className="flex gap-4 w-full">
                             <button
                                 onClick={() => setConfirmModal({ ...confirmModal, isOpen: false })}
-                                className="flex-1 py-4 rounded-xl bg-neutral-200 dark:bg-neutral-800 text-neutral-900 dark:text-white font-semibold hover:bg-neutral-300 dark:hover:bg-neutral-700 transition-colors"
+                                className="flex-1 py-4 rounded-xl bg-neutral-200 dark:bg-neutral-700 text-neutral-900 dark:text-white font-semibold hover:bg-neutral-300 dark:hover:bg-neutral-700 transition-colors"
                             >
                                 {t('ws.cancel')}
                             </button>
@@ -290,4 +294,4 @@ const DeleteItemsModal: React.FC<DeleteItemsModalProps> = ({ isOpen, onClose, on
     );
 };
 
-export default DeleteItemsModal;
+export default React.memo(DeleteItemsModal);

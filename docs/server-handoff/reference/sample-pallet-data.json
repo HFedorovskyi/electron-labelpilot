@@ -1,0 +1,24 @@
+{
+  "_comment": "Runtime render data for the sample pallet scheme. Scalars fill {{...}} in text elements; items[] fill the table rows (each cell resolves {{column.key}} against one item).",
+
+  "pallet_number": "PLT-000123",
+  "shipping_date": "22.06.2026",
+  "production_date": "21.06.2026",
+  "operator_name": "Иванов И.",
+
+  "total_count": "138",
+  "total_places": "12",
+  "total_boxes": "138",
+  "weight_total": "132.300",
+  "weight_netto_pallet": "120.000",
+  "weight_brutto_pallet": "132.300",
+
+  "items": [
+    { "name": "Колбаса «Молочная»",   "article": "ART-1001", "quantity": "8",  "batch_number": "LOT-1001", "production_date_batch": "21.06.2026", "exp_date_full": "21.07.2026", "weight_netto_pack": "9.500",  "weight_brutto_pack": "9.900" },
+    { "name": "Сосиски «Сливочные»",  "article": "ART-1002", "quantity": "10", "batch_number": "LOT-1001", "production_date_batch": "21.06.2026", "exp_date_full": "21.07.2026", "weight_netto_pack": "10.250", "weight_brutto_pack": "10.650" },
+    { "name": "Сардельки «Говяжьи»",  "article": "ART-1003", "quantity": "12", "batch_number": "LOT-1001", "production_date_batch": "21.06.2026", "exp_date_full": "21.07.2026", "weight_netto_pack": "11.000", "weight_brutto_pack": "11.400" },
+    { "name": "Колбаса «Молочная»",   "article": "ART-1001", "quantity": "14", "batch_number": "LOT-1002", "production_date_batch": "20.06.2026", "exp_date_full": "20.07.2026", "weight_netto_pack": "11.750", "weight_brutto_pack": "12.150" },
+    { "name": "Сосиски «Сливочные»",  "article": "ART-1002", "quantity": "16", "batch_number": "LOT-1002", "production_date_batch": "20.06.2026", "exp_date_full": "20.07.2026", "weight_netto_pack": "9.500",  "weight_brutto_pack": "9.900" },
+    { "name": "Сардельки «Говяжьи»",  "article": "ART-1003", "quantity": "8",  "batch_number": "LOT-1002", "production_date_batch": "20.06.2026", "exp_date_full": "20.07.2026", "weight_netto_pack": "10.250", "weight_brutto_pack": "10.650" }
+  ]
+}

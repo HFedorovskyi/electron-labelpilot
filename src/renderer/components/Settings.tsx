@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
-import { Save, RefreshCw, Settings as SettingsIcon, Printer, Languages, Moon, Sun, Monitor } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Save, RefreshCw, Settings as SettingsIcon, Printer, Languages, Moon, Sun, Monitor, ShieldCheck, ShieldAlert, LogOut, KeyRound } from 'lucide-react';
 import PrinterSettings from './PrinterSettings';
 import UpdateSettings from './UpdateSettings';
-import { useTranslation, type Lang } from '../i18n';
+import { useTranslation, getSavedLang, type Lang } from '../i18n';
 import { useTheme } from './ThemeProvider';
+import { useLicenseStatus } from '../hooks/useLicenseStatus';
 
 interface SerialPortInfo {
     path: string;
@@ -23,9 +24,20 @@ interface PrinterInfo {
     status: number;
 }
 
-const Settings = () => {
+interface SettingsProps {
+    /** Switch the active app tab (provided by App). Used to open the dedicated License panel. */
+    onNavigate?: (tab: string) => void;
+}
+
+const Settings = ({ onNavigate }: SettingsProps) => {
     const { t, lang, setLang } = useTranslation();
     const { theme, setTheme } = useTheme();
+    const { license } = useLicenseStatus();
+    // Durable local-demo state (the seeded demo), independent of the server license mode.
+    const [isDemo, setIsDemo] = useState(false);
+    useEffect(() => {
+        window.desktopBridge.invoke('demo:status').then((r: any) => setIsDemo(!!r?.isDemo)).catch(() => { });
+    }, []);
     const [ports, setPorts] = useState<SerialPortInfo[]>([]);
     const [protocols, setProtocols] = useState<ProtocolInfo[]>([]);
     const [config, setConfig] = useState({
@@ -35,11 +47,14 @@ const Settings = () => {
         baudRate: 9600,
         host: '192.168.1.50',
         port: 8000,
-        pollingInterval: 500,
-        stabilityCount: 5
+        pollingInterval: 250,
+        stabilityCount: 4
     });
 
     const [printers, setPrinters] = useState<PrinterInfo[]>([]);
+    // Accordion layout: at 1366x768 all three printer roles remain visible, while
+    // only the role being edited consumes vertical space.
+    const [expandedPrinterId, setExpandedPrinterId] = useState<string | null>(null);
     const [printerConfig, setPrinterConfig] = useState<any>({
         packPrinter: {
             id: 'pack_default',
@@ -61,7 +76,17 @@ const Settings = () => {
             baudRate: 9600,
             dpi: 203
         },
-        autoPrintOnStable: false,
+        palletPrinter: {
+            id: 'pallet_default',
+            active: false,
+            name: 'Pallet Printer',
+            connection: 'windows_driver',
+            protocol: 'image',
+            port: 9100,
+            baudRate: 9600,
+            dpi: 203
+        },
+        autoPrintOnStable: true,
         serverIp: ''
     });
     const [isSyncing, setIsSyncing] = useState(false);
@@ -69,6 +94,13 @@ const Settings = () => {
     const [toastMessage, setToastMessage] = useState<string | null>(null);
     const [showResetModal, setShowResetModal] = useState(false);
     const [isResetting, setIsResetting] = useState(false);
+    const [resetConfirmText, setResetConfirmText] = useState('');
+    // Station identity (null when the station is UNPROVISIONED). Drives the
+    // "Демо режим" button's wipe-confirmation: a provisioned station gets an
+    // extra warning before its real data is replaced by the demo dataset.
+    const [identity, setIdentity] = useState<any>(null);
+    // Snapshot of the last saved scale+printer config; drives the "unsaved changes" sticky bar.
+    const savedSnapshotRef = useRef<string>('');
 
     useEffect(() => {
         loadData();
@@ -81,32 +113,77 @@ const Settings = () => {
 
     const loadData = async () => {
         try {
-            const portsList = await window.electron.invoke('get-serial-ports');
-            const protocolsList = await window.electron.invoke('get-protocols');
-            const savedConfig = await window.electron.invoke('get-scale-config');
+            const portsList = await window.desktopBridge.invoke('get-serial-ports');
+            const protocolsList = await window.desktopBridge.invoke('get-protocols');
+            const savedConfig = await window.desktopBridge.invoke('get-scale-config');
 
-            const printersList = await window.electron.invoke('get-printers');
-            const savedPrinterConfig = await window.electron.invoke('get-printer-config');
+            const printersList = await window.desktopBridge.invoke('get-printers');
+            const savedPrinterConfig = await window.desktopBridge.invoke('get-printer-config');
+
+            try {
+                setIdentity(await window.desktopBridge.invoke('get-identity'));
+            } catch {
+                setIdentity(null);
+            }
 
             setPorts(portsList);
             setProtocols(protocolsList);
 
-            if (savedPrinterConfig) setPrinterConfig(savedPrinterConfig);
+            // Merge over the state defaults so EVERY printer role always exists in state,
+            // even if the backend response omits one (e.g. an older config without a
+            // palletPrinter). Otherwise the pallet block would lose its editable config.
+            let nextPrinter = printerConfig;
+            if (savedPrinterConfig) {
+                nextPrinter = {
+                    ...printerConfig,
+                    ...savedPrinterConfig,
+                    packPrinter: savedPrinterConfig.packPrinter || printerConfig.packPrinter,
+                    boxPrinter: savedPrinterConfig.boxPrinter || printerConfig.boxPrinter,
+                    palletPrinter: savedPrinterConfig.palletPrinter || printerConfig.palletPrinter,
+                };
+                setPrinterConfig(nextPrinter);
+            }
             if (printersList) setPrinters(printersList);
 
+            let nextConfig = config;
             if (savedConfig) {
+                nextConfig = savedConfig;
                 setConfig(savedConfig);
             } else if (portsList.length > 0 && !config.path) {
-                setConfig(prev => ({ ...prev, path: portsList[0].path }));
+                nextConfig = { ...config, path: portsList[0].path };
+                setConfig(nextConfig);
             }
+            // Baseline for unsaved-changes detection.
+            savedSnapshotRef.current = JSON.stringify({ config: nextConfig, printerConfig: nextPrinter });
         } catch (err) {
             console.error("Failed to load settings data", err);
         }
     };
 
+    const isValidIpStr = (ip: string) => /^(\d{1,3}\.){3}\d{1,3}$/.test(ip) && ip.split('.').every(o => Number(o) <= 255);
+
+    // Block saving an obviously-broken config (bad printer IP / out-of-range port).
+    const validateConfig = (): string | null => {
+        for (const role of ['packPrinter', 'boxPrinter', 'palletPrinter'] as const) {
+            const p = printerConfig[role];
+            if (p && p.connection === 'tcp') {
+                if (p.ip && !isValidIpStr(p.ip)) return t('settings.invalidConfig');
+                if (p.port != null && (p.port < 1 || p.port > 65535)) return t('settings.invalidConfig');
+            }
+        }
+        return null;
+    };
+
     const handleSave = () => {
-        window.electron.send('save-scale-config', config);
-        window.electron.send('save-printer-config', printerConfig);
+        const err = validateConfig();
+        if (err) { showToast(err); return; }
+        window.desktopBridge.send('save-scale-config', config);
+        // Language is persisted separately (the language buttons write config.language to
+        // disk via saveLang). Carry the LIVE saved language so a printer-config save here
+        // doesn't revert it to the stale mount-time value.
+        const toSave = { ...printerConfig, language: getSavedLang() };
+        window.desktopBridge.send('save-printer-config', toSave);
+        savedSnapshotRef.current = JSON.stringify({ config, printerConfig: toSave });
         showToast(t('settings.saved'));
     };
 
@@ -118,11 +195,13 @@ const Settings = () => {
 
         setIsSyncing(true);
         try {
-            await window.electron.invoke('sync-data', printerConfig.serverIp);
-            showToast(t('settings.connectionSuccess'));
+            // sync-data resolves to info.online (false on timeout/wrong-server/no-uuid —
+            // it never rejects), so a bare await would report success for a dead server.
+            const online = await window.desktopBridge.invoke('sync-data', printerConfig.serverIp);
+            showToast(online ? t('settings.connectionSuccess') : t('settings.connectionFailed'));
         } catch (error) {
             console.error('Connection test failed:', error);
-            showToast(t('settings.connectionFailed'));
+            showToast(`${t('settings.connectionFailed')}: ${error instanceof Error ? error.message : String(error)}`);
         } finally {
             setIsSyncing(false);
         }
@@ -131,25 +210,27 @@ const Settings = () => {
     const handleReset = async () => {
         setIsResetting(true);
         try {
-            const res = await window.electron.invoke('reset-database');
+            const res = await window.desktopBridge.invoke('reset-database');
             if (res.success) {
                 showToast(t('settings.resetSuccess') || 'Database Reset Successfully');
                 // Reload data to reflect empty state
                 window.location.reload();
             } else {
-                showToast(res.message);
+                // Keep the modal open on failure so the admin sees the reason and can retry.
+                showToast(res.message || t('settings.resetFailed'));
+                setIsResetting(false);
             }
         } catch (error) {
             console.error('Reset failed:', error);
-            showToast('Reset failed');
-        } finally {
+            showToast(`${t('settings.resetFailed')}: ${error instanceof Error ? error.message : String(error)}`);
             setIsResetting(false);
-            setShowResetModal(false);
         }
     };
 
+    const isDirty = savedSnapshotRef.current !== '' && JSON.stringify({ config, printerConfig }) !== savedSnapshotRef.current;
+
     return (
-        <div className="bg-transparent min-h-screen text-neutral-900 dark:text-white p-8 relative">
+        <div className="bg-transparent min-h-screen text-neutral-900 dark:text-white p-4 md:p-5 xl:p-6 relative pb-28">
             {/* Toast Notification */}
             {toastMessage && (
                 <div className="fixed bottom-8 right-8 bg-emerald-600 text-white px-6 py-3 rounded-xl shadow-2xl flex items-center gap-3 animate-bounce z-50">
@@ -158,14 +239,31 @@ const Settings = () => {
                 </div>
             )}
 
-            <h1 className="text-3xl font-bold mb-8 flex items-center gap-3 text-neutral-900 dark:text-white">
+            <h1 className="text-2xl lg:text-3xl font-bold mb-6 flex items-center gap-3 text-neutral-900 dark:text-white">
                 <SettingsIcon className="w-8 h-8 text-emerald-500" />
                 {t('settings.title')}
             </h1>
 
-            <div className="space-y-8 max-w-4xl">
+            {/* Sticky unsaved-changes save bar (printer + scale configs) */}
+            {isDirty && (
+                <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-4 px-6 py-3 rounded-2xl bg-neutral-900 dark:bg-neutral-700 text-white shadow-2xl border border-white/10 animate-in fade-in slide-in-from-bottom-2 duration-200">
+                    <span className="flex items-center gap-2 text-sm font-medium">
+                        <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+                        {t('settings.unsavedChanges')}
+                    </span>
+                    <button
+                        onClick={handleSave}
+                        className="flex items-center gap-2 px-5 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-xl font-semibold text-white transition-all active:scale-95"
+                    >
+                        <Save size={16} />
+                        {t('settings.saveAll')}
+                    </button>
+                </div>
+            )}
+
+            <div className="space-y-6 max-w-7xl">
                 {/* ── Theme Configuration ── */}
-                <div className="p-6 bg-white dark:bg-white/5 border border-neutral-200 dark:border-white/10 rounded-2xl shadow-sm dark:shadow-none">
+                <div className="p-6 bg-white dark:bg-white/5 border border-neutral-200 dark:border-neutral-600 rounded-2xl shadow-sm dark:shadow-none">
                     <h2 className="text-xl font-semibold mb-6 flex items-center gap-3 text-neutral-800 dark:text-emerald-400">
                         <Moon className="w-6 h-6" />
                         {t('settings.theme') || 'Appearance'}
@@ -175,7 +273,7 @@ const Settings = () => {
                             onClick={() => setTheme('light')}
                             className={`px-6 py-3 rounded-xl border transition-all font-medium flex items-center gap-2 ${theme === 'light'
                                 ? 'bg-emerald-600 border-emerald-600 text-white shadow-lg shadow-emerald-500/20'
-                                : 'bg-neutral-50 dark:bg-black/20 border-neutral-200 dark:border-white/10 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/5'
+                                : 'bg-neutral-50 dark:bg-black/20 border-neutral-200 dark:border-neutral-600 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/5'
                                 }`}
                         >
                             <Sun size={18} /> Light
@@ -184,7 +282,7 @@ const Settings = () => {
                             onClick={() => setTheme('dark')}
                             className={`px-6 py-3 rounded-xl border transition-all font-medium flex items-center gap-2 ${theme === 'dark'
                                 ? 'bg-emerald-600 border-emerald-600 text-white shadow-lg shadow-emerald-500/20'
-                                : 'bg-neutral-50 dark:bg-black/20 border-neutral-200 dark:border-white/10 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/5'
+                                : 'bg-neutral-50 dark:bg-black/20 border-neutral-200 dark:border-neutral-600 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/5'
                                 }`}
                         >
                             <Moon size={18} /> Dark
@@ -193,7 +291,7 @@ const Settings = () => {
                             onClick={() => setTheme('system')}
                             className={`px-6 py-3 rounded-xl border transition-all font-medium flex items-center gap-2 ${theme === 'system'
                                 ? 'bg-emerald-600 border-emerald-600 text-white shadow-lg shadow-emerald-500/20'
-                                : 'bg-neutral-50 dark:bg-black/20 border-neutral-200 dark:border-white/10 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/5'
+                                : 'bg-neutral-50 dark:bg-black/20 border-neutral-200 dark:border-neutral-600 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/5'
                                 }`}
                         >
                             <Monitor size={18} /> System
@@ -202,29 +300,29 @@ const Settings = () => {
                 </div>
 
                 {/* ── Language Configuration ── */}
-                <div className="p-6 bg-white dark:bg-white/5 border border-neutral-200 dark:border-white/10 rounded-2xl shadow-sm dark:shadow-none">
+                <div className="p-6 bg-white dark:bg-white/5 border border-neutral-200 dark:border-neutral-600 rounded-2xl shadow-sm dark:shadow-none">
                     <h2 className="text-xl font-semibold mb-6 flex items-center gap-3 text-emerald-400">
                         <Languages className="w-6 h-6" />
                         {t('settings.language')}
                     </h2>
                     <div className="flex gap-4">
-                        {(['ru', 'en', 'de'] as Lang[]).map((l) => (
+                        {(['ru', 'en', 'de', 'uk'] as Lang[]).map((l) => (
                             <button
                                 key={l}
                                 onClick={() => setLang(l)}
                                 className={`px-6 py-3 rounded-xl border transition-all font-medium ${lang === l
                                     ? 'bg-emerald-600 border-emerald-600 text-white shadow-lg shadow-emerald-500/20'
-                                    : 'bg-neutral-50 dark:bg-black/20 border-neutral-200 dark:border-white/10 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/5'
+                                    : 'bg-neutral-50 dark:bg-black/20 border-neutral-200 dark:border-neutral-600 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/5'
                                     }`}
                             >
-                                {l.toUpperCase()}
+                                {({ ru: '🇷🇺 Русский', en: '🇬🇧 English', de: '🇩🇪 Deutsch', uk: '🇺🇦 Українська' } as Record<string, string>)[l] || l.toUpperCase()}
                             </button>
                         ))}
                     </div>
                 </div>
 
                 {/* ── Server Configuration ── */}
-                <div className="p-6 bg-white dark:bg-white/5 border border-neutral-200 dark:border-white/10 rounded-2xl shadow-sm dark:shadow-none">
+                <div className="p-6 bg-white dark:bg-white/5 border border-neutral-200 dark:border-neutral-600 rounded-2xl shadow-sm dark:shadow-none">
                     <h2 className="text-xl font-semibold mb-6 flex items-center gap-3 text-blue-600 dark:text-blue-400">
                         <SettingsIcon className="w-6 h-6" />
                         {t('sidebar.serverStatus')}
@@ -237,13 +335,13 @@ const Settings = () => {
                                 value={printerConfig.serverIp || ''}
                                 onChange={(e) => setPrinterConfig({ ...printerConfig, serverIp: e.target.value })}
                                 placeholder={t('settings.serverIpPlaceholder')}
-                                className="w-full bg-white dark:bg-black/30 border border-neutral-200 dark:border-white/10 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-all hover:bg-neutral-50 dark:hover:bg-black/40 font-mono"
+                                className="w-full bg-white dark:bg-black/30 border border-neutral-200 dark:border-neutral-600 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-all hover:bg-neutral-50 dark:hover:bg-black/40 font-mono"
                             />
                             <button
                                 onClick={handleSync}
                                 disabled={isSyncing || !printerConfig.serverIp}
                                 className={`px-6 rounded-xl font-medium transition-all flex items-center gap-2 ${isSyncing || !printerConfig.serverIp
-                                    ? 'bg-neutral-100 dark:bg-neutral-800 text-neutral-400 dark:text-neutral-500 cursor-not-allowed'
+                                    ? 'bg-neutral-100 dark:bg-neutral-700 text-neutral-400 dark:text-neutral-500 cursor-not-allowed'
                                     : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg hover:shadow-blue-500/20'
                                     }`}
                             >
@@ -257,13 +355,45 @@ const Settings = () => {
                         </p>
                     </div>
 
+                    {/* License / Demo status — summary; full details live in the dedicated License panel. */}
+                    <div className="mt-6 pt-6 border-t border-neutral-200 dark:border-neutral-600">
+                        <div className="flex items-center justify-between gap-3 flex-wrap">
+                            <div className="text-sm min-w-0">
+                                {license ? (
+                                    license.mode === 'demo' ? (
+                                        <span className="flex items-center gap-2 font-medium text-amber-600 dark:text-amber-400">
+                                            <ShieldAlert className="w-4 h-4 shrink-0" />{t('license.demo')}
+                                        </span>
+                                    ) : (
+                                        <span className={`flex items-center gap-2 font-medium ${license.expired ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                                            {license.expired ? <ShieldAlert className="w-4 h-4 shrink-0" /> : <ShieldCheck className="w-4 h-4 shrink-0" />}
+                                            <span className="truncate">{t('license.licensed')}: {license.edition}{license.expired ? ` (${t('license.statusExpired')})` : ''}</span>
+                                        </span>
+                                    )
+                                ) : (
+                                    <span className="flex items-center gap-2 text-neutral-500 dark:text-neutral-400">
+                                        <ShieldCheck className="w-4 h-4 opacity-50 shrink-0" />{t('license.unknown')}
+                                    </span>
+                                )}
+                            </div>
+                            {onNavigate && (
+                                <button
+                                    onClick={() => onNavigate('license')}
+                                    className="flex items-center gap-2 px-4 py-2 rounded-xl bg-neutral-100 dark:bg-white/5 border border-neutral-200 dark:border-neutral-600 text-sm font-medium text-neutral-600 dark:text-neutral-300 hover:text-emerald-600 dark:hover:text-emerald-400 hover:border-emerald-300 dark:hover:border-emerald-500/40 transition-colors shrink-0"
+                                >
+                                    <KeyRound className="w-4 h-4" />{t('license.openPanel')}
+                                </button>
+                            )}
+                        </div>
+                    </div>
+
                     {/* Offline Sync Controls */}
-                    <div className="mt-6 pt-6 border-t border-neutral-200 dark:border-white/5">
+                    <div className="mt-6 pt-6 border-t border-neutral-200 dark:border-neutral-600">
                         <label className="block text-sm text-neutral-600 dark:text-neutral-400 mb-3">{t('settings.offlineSync') || 'Offline Synchronization'}</label>
                         <div className="flex gap-3 flex-wrap">
                             <button
                                 onClick={async () => {
-                                    const res = await window.electron.invoke('import-identity-file');
+                                    const res = await window.desktopBridge.invoke('import-identity-file');
                                     if (res.success) {
                                         showToast(t('settings.identityImported') || 'Identity Imported');
                                     } else {
@@ -279,8 +409,55 @@ const Settings = () => {
                             </button>
                             <button
                                 onClick={async () => {
-                                    const res = await window.electron.invoke('offline-import');
+                                    // Station is "provisioned" once it has an identity with a
+                                    // station number. Seeding the demo routes through
+                                    // importFullDump (DELETE + INSERT), so warn extra hard
+                                    // before wiping a real provisioned station's data.
+                                    const provisioned = !!(identity && identity.station_number != null);
+                                    const warning = provisioned
+                                        ? `${t('demo.seedWipeProvisioned')}\n\n${t('demo.seedHint')}`
+                                        : `${t('demo.seedWipe')}\n\n${t('demo.seedHint')}`;
+                                    if (!window.confirm(warning)) return;
+                                    const res = await window.desktopBridge.invoke('seed-demo-data');
+                                    if (res.success) {
+                                        // Mirror handleReset: reload so the UI reflects the
+                                        // freshly seeded local data.
+                                        window.location.reload();
+                                    } else {
+                                        showToast(res.message || t('demo.seedFailed'));
+                                    }
+                                }}
+                                className="px-5 py-3 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-medium shadow-lg hover:shadow-amber-500/20 flex items-center gap-2 transition-all"
+                            >
+                                <ShieldAlert className="w-5 h-5" />
+                                {t('demo.seedButton') || 'Демо режим'}
+                            </button>
+                            {isDemo && (
+                                <button
+                                    onClick={async () => {
+                                        if (!window.confirm(t('demo.exitConfirm'))) return;
+                                        const res = await window.desktopBridge.invoke('exit-demo');
+                                        if (res?.success) {
+                                            window.location.reload();
+                                        } else {
+                                            showToast(res?.message || t('demo.exitFailed'));
+                                        }
+                                    }}
+                                    className="px-5 py-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-medium shadow-lg hover:shadow-rose-500/20 flex items-center gap-2 transition-all"
+                                >
+                                    <LogOut className="w-5 h-5" />
+                                    {t('demo.exitButton')}
+                                </button>
+                            )}
+                            <button
+                                onClick={async () => {
+                                    const res = await window.desktopBridge.invoke('offline-import');
                                     showToast(res.message);
+                                    // The import writes serverIp (and other fields) to the
+                                    // on-disk config behind this screen. Reload so a later
+                                    // 'Save All' doesn't clobber the just-imported values
+                                    // with the stale mount-time state.
+                                    await loadData();
                                 }}
                                 className="px-5 py-3 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-medium shadow-lg hover:shadow-purple-500/20 flex items-center gap-2 transition-all"
                             >
@@ -289,7 +466,7 @@ const Settings = () => {
                             </button>
                             <button
                                 onClick={async () => {
-                                    const res = await window.electron.invoke('offline-export');
+                                    const res = await window.desktopBridge.invoke('offline-export');
                                     showToast(res.message);
                                 }}
                                 className="px-5 py-3 rounded-xl bg-orange-600 hover:bg-orange-500 text-white font-medium shadow-lg hover:shadow-orange-500/20 flex items-center gap-2 transition-all"
@@ -298,44 +475,72 @@ const Settings = () => {
                                 {t('settings.exportData') || 'Export Data (.lpr)'}
                             </button>
                         </div>
+                        <p className="mt-3 text-xs text-neutral-500 dark:text-neutral-400 flex items-center gap-1.5">
+                            <ShieldAlert className="w-3.5 h-3.5 shrink-0 text-amber-500" />
+                            {t('demo.seedInline')}
+                        </p>
                     </div>
                 </div>
 
                 {/* ── Printer Configuration ── */}
-                <div className="p-6 bg-white dark:bg-white/5 border border-neutral-200 dark:border-white/10 rounded-2xl shadow-sm dark:shadow-none">
-                    <h2 className="text-xl font-semibold mb-6 flex items-center gap-3 text-amber-600 dark:text-amber-400">
+                <div className="p-4 sm:p-5 bg-white dark:bg-white/5 border border-neutral-200 dark:border-neutral-600 rounded-2xl shadow-sm dark:shadow-none">
+                    <h2 className="text-xl font-semibold mb-4 flex items-center gap-3 text-amber-600 dark:text-amber-400">
                         <Printer className="w-6 h-6" />
                         {t('settings.printer')}
                     </h2>
 
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div className="flex flex-col gap-3">
                         {/* Pack Label Printer */}
                         <PrinterSettings
                             title={t('settings.packPrinter')}
+                            description={t('settings.packPrinterDesc')}
+                            accentClass="border-l-emerald-500"
                             config={printerConfig.packPrinter as any}
                             onChange={(newConfig) => setPrinterConfig({ ...printerConfig, packPrinter: newConfig as any })}
                             systemPrinters={printers}
                             serialPorts={ports}
+                            onToast={showToast}
+                            expanded={expandedPrinterId === 'pack'}
+                            onToggle={() => setExpandedPrinterId((current) => current === 'pack' ? null : 'pack')}
                         />
 
                         {/* Box Label Printer */}
                         <PrinterSettings
                             title={t('settings.boxPrinter')}
+                            description={t('settings.boxPrinterDesc')}
+                            accentClass="border-l-blue-500"
                             config={printerConfig.boxPrinter as any}
                             onChange={(newConfig) => setPrinterConfig({ ...printerConfig, boxPrinter: newConfig as any })}
                             systemPrinters={printers}
                             serialPorts={ports}
+                            onToast={showToast}
+                            expanded={expandedPrinterId === 'box'}
+                            onToggle={() => setExpandedPrinterId((current) => current === 'box' ? null : 'box')}
+                        />
+
+                        {/* Pallet Sheet Printer */}
+                        <PrinterSettings
+                            title={t('settings.palletPrinter')}
+                            description={t('settings.palletPrinterDesc')}
+                            accentClass="border-l-amber-500"
+                            config={printerConfig.palletPrinter as any}
+                            onChange={(newConfig) => setPrinterConfig({ ...printerConfig, palletPrinter: newConfig as any })}
+                            systemPrinters={printers}
+                            serialPorts={ports}
+                            onToast={showToast}
+                            expanded={expandedPrinterId === 'pallet'}
+                            onToggle={() => setExpandedPrinterId((current) => current === 'pallet' ? null : 'pallet')}
                         />
                     </div>
 
-                    <div className="flex items-center gap-3 mt-6">
-                        <button onClick={loadData} className="text-xs text-amber-400 hover:text-amber-300 flex items-center gap-1">
-                            <RefreshCw size={12} /> {t('settings.refreshPrinters')}
+                    <div className="flex items-center gap-3 mt-4">
+                        <button onClick={loadData} className="min-h-11 px-3 text-sm text-amber-600 dark:text-amber-400 hover:text-amber-500 dark:hover:text-amber-300 flex items-center gap-2 rounded-lg touch-manipulation">
+                            <RefreshCw size={16} /> {t('settings.refreshPrinters')}
                         </button>
                     </div>
 
                     {/* Auto-Print Toggle */}
-                    <div className="mt-6 p-4 bg-neutral-50 dark:bg-black/20 rounded-xl border border-neutral-200 dark:border-white/5">
+                    <div className="mt-6 p-4 bg-neutral-50 dark:bg-black/20 rounded-xl border border-neutral-200 dark:border-neutral-600">
                         <div className="flex justify-between items-center">
                             <div>
                                 <div className="font-medium text-neutral-900 dark:text-white">{t('settings.autoPrint')}</div>
@@ -357,15 +562,16 @@ const Settings = () => {
                 </div>
 
                 {/* ── Scale Configuration ── */}
-                <div className="p-6 bg-white dark:bg-white/5 border border-neutral-200 dark:border-white/10 rounded-2xl shadow-sm dark:shadow-none">
-                    <h2 className="text-xl font-semibold mb-6 text-neutral-900 dark:text-white">{t('settings.scales')}</h2>
+                <div className="p-6 bg-white dark:bg-white/5 border border-neutral-200 dark:border-neutral-600 rounded-2xl shadow-sm dark:shadow-none">
+                    <h2 className="text-xl font-semibold mb-1 text-neutral-900 dark:text-white">{t('settings.scales')}</h2>
+                    <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-6">{t('settings.scalesDesc')}</p>
 
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                         {/* Left Column: Connection */}
                         <div className="space-y-6">
-                            <h3 className="text-lg font-medium text-neutral-800 dark:text-white/80 border-b border-neutral-200 dark:border-white/5 pb-2">{t('settings.connectionInterface')}</h3>
+                            <h3 className="text-lg font-medium text-neutral-800 dark:text-white/80 border-b border-neutral-200 dark:border-neutral-600 pb-2">{t('settings.connectionInterface')}</h3>
 
-                            <div className="flex bg-neutral-100 dark:bg-black/20 p-1.5 rounded-xl border border-neutral-200 dark:border-white/10 w-full mb-2">
+                            <div className="flex bg-neutral-100 dark:bg-black/20 p-1.5 rounded-xl border border-neutral-200 dark:border-neutral-600 w-full mb-2">
                                 <button
                                     onClick={() => {
                                         setConfig({ ...config, type: 'serial' });
@@ -413,7 +619,7 @@ const Settings = () => {
                                         <select
                                             value={config.path}
                                             onChange={(e) => setConfig({ ...config, path: e.target.value })}
-                                            className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-white/10 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                                            className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-neutral-600 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
                                         >
                                             {ports.map(p => (
                                                 <option key={p.path} value={p.path}>{p.path} {p.manufacturer ? `(${p.manufacturer})` : ''}</option>
@@ -426,7 +632,7 @@ const Settings = () => {
                                         <select
                                             value={config.baudRate}
                                             onChange={(e) => setConfig({ ...config, baudRate: Number(e.target.value) })}
-                                            className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-white/10 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                                            className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-neutral-600 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
                                         >
                                             {[1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200].map(rate => (
                                                 <option key={rate} value={rate}>{rate}</option>
@@ -444,7 +650,7 @@ const Settings = () => {
                                             type="text"
                                             value={config.host}
                                             onChange={(e) => setConfig({ ...config, host: e.target.value })}
-                                            className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-white/10 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                                            className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-neutral-600 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
                                         />
                                     </div>
                                     <div>
@@ -453,7 +659,7 @@ const Settings = () => {
                                             type="number"
                                             value={config.port}
                                             onChange={(e) => setConfig({ ...config, port: Number(e.target.value) })}
-                                            className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-white/10 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                                            className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-neutral-600 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
                                         />
                                     </div>
                                 </div>
@@ -462,23 +668,51 @@ const Settings = () => {
 
                         {/* Right Column: Protocol & Advanced */}
                         <div className="space-y-6">
-                            <h3 className="text-lg font-medium text-neutral-800 dark:text-white/80 border-b border-neutral-200 dark:border-white/5 pb-2">{t('settings.protocolSettings')}</h3>
+                            <h3 className="text-lg font-medium text-neutral-800 dark:text-white/80 border-b border-neutral-200 dark:border-neutral-600 pb-2">{t('settings.protocolSettings')}</h3>
 
                             <div>
                                 <label className="block text-sm text-neutral-600 dark:text-neutral-400 mb-2">{t('settings.protocol')}</label>
                                 <select
                                     value={config.protocolId}
                                     onChange={(e) => setConfig({ ...config, protocolId: e.target.value })}
-                                    className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-white/10 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                                    className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-neutral-600 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
                                     disabled={config.type === 'simulator'}
                                 >
                                     {protocols.map(p => (
                                         <option key={p.id} value={p.id}>{p.name}</option>
                                     ))}
                                 </select>
-                                <p className="mt-2 text-xs text-neutral-500 dark:text-white/40">
+                                <p className="mt-2 text-xs text-neutral-500 dark:text-white/60">
                                     {protocols.find(p => p.id === config.protocolId)?.description}
                                 </p>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm text-neutral-600 dark:text-neutral-400 mb-2">{t('settings.stabilityPreset')}</label>
+                                <div className="grid grid-cols-3 gap-2">
+                                    {([
+                                        { id: 'fast',     label: t('settings.presetFast'),     poll: 150, count: 3, hint: '~450ms' },
+                                        { id: 'balanced', label: t('settings.presetBalanced'), poll: 250, count: 4, hint: '~1s' },
+                                        { id: 'accurate', label: t('settings.presetAccurate'), poll: 500, count: 5, hint: '~2.5s' },
+                                    ] as const).map(p => {
+                                        const active = config.pollingInterval === p.poll && config.stabilityCount === p.count;
+                                        return (
+                                            <button
+                                                key={p.id}
+                                                type="button"
+                                                onClick={() => setConfig({ ...config, pollingInterval: p.poll, stabilityCount: p.count })}
+                                                className={`px-2 py-2.5 rounded-xl border text-sm transition-all ${
+                                                    active
+                                                        ? 'border-emerald-500 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+                                                        : 'border-neutral-200 dark:border-neutral-600 bg-neutral-50 dark:bg-black/20 text-neutral-700 dark:text-neutral-300 hover:border-emerald-400/50'
+                                                }`}
+                                            >
+                                                <div className="font-semibold text-[13px] leading-tight break-words">{p.label}</div>
+                                                <div className="text-xs opacity-60 mt-0.5">{p.hint}</div>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
                             </div>
 
                             <div className="grid grid-cols-2 gap-4">
@@ -488,7 +722,7 @@ const Settings = () => {
                                         type="number"
                                         value={config.pollingInterval}
                                         onChange={(e) => setConfig({ ...config, pollingInterval: Number(e.target.value) })}
-                                        className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-white/10 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                                        className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-neutral-600 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
                                     />
                                 </div>
                                 <div>
@@ -497,22 +731,13 @@ const Settings = () => {
                                         type="number"
                                         value={config.stabilityCount}
                                         onChange={(e) => setConfig({ ...config, stabilityCount: Number(e.target.value) })}
-                                        className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-white/10 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                                        className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-200 dark:border-neutral-600 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
                                     />
                                 </div>
                             </div>
                         </div>
                     </div>
 
-                    <div className="mt-8 flex justify-end pt-6 border-t border-white/5">
-                        <button
-                            onClick={handleSave}
-                            className="flex items-center gap-2 px-8 py-3 bg-emerald-600 hover:bg-emerald-500 hover:shadow-lg hover:shadow-emerald-500/20 rounded-xl font-semibold text-white transition-all transform active:scale-95"
-                        >
-                            <Save size={18} />
-                            {t('settings.save')}
-                        </button>
-                    </div>
                 </div>
 
                 {/* ── Updates ── */}
@@ -531,8 +756,8 @@ const Settings = () => {
                             {t('settings.resetWarning') || 'Resetting the database will permanently delete all local data, including labels, products, and logs. This action cannot be undone.'}
                         </p>
                         <button
-                            onClick={() => window.electron.send('open-logs-folder', {})}
-                            className="w-fit px-6 py-3 bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 border border-neutral-300 dark:border-white/5 hover:border-neutral-400 dark:hover:border-white/10 text-neutral-900 dark:text-white font-medium rounded-xl transition-all flex items-center gap-2"
+                            onClick={() => window.desktopBridge.send('open-logs-folder', {})}
+                            className="w-fit px-6 py-3 bg-neutral-100 dark:bg-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-700 border border-neutral-300 dark:border-neutral-600 hover:border-neutral-400 dark:hover:border-white/10 text-neutral-900 dark:text-white font-medium rounded-xl transition-all flex items-center gap-2"
                         >
                             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -555,9 +780,9 @@ const Settings = () => {
                 <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
                     <div
                         className="absolute inset-0 bg-neutral-900/40 dark:bg-black/80 backdrop-blur-sm"
-                        onClick={() => !isResetting && setShowResetModal(false)}
+                        onClick={() => { if (!isResetting) { setShowResetModal(false); setResetConfirmText(''); } }}
                     />
-                    <div className="relative bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-white/10 rounded-3xl p-8 max-w-md w-full shadow-2xl animate-in fade-in zoom-in duration-200">
+                    <div className="relative bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-600 rounded-3xl p-8 max-w-md w-full shadow-2xl animate-in fade-in zoom-in duration-200">
                         <div className="w-16 h-16 bg-red-100 dark:bg-red-500/10 rounded-full flex items-center justify-center mb-6 mx-auto">
                             <RefreshCw className="w-8 h-8 text-red-600 dark:text-red-500" />
                         </div>
@@ -565,22 +790,33 @@ const Settings = () => {
                         <h3 className="text-2xl font-bold text-center mb-2 text-neutral-900 dark:text-white">
                             {t('settings.resetConfirmTitle') || 'Are you absolutely sure?'}
                         </h3>
-                        <p className="text-neutral-600 dark:text-neutral-400 text-center mb-8">
+                        <p className="text-neutral-600 dark:text-neutral-400 text-center mb-4">
                             {t('settings.resetConfirmDesc') || 'This will wipe all local data and reset the station identity. You will need to re-import the identity file to use the application.'}
                         </p>
+
+                        {/* Type-to-confirm guard — prevents accidental touchscreen reset */}
+                        <input
+                            type="text"
+                            value={resetConfirmText}
+                            onChange={(e) => setResetConfirmText(e.target.value)}
+                            placeholder="RESET"
+                            autoFocus
+                            className="w-full text-center font-mono tracking-widest uppercase bg-neutral-50 dark:bg-black/30 border border-neutral-300 dark:border-neutral-600 rounded-xl px-4 py-3 text-neutral-900 dark:text-white mb-2 focus:outline-none focus:ring-2 focus:ring-red-500/50"
+                        />
+                        <p className="text-xs text-center text-neutral-500 dark:text-neutral-400 mb-6">{t('settings.resetTypeHint')}</p>
 
                         <div className="flex gap-4">
                             <button
                                 disabled={isResetting}
-                                onClick={() => setShowResetModal(false)}
-                                className="flex-1 px-6 py-3 bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-900 dark:text-white font-medium rounded-xl transition-all"
+                                onClick={() => { setShowResetModal(false); setResetConfirmText(''); }}
+                                className="flex-1 px-6 py-3 bg-neutral-100 dark:bg-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-900 dark:text-white font-medium rounded-xl transition-all"
                             >
                                 {t('common.cancel') || 'Cancel'}
                             </button>
                             <button
-                                disabled={isResetting}
+                                disabled={isResetting || resetConfirmText.trim().toUpperCase() !== 'RESET'}
                                 onClick={handleReset}
-                                className={`flex-1 px-6 py-3 bg-red-600 hover:bg-red-500 text-white font-medium rounded-xl transition-all flex items-center justify-center gap-2 ${isResetting ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                className="flex-1 px-6 py-3 bg-red-600 hover:bg-red-500 text-white font-medium rounded-xl transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-red-600"
                             >
                                 {isResetting ? (
                                     <RefreshCw className="w-5 h-5 animate-spin" />

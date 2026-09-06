@@ -1,0 +1,24 @@
+{
+  "protocols": [
+    { "id": "cas_simple", "encoding": "utf8", "data": "ST,GS,+  1.500kg\r\n", "expected": { "weight": 1.5, "unit": "kg", "stable": true } },
+    { "id": "mettler_sics", "encoding": "utf8", "data": "S S 100.00 g\r\n", "expected": { "weight": 100.0, "unit": "g", "stable": true } },
+    { "id": "massak_100", "encoding": "hex", "data": "f855ce070010d204000000010000", "expected": { "weight": 1.234, "unit": "kg", "stable": true } },
+    { "id": "massak_p1", "encoding": "utf8", "data": "S +001.234 kg\r\n", "expected": { "weight": 1.234, "unit": "kg", "stable": true } },
+    { "id": "massak_astb", "encoding": "utf8", "data": "S + 1.235 kg\r", "expected": { "weight": 1.235, "unit": "kg", "stable": true } },
+    { "id": "massak_astbp", "encoding": "utf8", "data": "S +2.750\r\n", "expected": { "weight": 2.75, "unit": "kg", "stable": true } },
+    { "id": "massak_j", "encoding": "hex", "data": "8000d00700", "expected": { "weight": 2.0, "unit": "kg", "stable": true } },
+    { "id": "massak_cont", "encoding": "utf8", "data": "U -0.500 kg\r\n", "expected": { "weight": -0.5, "unit": "kg", "stable": false } },
+    { "id": "massak_lite", "encoding": "utf8", "data": "1.111\r\n", "expected": { "weight": 1.111, "unit": "kg", "stable": false } },
+    { "id": "shtrih_m", "encoding": "utf8", "data": "W=3.125kg\r\n", "expected": { "weight": 3.125, "unit": "kg", "stable": false } },
+    { "id": "mertech", "encoding": "utf8", "data": "S 4.500\r", "expected": { "weight": 4.5, "unit": "kg", "stable": true } },
+    { "id": "and_standard", "encoding": "utf8", "data": "ST,+00123.45 g\r\n", "expected": { "weight": 0.12345, "unit": "kg", "stable": true } },
+    { "id": "dibal_delta", "encoding": "utf8", "data": "+12.345A\r\n", "expected": { "weight": 12.345, "unit": "kg", "stable": true } },
+    { "id": "ohaus", "encoding": "utf8", "data": " 1.250 kg\r\n", "expected": { "weight": 1.25, "unit": "kg", "stable": false } },
+    { "id": "sartorius_sbi", "encoding": "utf8", "data": "+ 00125.0 g\r\n", "expected": { "weight": 0.125, "unit": "kg", "stable": false } },
+    { "id": "radwag", "encoding": "utf8", "data": "- 2.500 kg\r\n", "expected": { "weight": -2.5, "unit": "kg", "stable": false } },
+    { "id": "kern", "encoding": "utf8", "data": "1.234 lb\r\n", "expected": { "weight": 1.234, "unit": "lb", "stable": false } },
+    { "id": "dini_argeo", "encoding": "utf8", "data": "ST,GS,+12.340,kg\r\n", "expected": { "weight": 12.34, "unit": "kg", "stable": true } },
+    { "id": "simulator", "encoding": "utf8", "data": "SIM", "expected": null },
+    { "id": "generic", "encoding": "utf8", "data": "net 7.875 kg\r\n", "expected": { "weight": 7.875, "unit": "kg", "stable": false } }
+  ]
+}

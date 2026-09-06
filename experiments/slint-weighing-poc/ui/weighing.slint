@@ -1,0 +1,1229 @@
+import { ScrollView } from "std-widgets.slint";
+import "../assets/fonts/Inter-Regular.ttf";
+import "../assets/fonts/Inter-Bold.ttf";
+
+global Palette {
+    out property <color> n50: #fafafa;
+    out property <color> n100: #f5f5f5;
+    out property <color> n200: #e5e5e5;
+    out property <color> n300: #d4d4d4;
+    out property <color> n400: #a3a3a3;
+    out property <color> n500: #737373;
+    out property <color> n600: #525252;
+    out property <color> n700: #404040;
+    out property <color> n800: #262626;
+    out property <color> n900: #171717;
+    out property <color> e50: #ecfdf5;
+    out property <color> e100: #d1fae5;
+    out property <color> e200: #a7f3d0;
+    out property <color> e300: #6ee7b7;
+    out property <color> e400: #34d399;
+    out property <color> e500: #10b981;
+    out property <color> e600: #059669;
+    out property <color> e700: #047857;
+    out property <color> a50: #fffbeb;
+    out property <color> a300: #fcd34d;
+    out property <color> a500: #f59e0b;
+    out property <color> a600: #d97706;
+    out property <color> a700: #b45309;
+    out property <color> r50: #fef2f2;
+    out property <color> r100: #fee2e2;
+    out property <color> r300: #fca5a5;
+    out property <color> r400: #f87171;
+    out property <color> r500: #ef4444;
+    out property <color> r600: #dc2626;
+    out property <color> r700: #b91c1c;
+}
+
+component AppIcon inherits Rectangle {
+    in property <image> icon;
+    in property <color> icon-color: Palette.n500;
+    background: transparent;
+    Image {
+        width: parent.width;
+        height: parent.height;
+        source: root.icon;
+        image-fit: contain;
+    }
+}
+
+component SidebarItem inherits Rectangle {
+    in property <string> text;
+    in property <image> icon;
+    in property <bool> active: false;
+    in property <bool> collapsed: false;
+    in property <bool> danger: false;
+    callback clicked;
+
+    height: 44px;
+    border-radius: 12px;
+    border-width: root.active ? 1px : 0px;
+    border-color: #10b98133;
+    background: root.active ? #d1fae580 : touch.has-hover ? (root.danger ? Palette.r100 : Palette.n100) : transparent;
+
+    HorizontalLayout {
+        alignment: root.collapsed ? center : start;
+        spacing: 12px;
+        padding-left: root.collapsed ? 0px : 16px;
+        padding-right: root.collapsed ? 0px : 16px;
+        AppIcon {
+            width: 20px;
+            height: 20px;
+            icon: root.icon;
+            icon-color: root.danger ? Palette.r500 : root.active ? Palette.e600 : touch.has-hover ? Palette.n900 : Palette.n500;
+        }
+        Text {
+            visible: !root.collapsed;
+            text: root.text;
+            color: root.danger ? Palette.r500 : root.active ? Palette.e600 : touch.has-hover ? Palette.n900 : Palette.n500;
+            font-size: 14px;
+            font-weight: 500;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+    touch := TouchArea { clicked => { root.clicked(); } }
+}
+
+component MainButton inherits Rectangle {
+    in property <string> text;
+    in property <image> icon;
+    in property <color> normal-color: Palette.e600;
+    in property <color> hover-color: Palette.e500;
+    in property <color> pressed-color: Palette.e700;
+    in property <bool> enabled: true;
+    callback clicked;
+
+    height: 56px;
+    border-radius: 24px;
+    background: !root.enabled ? #05966966 : touch.pressed ? root.pressed-color : touch.has-hover ? root.hover-color : root.normal-color;
+    drop-shadow-color: root.enabled ? #10b98155 : transparent;
+    drop-shadow-blur: 24px;
+    drop-shadow-offset-y: 8px;
+
+    HorizontalLayout {
+        alignment: center;
+        spacing: 12px;
+        AppIcon { width: 24px; height: 24px; icon: root.icon; icon-color: white; }
+        Text { text: root.text; color: white; font-size: 20px; font-weight: 700; vertical-alignment: center; overflow: elide; }
+    }
+    touch := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
+}
+
+component TileButton inherits Rectangle {
+    in property <string> text;
+    in property <image> icon;
+    in property <color> normal-color: Palette.n100;
+    in property <color> hover-color: Palette.n200;
+    in property <color> pressed-color: Palette.n300;
+    in property <color> outline: Palette.n300;
+    in property <color> foreground: Palette.n500;
+    in property <bool> enabled: true;
+    in property <bool> short: false;
+    callback clicked;
+
+    height: root.short ? 66px : 80px;
+    border-radius: 16px;
+    border-width: 1px;
+    border-color: root.outline;
+    background: !root.enabled ? #f5f5f580 : touch.pressed ? root.pressed-color : touch.has-hover ? root.hover-color : root.normal-color;
+    drop-shadow-color: #0000000d;
+    drop-shadow-blur: 5px;
+    drop-shadow-offset-y: 1px;
+
+    VerticalLayout {
+        alignment: center;
+        spacing: root.short ? 4px : 8px;
+        AppIcon {
+            width: root.short ? 21px : 24px;
+            height: root.short ? 21px : 24px;
+            icon: root.icon;
+            icon-color: root.enabled ? (touch.has-hover ? Palette.n800 : root.foreground) : Palette.n400;
+        }
+        Text {
+            text: root.text;
+            color: root.enabled ? (touch.has-hover ? Palette.n800 : root.foreground) : Palette.n400;
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 1.2px;
+            horizontal-alignment: center;
+        }
+    }
+    touch := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
+}
+
+component StatusPill inherits Rectangle {
+    in property <string> text;
+    in property <image> icon;
+    in property <bool> show-icon: false;
+    in property <bool> good: true;
+
+    height: 38px;
+    min-width: 142px;
+    border-radius: 19px;
+    border-width: 1px;
+    border-color: root.good ? #10b98133 : #ef444433;
+    background: root.good ? #10b9811a : #ef44441a;
+
+    HorizontalLayout {
+        alignment: center;
+        spacing: 8px;
+        padding-left: 14px;
+        padding-right: 14px;
+        if root.show-icon: AppIcon {
+            width: 14px;
+            height: 14px;
+            icon: root.icon;
+            icon-color: root.good ? Palette.e600 : Palette.r500;
+        }
+        if !root.show-icon: Rectangle {
+            width: 8px;
+            height: 8px;
+            border-radius: 4px;
+            background: root.good ? Palette.e500 : Palette.r500;
+        }
+        Text {
+            text: root.text;
+            color: root.good ? Palette.e600 : Palette.r500;
+            font-size: 14px;
+            font-weight: 500;
+            vertical-alignment: center;
+        }
+    }
+}
+
+component ThinStatRow inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+    in property <color> value-color: Palette.n900;
+    in property <bool> compact: false;
+    height: root.compact ? 24px : 28px;
+    Rectangle { y: parent.height - 1px; height: 1px; background: Palette.n200; }
+    HorizontalLayout {
+        Text { text: root.label; color: Palette.n500; font-size: 14px; vertical-alignment: center; }
+        Text { text: root.value; color: root.value-color; font-size: 14px; font-family: "Consolas"; horizontal-alignment: right; vertical-alignment: center; }
+    }
+}
+
+component StatEditorRow inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+    in property <image> icon;
+    in property <bool> compact: false;
+    callback clicked;
+
+    height: root.compact ? 42px : 46px;
+    border-radius: 12px;
+    border-width: 1px;
+    border-color: touch.has-hover ? Palette.e300 : Palette.n300;
+    background: touch.pressed ? Palette.e100 : touch.has-hover ? Palette.e50 : Palette.n100;
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        Text { text: root.label; color: Palette.n500; font-size: 12px; font-weight: 700; letter-spacing: 0.8px; vertical-alignment: center; }
+        HorizontalLayout {
+            alignment: end;
+            spacing: 12px;
+            Text { text: root.value; color: touch.has-hover ? Palette.e600 : Palette.n900; font-family: "Consolas"; font-size: 17px; font-weight: 700; vertical-alignment: center; }
+            Rectangle {
+                width: 34px;
+                height: 34px;
+                border-radius: 8px;
+                border-width: 1px;
+                border-color: touch.has-hover ? Palette.e400 : Palette.n300;
+                background: touch.has-hover ? Palette.e100 : white;
+                AppIcon { width: 16px; height: 16px; x: 9px; y: 9px; icon: root.icon; icon-color: Palette.e600; }
+            }
+        }
+    }
+    touch := TouchArea { clicked => { root.clicked(); } }
+}
+
+component KeyButton inherits Rectangle {
+    in property <string> text;
+    callback clicked;
+    height: 56px;
+    border-radius: 14px;
+    border-width: 1px;
+    border-color: Palette.n300;
+    background: touch.pressed ? Palette.e100 : touch.has-hover ? Palette.e50 : Palette.n50;
+    Text { text: root.text; color: Palette.n900; font-size: 22px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+    touch := TouchArea { clicked => { root.clicked(); } }
+}
+
+export component WeighingPrototype inherits Window {
+    title: "LabelPilot — Slint Weighing PoC";
+    preferred-width: 1366px;
+    preferred-height: 768px;
+    min-width: 1024px;
+    min-height: 640px;
+    background: Palette.n50;
+    default-font-family: "Inter";
+
+    in-out property <string> gross-weight: "3.406";
+    in-out property <string> net-weight: "3.364";
+    in-out property <bool> stable: true;
+    in-out property <int> units-in-box: 7;
+    in-out property <int> boxes-on-pallet: 12;
+    in-out property <int> total-units: 246;
+    in-out property <string> pack-number: "01000247";
+    in-out property <string> box-number: "01000036";
+    in-out property <string> batch-number: "2408-02";
+    in-out property <string> labeling-date: "24.08.2026";
+    in-out property <string> last-print: "#01000246 · 14:32:08";
+    in-out property <bool> toast-visible: false;
+    in-out property <string> toast-text: "";
+    in-out property <bool> alert-visible: false;
+    in-out property <string> alert-text: "";
+    property <bool> product-modal-visible: false;
+    property <bool> keypad-visible: false;
+    property <bool> date-modal-visible: false;
+    property <bool> delete-modal-visible: false;
+    property <bool> sidebar-collapsed: false;
+    in-out property <bool> compact: false;
+    in-out property <bool> narrow: false;
+    in-out property <bool> short: false;
+    property <bool> effective-collapsed: root.sidebar-collapsed || root.compact;
+    property <length> sidebar-width: root.effective-collapsed ? 72px : 256px;
+    property <length> content-padding: root.narrow ? 18px : root.compact ? 24px : 36px;
+    property <length> work-area-width: min(root.width - root.sidebar-width, 1500px);
+    property <length> right-panel-width: (root.work-area-width - root.content-padding * 2 - (root.narrow ? 16px : 24px)) / 3;
+
+    callback print-label;
+    callback repeat-print;
+    callback close-box;
+    callback print-pallet;
+    callback delete-last;
+    callback quit-app;
+
+    HorizontalLayout {
+        spacing: 0px;
+
+        Rectangle {
+            width: root.sidebar-width;
+            background: #ffffffee;
+            border-width: 1px;
+            border-color: Palette.n200;
+
+            VerticalLayout {
+                padding-left: root.effective-collapsed ? 12px : 16px;
+                padding-right: root.effective-collapsed ? 12px : 16px;
+                padding-top: root.effective-collapsed ? 12px : 16px;
+                padding-bottom: root.effective-collapsed ? 12px : 16px;
+                spacing: 0px;
+
+                header := Rectangle {
+                    height: root.effective-collapsed ? 76px : 108px;
+                    background: header-touch.has-hover && root.effective-collapsed ? Palette.n100 : transparent;
+                    border-radius: 12px;
+
+                    HorizontalLayout {
+                        alignment: center;
+                        spacing: 8px;
+                        if root.effective-collapsed: AppIcon {
+                            width: 24px;
+                            height: 24px;
+                            icon: @image-url("../assets/icons/menu.png");
+                        }
+                        if !root.effective-collapsed: HorizontalLayout {
+                            width: 224px;
+                            alignment: start;
+                            spacing: 8px;
+                            Image {
+                                width: 36px;
+                                height: 36px;
+                                source: @image-url("../assets/sidebar-logo.svg");
+                                image-fit: contain;
+                            }
+                            Text {
+                                text: "LabelPilot";
+                                color: Palette.n800;
+                                font-size: 22px;
+                                font-weight: 800;
+                                vertical-alignment: center;
+                            }
+                            Rectangle { horizontal-stretch: 1; }
+                            AppIcon {
+                                width: 20px;
+                                height: 20px;
+                                icon: @image-url("../assets/icons/chevron-left.png");
+                            }
+                        }
+                    }
+                    header-touch := TouchArea {
+                        clicked => { root.sidebar-collapsed = !root.sidebar-collapsed; }
+                    }
+                }
+
+                VerticalLayout {
+                    spacing: 8px;
+                    SidebarItem { text: "Весовая станция"; icon: @image-url("../assets/icons/scale-green.png"); active: true; collapsed: root.effective-collapsed; }
+                    SidebarItem { text: "Фиксированный вес"; icon: @image-url("../assets/icons/weight.png"); collapsed: root.effective-collapsed; }
+                    SidebarItem { text: "Задания на печать"; icon: @image-url("../assets/icons/clipboard-list.png"); collapsed: root.effective-collapsed; }
+                    SidebarItem { text: "Очередь печати"; icon: @image-url("../assets/icons/list-restart.png"); collapsed: root.effective-collapsed; }
+                    SidebarItem { text: "Диагностика"; icon: @image-url("../assets/icons/stethoscope.png"); collapsed: root.effective-collapsed; }
+                    SidebarItem { text: "Товары"; icon: @image-url("../assets/icons/package.png"); collapsed: root.effective-collapsed; }
+                    SidebarItem { text: "Лицензия"; icon: @image-url("../assets/icons/key-round.png"); collapsed: root.effective-collapsed; }
+                    SidebarItem { text: "Настройки"; icon: @image-url("../assets/icons/settings.png"); collapsed: root.effective-collapsed; }
+                }
+
+                Rectangle { vertical-stretch: 1; }
+
+                SidebarItem {
+                    text: "Выход";
+                    icon: @image-url("../assets/icons/log-out-red.png");
+                    collapsed: root.effective-collapsed;
+                    danger: true;
+                    clicked => { root.quit-app(); }
+                }
+
+                Rectangle {
+                    height: root.effective-collapsed ? 116px : 156px;
+                    Rectangle { y: 0px; height: 1px; background: Palette.n200; }
+
+                    VerticalLayout {
+                        padding-top: 14px;
+                        spacing: 9px;
+
+                        HorizontalLayout {
+                            alignment: root.effective-collapsed ? center : start;
+                            if !root.effective-collapsed: Text {
+                                text: "СТАТУС СЕРВЕРА";
+                                color: Palette.n500;
+                                font-size: 10px;
+                                font-weight: 700;
+                                letter-spacing: 0.8px;
+                                vertical-alignment: center;
+                            }
+                            Rectangle { horizontal-stretch: root.effective-collapsed ? 0 : 1; }
+                            Rectangle {
+                                width: root.effective-collapsed ? 12px : 7px;
+                                height: root.effective-collapsed ? 12px : 7px;
+                                border-radius: 6px;
+                                background: Palette.e500;
+                            }
+                            if !root.effective-collapsed: Text {
+                                text: "Подключён";
+                                color: Palette.e600;
+                                font-size: 12px;
+                                font-weight: 500;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        HorizontalLayout {
+                            alignment: root.effective-collapsed ? center : start;
+                            if !root.effective-collapsed: Text {
+                                text: "СТАНЦИЯ";
+                                color: Palette.n500;
+                                font-size: 10px;
+                                font-weight: 700;
+                                letter-spacing: 0.8px;
+                                vertical-alignment: center;
+                            }
+                            Rectangle { horizontal-stretch: root.effective-collapsed ? 0 : 1; }
+                            Rectangle {
+                                width: 40px;
+                                height: 24px;
+                                border-radius: 4px;
+                                border-width: 1px;
+                                border-color: Palette.n200;
+                                background: Palette.n100;
+                                Text {
+                                    text: "02";
+                                    color: Palette.n700;
+                                    font-family: "Consolas";
+                                    font-size: 12px;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+
+                        HorizontalLayout {
+                            alignment: root.effective-collapsed ? center : start;
+                            AppIcon {
+                                width: 16px;
+                                height: 16px;
+                                icon: @image-url("../assets/icons/user.png");
+                            }
+                            if !root.effective-collapsed: Text {
+                                text: "Иван Петров";
+                                color: Palette.n700;
+                                font-size: 12px;
+                                font-weight: 500;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                        }
+                        if !root.effective-collapsed: Text {
+                            text: "ВЕРСИЯ 2.0.0";
+                            color: Palette.e600;
+                            font-size: 10px;
+                            font-weight: 700;
+                            letter-spacing: 1px;
+                        }
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            horizontal-stretch: 1;
+            background: Palette.n50;
+
+            HorizontalLayout {
+                width: root.work-area-width;
+                x: (parent.width - self.width) / 2;
+                padding: root.content-padding;
+                spacing: root.narrow ? 16px : 24px;
+
+                Rectangle {
+                    horizontal-stretch: 1;
+                    border-radius: 16px;
+                    border-width: 1px;
+                    border-color: Palette.n200;
+                    background: white;
+                    drop-shadow-color: #00000012;
+                    drop-shadow-blur: 8px;
+                    drop-shadow-offset-y: 2px;
+
+                    VerticalLayout {
+                        padding: root.narrow ? 16px : 20px;
+                        spacing: 16px;
+
+                        HorizontalLayout {
+                            height: 40px;
+                            Text {
+                                text: "Весовая станция";
+                                color: Palette.n900;
+                                font-size: 24px;
+                                font-weight: 600;
+                                vertical-alignment: center;
+                            }
+                            HorizontalLayout {
+                                alignment: end;
+                                spacing: 8px;
+                                StatusPill {
+                                    text: root.compact ? "Весы: OK" : "Весы: подключены";
+                                }
+                                StatusPill {
+                                    text: root.compact ? "Принтер: OK" : "Принтер: готов";
+                                    icon: @image-url("../assets/icons/printer-green.png");
+                                    show-icon: true;
+                                }
+                            }
+                        }
+
+                        VerticalLayout {
+                            height: 84px;
+                            spacing: 8px;
+                            Text {
+                                text: "Поиск товара";
+                                color: Palette.n400;
+                                font-size: 14px;
+                                font-weight: 500;
+                            }
+                            product-picker := Rectangle {
+                                height: 58px;
+                                border-radius: 16px;
+                                border-width: 1px;
+                                border-color: Palette.n300;
+                                background: product-touch.pressed ? Palette.n200 : product-touch.has-hover ? Palette.n100 : Palette.n50;
+
+                                HorizontalLayout {
+                                    padding-left: 20px;
+                                    padding-right: 20px;
+                                    Text {
+                                        text: "«Классикалық» мәрмәр сиыр етінен джерки";
+                                        color: Palette.n900;
+                                        font-size: root.narrow ? 15px : 18px;
+                                        vertical-alignment: center;
+                                        overflow: elide;
+                                    }
+                                    AppIcon {
+                                        width: 24px;
+                                        height: 24px;
+                                        icon: @image-url("../assets/icons/search.png");
+                                        icon-color: Palette.n400;
+                                    }
+                                }
+                                product-touch := TouchArea {
+                                    clicked => { root.product-modal-visible = true; }
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            height: root.narrow ? 130px : 140px;
+                            border-radius: 16px;
+                            border-width: 1px;
+                            border-color: Palette.e200;
+                            background: Palette.e50;
+
+                            VerticalLayout {
+                                padding: 16px;
+                                spacing: 6px;
+                                Text {
+                                    text: "НАИМЕНОВАНИЕ";
+                                    color: Palette.e600;
+                                    font-size: 14px;
+                                    font-weight: 700;
+                                    letter-spacing: 0.8px;
+                                }
+                                Text {
+                                    text: "«Классикалық» мәрмәр сиыр етінен джерки";
+                                    color: Palette.e700;
+                                    font-size: root.narrow ? 22px : 28px;
+                                    font-weight: 700;
+                                    wrap: word-wrap;
+                                }
+                                Text {
+                                    text: "АРТИКУЛ: 3002     СРОК ГОДНОСТИ: 80";
+                                    color: #34d39999;
+                                    font-family: "Consolas";
+                                    font-size: 14px;
+                                }
+                            }
+                        }
+
+                        HorizontalLayout {
+                            height: root.short ? 140px : 158px;
+                            spacing: 16px;
+
+                            Rectangle {
+                                horizontal-stretch: 1;
+                                border-radius: 16px;
+                                border-width: 1px;
+                                border-color: Palette.n200;
+                                background: Palette.n50;
+
+                                VerticalLayout {
+                                    alignment: center;
+                                    spacing: 8px;
+                                    Text {
+                                        text: "ВЕС БРУТТО";
+                                        color: Palette.n500;
+                                        font-size: 12px;
+                                        font-weight: 700;
+                                        letter-spacing: 1.5px;
+                                        horizontal-alignment: center;
+                                    }
+                                    HorizontalLayout {
+                                        alignment: center;
+                                        spacing: 5px;
+                                        Text {
+                                            text: root.gross-weight;
+                                            color: Palette.e600;
+                                            font-family: "Consolas";
+                                            font-size: root.narrow ? 44px : 58px;
+                                            font-weight: 300;
+                                            vertical-alignment: center;
+                                        }
+                                        Text {
+                                            text: "кг";
+                                            color: #10b98180;
+                                            font-size: 24px;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                    if root.stable: HorizontalLayout {
+                                        alignment: center;
+                                        spacing: 8px;
+                                        Rectangle {
+                                            width: 4px;
+                                            height: 4px;
+                                            border-radius: 2px;
+                                            background: Palette.e500;
+                                        }
+                                        Text {
+                                            text: "СТАБИЛЬНО";
+                                            color: Palette.e600;
+                                            font-size: 12px;
+                                            font-weight: 700;
+                                            letter-spacing: 1.4px;
+                                        }
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                horizontal-stretch: 1;
+                                border-radius: 16px;
+                                border-width: 1px;
+                                border-color: Palette.n200;
+                                background: Palette.n50;
+
+                                VerticalLayout {
+                                    alignment: center;
+                                    spacing: 8px;
+                                    Text {
+                                        text: "ВЕС НЕТТО";
+                                        color: Palette.n500;
+                                        font-size: 12px;
+                                        font-weight: 700;
+                                        letter-spacing: 1.5px;
+                                        horizontal-alignment: center;
+                                    }
+                                    HorizontalLayout {
+                                        alignment: center;
+                                        spacing: 5px;
+                                        Text {
+                                            text: root.net-weight;
+                                            color: Palette.n700;
+                                            font-family: "Consolas";
+                                            font-size: root.narrow ? 44px : 58px;
+                                            font-weight: 300;
+                                            vertical-alignment: center;
+                                        }
+                                        Text {
+                                            text: "кг";
+                                            color: Palette.n500;
+                                            font-size: 24px;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Rectangle { vertical-stretch: 1; }
+                    }
+                }
+
+                Rectangle {
+                    width: root.right-panel-width;
+                    background: transparent;
+
+                    VerticalLayout {
+                        width: root.right-panel-width;
+                        height: parent.height;
+                        spacing: 16px;
+
+                            MainButton {
+                                text: "ПЕЧАТЬ ЭТИКЕТКИ";
+                                icon: @image-url("../assets/icons/printer-white.png");
+                                clicked => { root.print-label(); }
+                            }
+
+                            HorizontalLayout {
+                                width: root.right-panel-width;
+                                spacing: 16px;
+                                TileButton {
+                                    width: (root.right-panel-width - 16px) / 2;
+                                    text: "ПОВТОР";
+                                    icon: @image-url("../assets/icons/refresh-cw.png");
+                                    short: root.short;
+                                    clicked => { root.repeat-print(); }
+                                }
+                                TileButton {
+                                    horizontal-stretch: 1;
+                                    text: "КОРОБ";
+                                    icon: @image-url("../assets/icons/box.png");
+                                    short: root.short;
+                                    enabled: root.units-in-box > 0;
+                                    clicked => { root.close-box(); }
+                                }
+                            }
+
+                            HorizontalLayout {
+                                width: root.right-panel-width;
+                                spacing: 16px;
+                                TileButton {
+                                    width: (root.right-panel-width - 16px) / 2;
+                                    text: "УДАЛИТЬ";
+                                    icon: @image-url("../assets/icons/trash2-red.png");
+                                    short: root.short;
+                                    normal-color: Palette.r50;
+                                    hover-color: Palette.r100;
+                                    pressed-color: #fecaca;
+                                    outline: Palette.r300;
+                                    foreground: Palette.r600;
+                                    clicked => { root.delete-modal-visible = true; }
+                                }
+                                Rectangle { width: (root.right-panel-width - 16px) / 2; background: transparent; }
+                            }
+
+                            MainButton {
+                                height: 52px;
+                                border-radius: 16px;
+                                text: "ПАЛЛЕТНЫЙ ЛИСТ";
+                                icon: @image-url("../assets/icons/layers-white.png");
+                                normal-color: Palette.a600;
+                                hover-color: Palette.a500;
+                                pressed-color: Palette.a700;
+                                clicked => { root.print-pallet(); }
+                            }
+
+                            Rectangle {
+                                min-height: root.short ? 282px : 338px;
+                                vertical-stretch: 1;
+                                border-radius: 24px;
+                                border-width: 1px;
+                                border-color: Palette.n200;
+                                background: white;
+                                drop-shadow-color: #0000000d;
+                                drop-shadow-blur: 5px;
+                                drop-shadow-offset-y: 1px;
+
+                                VerticalLayout {
+                                    padding: root.short ? 12px : 16px;
+                                    spacing: root.short ? 2px : 3px;
+                                    Text {
+                                        text: "СТАТИСТИКА СЕССИИ";
+                                        color: Palette.n500;
+                                        font-size: 14px;
+                                        font-weight: 600;
+                                        letter-spacing: 1.4px;
+                                    }
+                                    StatEditorRow {
+                                        compact: root.short;
+                                        label: "ПАРТИЯ";
+                                        value: root.batch-number;
+                                        icon: @image-url("../assets/icons/hash-green.png");
+                                        clicked => { root.keypad-visible = true; }
+                                    }
+                                    StatEditorRow {
+                                        compact: root.short;
+                                        label: "ДАТА";
+                                        value: root.labeling-date;
+                                        icon: @image-url("../assets/icons/calendar-green.png");
+                                        clicked => { root.date-modal-visible = true; }
+                                    }
+                                    ThinStatRow {
+                                        compact: root.short;
+                                        label: "Упаковка №";
+                                        value: root.pack-number;
+                                        value-color: Palette.e600;
+                                    }
+                                    ThinStatRow {
+                                        compact: root.short;
+                                        label: "Короб №";
+                                        value: root.box-number;
+                                        value-color: Palette.e600;
+                                    }
+                                    VerticalLayout {
+                                        height: root.short ? 34px : 42px;
+                                        spacing: root.short ? 3px : 5px;
+                                        HorizontalLayout {
+                                            Text {
+                                                text: "В коробе";
+                                                color: Palette.n500;
+                                                font-size: 14px;
+                                            }
+                                            Text {
+                                                text: root.units-in-box + " / 20";
+                                                color: Palette.n900;
+                                                font-family: "Consolas";
+                                                font-size: 14px;
+                                                horizontal-alignment: right;
+                                            }
+                                        }
+                                        Rectangle {
+                                            height: 8px;
+                                            border-radius: 4px;
+                                            background: Palette.n200;
+                                            Rectangle {
+                                                width: parent.width * root.units-in-box / 20;
+                                                height: parent.height;
+                                                border-radius: 4px;
+                                                background: Palette.e500;
+                                            }
+                                        }
+                                    }
+                                    ThinStatRow {
+                                        compact: root.short;
+                                        label: "Коробов на паллете";
+                                        value: root.boxes-on-pallet;
+                                        value-color: Palette.a600;
+                                    }
+                                    ThinStatRow {
+                                        compact: root.short;
+                                        label: "Всего упаковок";
+                                        value: root.total-units;
+                                    }
+                                    Text {
+                                        text: "ПОСЛЕДНЯЯ ПЕЧАТЬ    " + root.last-print;
+                                        color: Palette.a600;
+                                        font-size: 11px;
+                                        horizontal-alignment: right;
+                                        overflow: elide;
+                                    }
+                                }
+                            }
+                        }
+                }
+            }
+        }
+    }
+
+    if root.toast-visible: Rectangle {
+        width: 460px;
+        height: 52px;
+        x: (parent.width - self.width) / 2;
+        y: parent.height - self.height - 32px;
+        border-radius: 16px;
+        background: Palette.e600;
+        drop-shadow-color: #10b98199;
+        drop-shadow-blur: 24px;
+        drop-shadow-offset-y: 8px;
+        HorizontalLayout {
+            alignment: center;
+            spacing: 8px;
+            AppIcon {
+                width: 20px;
+                height: 20px;
+                icon: @image-url("../assets/icons/printer-white.png");
+                icon-color: white;
+            }
+            Text {
+                text: root.toast-text;
+                color: white;
+                font-size: 15px;
+                font-weight: 600;
+                vertical-alignment: center;
+            }
+        }
+    }
+
+    if root.product-modal-visible: Rectangle {
+        height: parent.height;
+        background: #000000cc;
+
+        Rectangle {
+            width: min(parent.width - 32px, 680px);
+            height: min(parent.height - 32px, 520px);
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            border-radius: 32px;
+            border-width: 1px;
+            border-color: Palette.n200;
+            background: white;
+            drop-shadow-color: #00000080;
+            drop-shadow-blur: 30px;
+
+            VerticalLayout {
+                padding: 32px;
+                spacing: 14px;
+                Text {
+                    text: "Выбор товара";
+                    color: Palette.n900;
+                    font-size: 28px;
+                    font-weight: 700;
+                }
+                Text {
+                    text: "Коснитесь строки для выбора";
+                    color: Palette.n500;
+                    font-size: 15px;
+                }
+                MainButton {
+                    text: "«Классикалық» мәрмәр сиыр етінен джерки";
+                    icon: @image-url("../assets/icons/package.png");
+                    border-radius: 16px;
+                    clicked => { root.product-modal-visible = false; }
+                }
+                MainButton {
+                    text: "Колбаса варёная · упаковка 500 г";
+                    icon: @image-url("../assets/icons/package.png");
+                    border-radius: 16px;
+                    normal-color: Palette.n600;
+                    hover-color: Palette.n500;
+                    pressed-color: Palette.n700;
+                    clicked => { root.product-modal-visible = false; }
+                }
+                MainButton {
+                    text: "Стейк охлаждённый · вакуум";
+                    icon: @image-url("../assets/icons/package.png");
+                    border-radius: 16px;
+                    normal-color: Palette.n600;
+                    hover-color: Palette.n500;
+                    pressed-color: Palette.n700;
+                    clicked => { root.product-modal-visible = false; }
+                }
+                Rectangle { vertical-stretch: 1; }
+                MainButton {
+                    text: "ЗАКРЫТЬ";
+                    icon: @image-url("../assets/icons/x.png");
+                    border-radius: 16px;
+                    normal-color: Palette.n800;
+                    hover-color: Palette.n700;
+                    pressed-color: Palette.n900;
+                    clicked => { root.product-modal-visible = false; }
+                }
+            }
+        }
+    }
+
+    if root.keypad-visible: Rectangle {
+        height: parent.height;
+        background: #000000cc;
+
+        Rectangle {
+            width: 470px;
+            height: 590px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            border-radius: 32px;
+            background: white;
+
+            VerticalLayout {
+                padding: 24px;
+                spacing: 11px;
+                Text {
+                    text: "Номер партии";
+                    color: Palette.n900;
+                    font-size: 25px;
+                    font-weight: 700;
+                }
+                Rectangle {
+                    height: 58px;
+                    border-radius: 14px;
+                    border-width: 1px;
+                    border-color: Palette.e300;
+                    background: Palette.e50;
+                    Text {
+                        text: root.batch-number;
+                        color: Palette.e700;
+                        font-family: "Consolas";
+                        font-size: 24px;
+                        font-weight: 700;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 9px;
+                    KeyButton { horizontal-stretch: 1; text: "1"; clicked => { root.batch-number += "1"; } }
+                    KeyButton { horizontal-stretch: 1; text: "2"; clicked => { root.batch-number += "2"; } }
+                    KeyButton { horizontal-stretch: 1; text: "3"; clicked => { root.batch-number += "3"; } }
+                }
+                HorizontalLayout {
+                    spacing: 9px;
+                    KeyButton { horizontal-stretch: 1; text: "4"; clicked => { root.batch-number += "4"; } }
+                    KeyButton { horizontal-stretch: 1; text: "5"; clicked => { root.batch-number += "5"; } }
+                    KeyButton { horizontal-stretch: 1; text: "6"; clicked => { root.batch-number += "6"; } }
+                }
+                HorizontalLayout {
+                    spacing: 9px;
+                    KeyButton { horizontal-stretch: 1; text: "7"; clicked => { root.batch-number += "7"; } }
+                    KeyButton { horizontal-stretch: 1; text: "8"; clicked => { root.batch-number += "8"; } }
+                    KeyButton { horizontal-stretch: 1; text: "9"; clicked => { root.batch-number += "9"; } }
+                }
+                HorizontalLayout {
+                    spacing: 9px;
+                    KeyButton { horizontal-stretch: 1; text: "-"; clicked => { root.batch-number += "-"; } }
+                    KeyButton { horizontal-stretch: 1; text: "0"; clicked => { root.batch-number += "0"; } }
+                    KeyButton { horizontal-stretch: 1; text: "⌫"; clicked => { root.batch-number = ""; } }
+                }
+                HorizontalLayout {
+                    spacing: 10px;
+                    MainButton {
+                        horizontal-stretch: 1;
+                        text: "ОЧИСТИТЬ";
+                        icon: @image-url("../assets/icons/x.png");
+                        border-radius: 16px;
+                        normal-color: Palette.n600;
+                        hover-color: Palette.n500;
+                        pressed-color: Palette.n700;
+                        clicked => { root.batch-number = ""; }
+                    }
+                    MainButton {
+                        horizontal-stretch: 1;
+                        text: "ГОТОВО";
+                        icon: @image-url("../assets/icons/check-circle2.png");
+                        border-radius: 16px;
+                        clicked => { root.keypad-visible = false; }
+                    }
+                }
+            }
+        }
+    }
+
+    if root.date-modal-visible: Rectangle {
+        height: parent.height;
+        background: #000000cc;
+
+        Rectangle {
+            width: 560px;
+            height: 410px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            border-radius: 32px;
+            background: white;
+
+            VerticalLayout {
+                padding: 28px;
+                spacing: 14px;
+                Text {
+                    text: "Дата маркировки";
+                    color: Palette.n900;
+                    font-size: 27px;
+                    font-weight: 700;
+                }
+                Text {
+                    text: "Выберите дату для следующей упаковки";
+                    color: Palette.n500;
+                    font-size: 15px;
+                }
+                MainButton {
+                    text: "24.08.2026 · сегодня";
+                    icon: @image-url("../assets/icons/calendar-green.png");
+                    border-radius: 16px;
+                    clicked => {
+                        root.labeling-date = "24.08.2026";
+                        root.date-modal-visible = false;
+                    }
+                }
+                MainButton {
+                    text: "23.08.2026 · вчера";
+                    icon: @image-url("../assets/icons/calendar-green.png");
+                    border-radius: 16px;
+                    normal-color: Palette.n600;
+                    hover-color: Palette.n500;
+                    pressed-color: Palette.n700;
+                    clicked => {
+                        root.labeling-date = "23.08.2026";
+                        root.date-modal-visible = false;
+                    }
+                }
+                Rectangle { vertical-stretch: 1; }
+                MainButton {
+                    text: "ЗАКРЫТЬ";
+                    icon: @image-url("../assets/icons/x.png");
+                    border-radius: 16px;
+                    normal-color: Palette.n800;
+                    hover-color: Palette.n700;
+                    pressed-color: Palette.n900;
+                    clicked => { root.date-modal-visible = false; }
+                }
+            }
+        }
+    }
+
+    if root.delete-modal-visible: Rectangle {
+        height: parent.height;
+        background: #000000cc;
+
+        Rectangle {
+            width: 590px;
+            height: 390px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            border-radius: 32px;
+            background: white;
+
+            VerticalLayout {
+                padding: 32px;
+                spacing: 16px;
+                AppIcon {
+                    width: 52px;
+                    height: 52px;
+                    icon: @image-url("../assets/icons/trash2-red.png");
+                    icon-color: Palette.r500;
+                }
+                Text {
+                    text: "Удалить последнюю упаковку?";
+                    color: Palette.n900;
+                    font-size: 27px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                }
+                Text {
+                    text: "Счётчик текущего короба и общий счётчик упаковок будут уменьшены на один.";
+                    color: Palette.n500;
+                    font-size: 17px;
+                    wrap: word-wrap;
+                    horizontal-alignment: center;
+                }
+                Rectangle { vertical-stretch: 1; }
+                HorizontalLayout {
+                    spacing: 12px;
+                    MainButton {
+                        horizontal-stretch: 1;
+                        text: "ОТМЕНА";
+                        icon: @image-url("../assets/icons/x.png");
+                        border-radius: 16px;
+                        normal-color: Palette.n600;
+                        hover-color: Palette.n500;
+                        pressed-color: Palette.n700;
+                        clicked => { root.delete-modal-visible = false; }
+                    }
+                    MainButton {
+                        horizontal-stretch: 1;
+                        text: "УДАЛИТЬ";
+                        icon: @image-url("../assets/icons/trash2-red.png");
+                        border-radius: 16px;
+                        normal-color: Palette.r600;
+                        hover-color: Palette.r500;
+                        pressed-color: Palette.r700;
+                        clicked => {
+                            root.delete-modal-visible = false;
+                            root.delete-last();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if root.alert-visible: Rectangle {
+        height: parent.height;
+        background: #000000cc;
+
+        Rectangle {
+            width: min(parent.width - 32px, 672px);
+            height: 430px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            border-radius: 32px;
+            border-width: 1px;
+            border-color: Palette.n200;
+            background: white;
+
+            VerticalLayout {
+                padding: 40px;
+                spacing: 16px;
+                Rectangle {
+                    width: 96px;
+                    height: 96px;
+                    border-radius: 48px;
+                    background: Palette.r100;
+                    AppIcon {
+                        width: 48px;
+                        height: 48px;
+                        x: 24px;
+                        y: 24px;
+                        icon: @image-url("../assets/icons/alert-red.png");
+                        icon-color: Palette.r500;
+                    }
+                }
+                Text {
+                    text: "Внимание";
+                    color: Palette.n900;
+                    font-size: 30px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                }
+                Text {
+                    text: root.alert-text;
+                    color: Palette.n600;
+                    font-size: 20px;
+                    wrap: word-wrap;
+                    horizontal-alignment: center;
+                }
+                Rectangle { vertical-stretch: 1; }
+                MainButton {
+                    height: 64px;
+                    text: "ПОНЯТНО";
+                    icon: @image-url("../assets/icons/check-circle2.png");
+                    normal-color: Palette.n800;
+                    hover-color: Palette.n700;
+                    pressed-color: Palette.n900;
+                    border-radius: 16px;
+                    clicked => { root.alert-visible = false; }
+                }
+            }
+        }
+    }
+}

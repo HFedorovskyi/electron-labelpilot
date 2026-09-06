@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Download, RefreshCw, RotateCcw, HardDrive, CheckCircle, AlertTriangle, XCircle } from 'lucide-react';
+import { useTranslation } from '../i18n';
 
 interface BackupInfo {
     id: string;
@@ -36,6 +37,7 @@ const formatDate = (iso: string) => {
 };
 
 const UpdateSettings = () => {
+    const { t } = useTranslation();
     const [currentVersion, setCurrentVersion] = useState<string>('...');
     const [phase, setPhase] = useState<UpdatePhase>('idle');
     const [updateInfo, setUpdateInfo] = useState<UpdateCheckResult | null>(null);
@@ -48,17 +50,17 @@ const UpdateSettings = () => {
     const [rollbackMsg, setRollbackMsg] = useState<string>('');
 
     useEffect(() => {
-        window.electron.invoke('updater:get-version').then(setCurrentVersion).catch(() => { });
+        window.desktopBridge.invoke('updater:get-version').then(setCurrentVersion).catch(() => { });
         loadBackups();
 
         // Listen for updater events from main process
-        const removeProgress = window.electron.on('updater:progress', (data: any) => {
+        const removeProgress = window.desktopBridge.on('updater:progress', (data: any) => {
             setProgress(Math.round(data.percent));
         });
-        const removeDownloaded = window.electron.on('updater:downloaded', () => {
+        const removeDownloaded = window.desktopBridge.on('updater:downloaded', () => {
             setPhase('ready');
         });
-        const removeError = window.electron.on('updater:error', (data: any) => {
+        const removeError = window.desktopBridge.on('updater:error', (data: any) => {
             setPhase('error');
             setErrorMsg(data.message);
         });
@@ -73,7 +75,7 @@ const UpdateSettings = () => {
     const loadBackups = async () => {
         setLoadingBackups(true);
         try {
-            const list = await window.electron.invoke('updater:list-backups');
+            const list = await window.desktopBridge.invoke('updater:list-backups');
             setBackups(list || []);
         } catch {
             setBackups([]);
@@ -86,7 +88,7 @@ const UpdateSettings = () => {
         setPhase('checking');
         setErrorMsg('');
         try {
-            const result: UpdateCheckResult = await window.electron.invoke('updater:check');
+            const result: UpdateCheckResult = await window.desktopBridge.invoke('updater:check');
             setUpdateInfo(result);
             if (!result.available) {
                 setPhase('up-to-date');
@@ -97,7 +99,7 @@ const UpdateSettings = () => {
             }
         } catch (err: any) {
             setPhase('error');
-            setErrorMsg(err.message || 'Ошибка проверки обновлений');
+            setErrorMsg(err.message || t('updates.checkError'));
         }
     };
 
@@ -105,19 +107,19 @@ const UpdateSettings = () => {
         setPhase('downloading');
         setProgress(0);
         try {
-            await window.electron.invoke('updater:download');
+            await window.desktopBridge.invoke('updater:download');
         } catch (err: any) {
             setPhase('error');
-            setErrorMsg(err.message || 'Ошибка загрузки');
+            setErrorMsg(err.message || t('updates.downloadError'));
         }
     };
 
     const handleInstall = async () => {
-        await window.electron.invoke('updater:install');
+        await window.desktopBridge.invoke('updater:install');
     };
 
     const handleOfflineInstall = async () => {
-        const res = await window.electron.invoke('updater:install-offline');
+        const res = await window.desktopBridge.invoke('updater:install-offline');
         if (!res.success) {
             setPhase('error');
             setErrorMsg(res.message);
@@ -129,7 +131,7 @@ const UpdateSettings = () => {
         setRollingBack(true);
         setRollbackMsg('');
         try {
-            const res = await window.electron.invoke('updater:rollback', rollbackId);
+            const res = await window.desktopBridge.invoke('updater:rollback', rollbackId);
             setRollbackMsg(res.message);
             if (res.success) loadBackups();
         } catch (err: any) {
@@ -152,28 +154,28 @@ const UpdateSettings = () => {
 
     const phaseText = () => {
         switch (phase) {
-            case 'idle': return 'Нажмите «Проверить» для поиска обновлений';
-            case 'checking': return 'Проверка обновлений...';
-            case 'up-to-date': return 'Установлена последняя версия';
-            case 'available': return `Доступна версия ${updateInfo?.version}`;
-            case 'incompatible': return `Версия ${updateInfo?.version} несовместима с текущим сервером`;
-            case 'downloading': return `Загрузка... ${progress}%`;
-            case 'ready': return `Версия ${updateInfo?.version} загружена. Готова к установке.`;
-            case 'error': return `Ошибка: ${errorMsg}`;
+            case 'idle': return t('updates.idlePrompt');
+            case 'checking': return t('updates.checking');
+            case 'up-to-date': return t('updates.upToDate');
+            case 'available': return `${t('updates.available')} ${updateInfo?.version || ''}`;
+            case 'incompatible': return t('updates.incompatible');
+            case 'downloading': return `${t('updates.downloading')} ${progress}%`;
+            case 'ready': return t('updates.ready');
+            case 'error': return `${t('updates.errorPrefix')}: ${errorMsg}`;
         }
     };
 
     return (
-        <div className="p-6 bg-white dark:bg-white/5 border border-neutral-200 dark:border-white/10 rounded-2xl space-y-6 shadow-sm dark:shadow-none">
+        <div className="p-6 bg-white dark:bg-white/5 border border-neutral-200 dark:border-neutral-600 rounded-2xl space-y-6 shadow-sm dark:shadow-none">
             <h2 className="text-xl font-semibold flex items-center gap-3 text-sky-600 dark:text-sky-400">
                 <Download className="w-6 h-6" />
-                Обновления приложения
+                {t('updates.title')}
             </h2>
 
             {/* Version & Status */}
-            <div className="flex items-center justify-between p-4 bg-neutral-50 dark:bg-black/20 rounded-xl border border-neutral-300 dark:border-white/5">
+            <div className="flex items-center justify-between p-4 bg-neutral-50 dark:bg-black/20 rounded-xl border border-neutral-300 dark:border-neutral-600">
                 <div>
-                    <div className="text-sm text-neutral-600 dark:text-neutral-400">Текущая версия</div>
+                    <div className="text-sm text-neutral-600 dark:text-neutral-400">{t('updates.currentVersion')}</div>
                     <div className="text-2xl font-mono font-bold text-neutral-900 dark:text-white">v{currentVersion}</div>
                 </div>
                 <div className="flex items-center gap-2 text-sm">
@@ -193,7 +195,7 @@ const UpdateSettings = () => {
 
             {/* Progress bar */}
             {phase === 'downloading' && (
-                <div className="w-full bg-neutral-200 dark:bg-neutral-800 rounded-full h-2 overflow-hidden">
+                <div className="w-full bg-neutral-200 dark:bg-neutral-700 rounded-full h-2 overflow-hidden">
                     <div
                         className="h-2 bg-sky-500 rounded-full transition-all duration-300"
                         style={{ width: `${progress}%` }}
@@ -209,7 +211,7 @@ const UpdateSettings = () => {
                     className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                     <RefreshCw className={`w-4 h-4 ${phase === 'checking' ? 'animate-spin' : ''}`} />
-                    Проверить обновления
+                    {t('updates.checkNow')}
                 </button>
 
                 {phase === 'available' && (
@@ -218,7 +220,7 @@ const UpdateSettings = () => {
                         className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-medium transition-all"
                     >
                         <Download className="w-4 h-4" />
-                        Скачать v{updateInfo?.version}
+                        {t('updates.download')} v{updateInfo?.version}
                     </button>
                 )}
 
@@ -228,37 +230,37 @@ const UpdateSettings = () => {
                         className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-medium transition-all animate-pulse"
                     >
                         <CheckCircle className="w-4 h-4" />
-                        Установить и перезапустить
+                        {t('updates.install')}
                     </button>
                 )}
 
                 <button
                     onClick={handleOfflineInstall}
-                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-neutral-100 dark:bg-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-600 border border-neutral-300 dark:border-white/10 text-neutral-800 dark:text-white font-medium transition-all"
+                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-neutral-100 dark:bg-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-600 border border-neutral-300 dark:border-neutral-600 text-neutral-800 dark:text-white font-medium transition-all"
                 >
                     <HardDrive className="w-4 h-4" />
-                    Установить с USB (.exe)
+                    {t('updates.installOffline')}
                 </button>
             </div>
 
             {/* Backups & Rollback */}
-            <div className="pt-4 border-t border-neutral-200 dark:border-white/5">
+            <div className="pt-4 border-t border-neutral-200 dark:border-neutral-600">
                 <div className="flex items-center justify-between mb-3">
                     <h3 className="text-base font-semibold text-neutral-800 dark:text-neutral-300 flex items-center gap-2">
                         <RotateCcw className="w-4 h-4 text-neutral-500 dark:text-neutral-400" />
-                        Резервные копии (откат)
+                        {t('updates.backups')}
                     </h3>
                     <button
                         onClick={loadBackups}
                         className="text-xs text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white flex items-center gap-1 transition-colors"
                     >
                         <RefreshCw className={`w-3 h-3 ${loadingBackups ? 'animate-spin' : ''}`} />
-                        Обновить
+                        {t('updates.refresh')}
                     </button>
                 </div>
 
                 {backups.length === 0 ? (
-                    <p className="text-sm text-neutral-500">Резервных копий нет</p>
+                    <p className="text-sm text-neutral-500">{t('updates.noBackups')}</p>
                 ) : (
                     <div className="space-y-2 mb-4">
                         {backups.map(b => (
@@ -266,7 +268,7 @@ const UpdateSettings = () => {
                                 key={b.id}
                                 className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all ${rollbackId === b.id
                                     ? 'bg-sky-50 dark:bg-sky-500/10 border-sky-300 dark:border-sky-500/30'
-                                    : 'bg-white dark:bg-black/20 border-neutral-200 dark:border-white/5 hover:border-neutral-300 dark:hover:border-white/10'
+                                    : 'bg-white dark:bg-black/20 border-neutral-200 dark:border-neutral-600 hover:border-neutral-300 dark:hover:border-white/10'
                                     }`}
                             >
                                 <input
@@ -295,7 +297,7 @@ const UpdateSettings = () => {
                             className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-amber-50 dark:bg-amber-600/20 hover:bg-amber-100 dark:hover:bg-amber-600 border border-amber-200 dark:border-amber-600/30 hover:border-amber-400 dark:hover:border-amber-600 text-amber-700 dark:text-amber-400 hover:text-amber-800 dark:hover:text-white font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             <RotateCcw className={`w-4 h-4 ${rollingBack ? 'animate-spin' : ''}`} />
-                            Откатить на выбранную копию
+                            {t('updates.rollback')}
                         </button>
                         {rollbackMsg && (
                             <span className="text-sm text-neutral-600 dark:text-neutral-300">{rollbackMsg}</span>

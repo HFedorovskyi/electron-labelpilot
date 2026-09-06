@@ -1,0 +1,107 @@
+name: Build & Release Tauri Client
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build-tauri:
+    runs-on: windows-2022
+    permissions:
+      contents: write
+    env:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify migration and telemetry contracts
+        run: npm run test:migration
+
+      - name: Run Tauri Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Run Slint Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --features slint-ui
+
+      - name: Report external signing mode
+        if: env.TAURI_SIGNING_PRIVATE_KEY == ''
+        shell: pwsh
+        run: Write-Host 'Signing secret is not configured; CI verifies source and locally signed assets are published separately.'
+
+      - name: Build signed NSIS bundle
+        if: env.TAURI_SIGNING_PRIVATE_KEY != ''
+        run: npm run tauri:build
+
+      - name: Create updater manifest and checksums
+        if: env.TAURI_SIGNING_PRIVATE_KEY != ''
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $config = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+          $version = [string]$config.version
+          $output = 'release-tauri'
+          New-Item -ItemType Directory -Force $output | Out-Null
+          $installer = Get-ChildItem src-tauri/target/release/bundle/nsis/*.exe | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
+          $signature = "$($installer.FullName).sig"
+          if (-not (Test-Path $signature)) { throw "Missing updater signature: $signature" }
+          Copy-Item $installer.FullName $output
+          Copy-Item $signature $output
+          $assetName = $installer.Name
+          $manifest = [ordered]@{
+            version = $version
+            notes = "LabelPilot $version — dual Tauri/Slint desktop runtime"
+            pub_date = [DateTimeOffset]::UtcNow.ToString('o')
+            platforms = [ordered]@{
+              'windows-x86_64' = [ordered]@{
+                signature = (Get-Content $signature -Raw).Trim()
+                url = "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/$([Uri]::EscapeDataString($assetName))"
+              }
+            }
+          }
+          $manifest | ConvertTo-Json -Depth 8 | Set-Content "$output/latest.json" -Encoding utf8
+          ./scripts/new-legacy-electron-manifest.ps1 `
+            -InstallerPath $installer.FullName `
+            -Version $version `
+            -OutputPath "$output/latest.yml" `
+            -ReleaseDate $manifest.pub_date
+          ./scripts/new-native-update-package.ps1 -SlintExecutable src-tauri/target/release/labelpilot-slint.exe -MaintenanceExecutable src-tauri/target/release/labelpilot-maintenance.exe -Version $version -OutputDirectory $output -ReleaseBaseUrl "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}" -UseEnvironmentKey
+          Get-ChildItem $output -File | Sort-Object Name | ForEach-Object {
+            "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())  $($_.Name)"
+          } | Set-Content "$output/SHA256SUMS.txt" -Encoding ascii
+
+      - name: Upload workflow artifact
+        if: env.TAURI_SIGNING_PRIVATE_KEY != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: labelpilot-tauri-${{ github.ref_name }}
+          path: release-tauri/*
+
+      - name: Publish GitHub release assets
+        if: startsWith(github.ref, 'refs/tags/') && env.TAURI_SIGNING_PRIVATE_KEY != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-tauri/*
+          draft: false
+          prerelease: false

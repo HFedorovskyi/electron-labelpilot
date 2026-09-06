@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "canvas": {
+    "width": 1183,
+    "height": 1678,
+    "widthCm": 14.8,
+    "heightCm": 21,
+    "dpi": 203,
+    "background": "#ffffff",
+    "showGrid": false,
+    "gridSize": 16,
+    "labelType": "pallet",
+    "printedZones": []
+  },
+  "elements": [
+    {
+      "id": "t-title", "type": "text", "x": 59, "y": 59, "w": 1065, "h": 62, "rotation": 0,
+      "text": "ПАЛЛЕТНЫЙ ЛИСТ", "fontSize": 44, "fontWeight": 700, "color": "#000000",
+      "fontFamily": "Inter", "fontStyle": "normal", "textAlign": "center", "textDecoration": "none"
+    },
+    {
+      "id": "t-pallet", "type": "text", "x": 59, "y": 141, "w": 1065, "h": 43, "rotation": 0,
+      "text": "Паллета №: {{pallet_number}}", "fontSize": 25, "fontWeight": 700, "color": "#000000",
+      "fontFamily": "Inter", "fontStyle": "normal", "textAlign": "left", "textDecoration": "none"
+    },
+    {
+      "id": "t-ship", "type": "text", "x": 59, "y": 188, "w": 532, "h": 43, "rotation": 0,
+      "text": "Дата отгрузки: {{shipping_date}}", "fontSize": 25, "fontWeight": 400, "color": "#000000",
+      "fontFamily": "Inter", "fontStyle": "normal", "textAlign": "left", "textDecoration": "none"
+    },
+    {
+      "id": "t-prod", "type": "text", "x": 591, "y": 188, "w": 532, "h": 43, "rotation": 0,
+      "text": "Дата произв.: {{production_date}}", "fontSize": 25, "fontWeight": 400, "color": "#000000",
+      "fontFamily": "Inter", "fontStyle": "normal", "textAlign": "left", "textDecoration": "none"
+    },
+    {
+      "id": "tbl-1", "type": "table", "x": 59, "y": 252, "w": 1065, "h": 1247, "rotation": 0,
+      "columns": [
+        { "id": "c1", "key": "name", "title": "Наименование", "widthRatio": 42 },
+        { "id": "c2", "key": "batch_number", "title": "Партия", "widthRatio": 20 },
+        { "id": "c3", "key": "quantity", "title": "Кол-во", "widthRatio": 13 },
+        { "id": "c4", "key": "weight_brutto_pack", "title": "Вес, кг", "widthRatio": 25 }
+      ],
+      "groupBy": "batch",
+      "sortBy": "none",
+      "fontSize": 21,
+      "showHeaders": true,
+      "showBorders": true,
+      "fontFamily": "Inter",
+      "fontStyle": "normal"
+    },
+    {
+      "id": "t-tot1", "type": "text", "x": 59, "y": 1519, "w": 1065, "h": 43, "rotation": 0,
+      "text": "Всего единиц: {{total_count}}        Кол-во коробов: {{total_boxes}}", "fontSize": 25,
+      "fontWeight": 700, "color": "#000000", "fontFamily": "Inter", "fontStyle": "normal",
+      "textAlign": "left", "textDecoration": "none"
+    },
+    {
+      "id": "t-tot2", "type": "text", "x": 59, "y": 1562, "w": 1065, "h": 43, "rotation": 0,
+      "text": "Общий вес (брутто): {{weight_total}} кг", "fontSize": 25, "fontWeight": 700,
+      "color": "#000000", "fontFamily": "Inter", "fontStyle": "normal", "textAlign": "left",
+      "textDecoration": "none"
+    }
+  ]
+}

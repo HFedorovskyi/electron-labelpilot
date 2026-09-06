@@ -1,0 +1,127 @@
+{
+  "scale": {
+    "input": {
+      "type": "tcp",
+      "protocolId": "industrial-tcp",
+      "host": "192.0.2.10",
+      "port": 4001,
+      "futureOption": "preserved"
+    },
+    "expected": {
+      "type": "tcp",
+      "protocolId": "industrial-tcp",
+      "pollingInterval": 250,
+      "stabilityCount": 4,
+      "host": "192.0.2.10",
+      "port": 4001,
+      "futureOption": "preserved"
+    }
+  },
+  "numbering": {
+    "input": {
+      "unit": {
+        "enabled": true,
+        "length": 13,
+        "prefix": "U"
+      },
+      "futureOption": true
+    },
+    "expected": {
+      "unit": {
+        "enabled": true,
+        "length": 13,
+        "prefix": "U"
+      },
+      "box": {
+        "enabled": false,
+        "length": 3,
+        "prefix": ""
+      },
+      "pallet": {
+        "enabled": false,
+        "length": 3,
+        "prefix": ""
+      },
+      "futureOption": true
+    }
+  },
+  "printer": {
+    "input": {
+      "packPrinter": {
+        "id": "fixture-pack",
+        "active": true,
+        "name": "Fixture TCP",
+        "connection": "tcp",
+        "protocol": "zpl",
+        "widthMm": 58,
+        "heightMm": 40,
+        "ramCache": "auto",
+        "futureOption": "preserved"
+      },
+      "language": "de",
+      "futureRootOption": 17
+    },
+    "expected": {
+      "packPrinter": {
+        "id": "fixture-pack",
+        "active": true,
+        "name": "Fixture TCP",
+        "connection": "tcp",
+        "protocol": "zpl",
+        "ramCache": "auto",
+        "futureOption": "preserved"
+      },
+      "boxPrinter": {
+        "id": "box_default",
+        "active": false,
+        "name": "Box Printer",
+        "connection": "windows_driver",
+        "protocol": "image",
+        "compatibilityMode": "auto",
+        "port": 9100,
+        "baudRate": 9600,
+        "dpi": 203
+      },
+      "palletPrinter": {
+        "id": "pallet_default",
+        "active": false,
+        "name": "Pallet Printer",
+        "connection": "windows_driver",
+        "protocol": "image",
+        "compatibilityMode": "auto",
+        "port": 9100,
+        "baudRate": 9600,
+        "dpi": 203
+      },
+      "autoPrintOnStable": true,
+      "serverIp": "",
+      "language": "de",
+      "futureRootOption": 17
+    }
+  },
+  "sequence": {
+    "identity": {
+      "station_uuid": "fixture-station",
+      "station_number": "07",
+      "station_name": "Fixture"
+    },
+    "numbering": {
+      "unit": {
+        "enabled": true,
+        "length": 13,
+        "prefix": ""
+      },
+      "box": {
+        "enabled": false,
+        "length": 3,
+        "prefix": ""
+      },
+      "pallet": {
+        "enabled": false,
+        "length": 3,
+        "prefix": ""
+      }
+    },
+    "firstUnit": "0700001000001"
+  }
+}

@@ -14,7 +14,7 @@ const SetupScreen: React.FC<SetupScreenProps> = ({ onIdentityLoaded }) => {
         setImporting(true);
         setError(null);
         try {
-            const result = await window.electron.invoke('import-identity-file');
+            const result = await window.desktopBridge.invoke('import-identity-file');
             if (result.success && result.identity) {
                 onIdentityLoaded(result.identity);
             } else {
@@ -32,7 +32,7 @@ const SetupScreen: React.FC<SetupScreenProps> = ({ onIdentityLoaded }) => {
             <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-emerald-100/50 dark:from-emerald-900/20 via-neutral-50 dark:via-neutral-950 to-neutral-50 dark:to-neutral-950 pointer-events-none transition-colors" />
 
             <div
-                className="z-10 bg-white/80 dark:bg-neutral-900/50 backdrop-blur-xl p-8 rounded-3xl border border-neutral-200 dark:border-white/10 shadow-xl dark:shadow-2xl max-w-md w-full text-center animate-in fade-in slide-in-from-bottom-4 duration-700"
+                className="z-10 bg-white/80 dark:bg-neutral-900/50 backdrop-blur-xl p-8 rounded-3xl border border-neutral-200 dark:border-neutral-600 shadow-xl dark:shadow-2xl max-w-md w-full text-center animate-in fade-in slide-in-from-bottom-4 duration-700"
             >
                 <div className="mb-8 flex justify-center">
                     <div className="w-20 h-20 bg-emerald-50 dark:bg-emerald-500/10 rounded-2xl flex items-center justify-center border border-emerald-200 dark:border-emerald-500/20 shadow-[0_0_30px_rgba(16,185,129,0.15)]">

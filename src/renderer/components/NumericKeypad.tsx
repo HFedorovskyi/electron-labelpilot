@@ -1,4 +1,4 @@
-import { } from 'react';
+import { memo } from 'react';
 import { X, Delete, Check } from 'lucide-react';
 
 interface NumericKeypadProps {
@@ -6,9 +6,15 @@ interface NumericKeypadProps {
     onUpdate: (val: string) => void;
     onClose: () => void;
     title?: string;
+    /** When true, the entered value is shown masked (e.g. PIN entry). The real value is unchanged. */
+    mask?: boolean;
+    /** Optional label for the confirm button (defaults to "OK"). */
+    confirmLabel?: string;
+    /** Optional callback for the confirm button; defaults to onClose. */
+    onConfirm?: () => void;
 }
 
-const NumericKeypad: React.FC<NumericKeypadProps> = ({ value, onUpdate, onClose, title = 'Введите данные' }) => {
+const NumericKeypad: React.FC<NumericKeypadProps> = ({ value, onUpdate, onClose, title = 'Введите данные', mask = false, confirmLabel, onConfirm }) => {
 
     const handleNumber = (n: string) => {
         onUpdate(value + n);
@@ -31,7 +37,7 @@ const NumericKeypad: React.FC<NumericKeypadProps> = ({ value, onUpdate, onClose,
 
     return (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
-            <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-white/10 rounded-[2.5rem] p-8 w-[400px] shadow-sm dark:shadow-2xl relative animate-in zoom-in-95 duration-200">
+            <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-600 rounded-[2.5rem] p-8 w-[400px] shadow-sm dark:shadow-2xl relative animate-in zoom-in-95 duration-200">
                 <button
                     onClick={onClose}
                     className="absolute top-6 right-6 p-2 bg-neutral-100 dark:bg-white/5 hover:bg-neutral-200 dark:hover:bg-white/10 rounded-full transition-colors"
@@ -41,9 +47,11 @@ const NumericKeypad: React.FC<NumericKeypadProps> = ({ value, onUpdate, onClose,
 
                 <h3 className="text-2xl font-bold text-neutral-900 dark:text-white mb-6 text-center">{title}</h3>
 
-                <div className="bg-neutral-50 dark:bg-black/40 border border-neutral-200 dark:border-white/10 rounded-2xl p-6 mb-8 text-center shadow-inner dark:shadow-none">
-                    <div className="text-4xl font-mono font-bold text-emerald-600 dark:text-emerald-400 min-h-[44px] break-all">
-                        {value || <span className="text-neutral-300 dark:text-neutral-700">_</span>}
+                <div className="bg-neutral-50 dark:bg-black/40 border border-neutral-200 dark:border-neutral-600 rounded-2xl p-6 mb-8 text-center shadow-inner dark:shadow-none">
+                    <div className="text-4xl font-mono font-bold text-emerald-600 dark:text-emerald-400 min-h-[44px] break-all tracking-widest">
+                        {value
+                            ? (mask ? '•'.repeat(value.length) : value)
+                            : <span className="text-neutral-300 dark:text-neutral-700">_</span>}
                     </div>
                 </div>
 
@@ -56,10 +64,10 @@ const NumericKeypad: React.FC<NumericKeypadProps> = ({ value, onUpdate, onClose,
                             className += "bg-red-50 dark:bg-red-500/10 text-red-600 dark:text-red-500 border-red-200 dark:border-red-500/20 hover:bg-red-100 dark:hover:bg-red-500/20";
                             action = handleClear;
                         } else if (btn === '⌫') {
-                            className += "bg-neutral-200 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-300 dark:hover:bg-neutral-700 border-neutral-300 dark:border-transparent";
+                            className += "bg-neutral-200 dark:bg-neutral-700 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-300 dark:hover:bg-neutral-700 border-neutral-300 dark:border-transparent";
                             action = handleBackspace;
                         } else {
-                            className += "bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-white hover:bg-neutral-200 dark:hover:bg-neutral-700 border-neutral-300 dark:border-white/5";
+                            className += "bg-neutral-100 dark:bg-neutral-700 text-neutral-900 dark:text-white hover:bg-neutral-200 dark:hover:bg-neutral-700 border-neutral-300 dark:border-neutral-600";
                         }
 
                         return (
@@ -71,15 +79,15 @@ const NumericKeypad: React.FC<NumericKeypadProps> = ({ value, onUpdate, onClose,
                 </div>
 
                 <button
-                    onClick={onClose}
+                    onClick={onConfirm || onClose}
                     className="w-full mt-8 py-6 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl font-bold text-xl flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 transition-all active:scale-[0.98]"
                 >
                     <Check className="w-6 h-6" />
-                    OK
+                    {confirmLabel || 'OK'}
                 </button>
             </div>
         </div>
     );
 };
 
-export default NumericKeypad;
+export default memo(NumericKeypad);

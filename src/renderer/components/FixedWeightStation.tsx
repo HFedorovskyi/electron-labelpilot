@@ -1,16 +1,22 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
-import { Printer, RefreshCw, Box, AlertCircle, X, Hash, Calendar, Search, Scale, Package, Play, Square, CheckCircle2, Layers } from 'lucide-react';
+import { useEffect, useState, useRef, useCallback, lazy, Suspense } from 'react';
+import { Printer, RefreshCw, Box, AlertCircle, X, Hash, Calendar, Search, Scale, Package, Play, Square, CheckCircle2, Layers, Trash2 } from 'lucide-react';
 import { generateBarcode, type BarcodeData } from '../utils/barcodeGenerator';
+import { computeDocKey } from '../utils/docKey';
+import { printPalletSheet } from '../utils/palletPrint';
 import { useTranslation } from '../i18n';
-import NumericKeypad from './NumericKeypad';
-import DeleteItemsModal from './DeleteItemsModal';
-import DatePickerModal from './DatePickerModal';
-import ProductSelectionModal from './ProductSelectionModal';
+import NumericKeypad from './LazyNumericKeypad';
+import DeleteItemsModal from './LazyDeleteItemsModal';
+import { useSession } from './SessionProvider';
+
+const DatePickerModal = lazy(() => import('./DatePickerModal'));
+const ProductSelectionModal = lazy(() => import('./ProductSelectionModal'));
 
 type SubMode = 'scale' | 'count';
 
 const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
     const { t } = useTranslation();
+    // Current operator (PIN-login layer) — used for the pallet-sheet operator_name.
+    const { operator } = useSession();
 
     // --- SUB-MODE ---
     const [subMode, setSubMode] = useState<SubMode>('scale');
@@ -19,6 +25,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
     const [weight, setWeight] = useState<string>('0.000');
     const [status, setStatus] = useState<string>('disconnected');
     const [labelDoc, setLabelDoc] = useState<any>(null);
+    const [labelDocKey, setLabelDocKey] = useState<string | null>(null);
     const [products, setProducts] = useState<any[]>([]);
     const [selectedProduct, setSelectedProduct] = useState<any | null>(null);
     const [isProductModalOpen, setIsProductModalOpen] = useState(false);
@@ -26,6 +33,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
     const [numberingConfig, setNumberingConfig] = useState<any>(null);
     const [containers, setContainers] = useState<any[]>([]);
     const [boxLabelDoc, setBoxLabelDoc] = useState<any>(null);
+    const [boxLabelDocKey, setBoxLabelDocKey] = useState<string | null>(null);
     const [packBarcodeTemplate, setPackBarcodeTemplate] = useState<any>(null);
     const [boxBarcodeTemplate, setBoxBarcodeTemplate] = useState<any>(null);
     const [boxNetWeight, setBoxNetWeight] = useState(0);
@@ -38,7 +46,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
     const [lastPrinted, setLastPrinted] = useState<{ doc: any, data: any } | null>(null);
     const [stationNumber, setStationNumber] = useState<string | null>(null);
     const [isStable, setIsStable] = useState(false);
-    const [printerConfig, setPrinterConfig] = useState<any>({ packPrinter: '', boxPrinter: '', autoPrintOnStable: false });
+    const [printerConfig, setPrinterConfig] = useState<any>({ packPrinter: '', boxPrinter: '', autoPrintOnStable: true });
     const [isReady, setIsReady] = useState(false);
     const [stableTrigger, setStableTrigger] = useState(0);
     const [batchNumber, setBatchNumber] = useState<string>('');
@@ -47,11 +55,20 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
     const [labelingDate, setLabelingDate] = useState<Date>(new Date());
     const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
     const [syncVersion, setSyncVersion] = useState(0);
+    // Pack-printer readiness indicator + manual-print feedback (parity with WeighingStation).
+    const [printerStatus, setPrinterStatus] = useState<'unknown' | 'ready' | 'unreachable' | 'unconfigured' | 'driver'>('unknown');
+    const [printToast, setPrintToast] = useState<string | null>(null);
+    const [lastPrintInfo, setLastPrintInfo] = useState<{ label: string; time: string } | null>(null);
+    const printToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // Auto-print refs
     const autoPrintFiredRef = useRef(false);
     const isPrintingRef = useRef(false);
     const weightRef = useRef('0.000');
+    const isPalletPrintingRef = useRef(false);
+    // Latest active tab for the mounted-once scale-reading listener (avoids stale closure).
+    const activeTabRef = useRef(activeTab);
+    activeTabRef.current = activeTab;
 
     // --- COUNT MODE STATE ---
     const [packsPerBoxInput, setPacksPerBoxInput] = useState(0);
@@ -78,7 +95,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
     useEffect(() => {
         const loadStationInfo = async () => {
             try {
-                const info = await window.electron.invoke('get-station-info');
+                const info = await window.desktopBridge.invoke('get-station-info');
                 if (info?.station_number) setStationNumber(info.station_number);
             } catch (e) { console.error('Failed to load station info', e); }
         };
@@ -90,7 +107,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
     useEffect(() => {
         const syncCounters = async () => {
             try {
-                const latest = await window.electron.invoke('get-latest-counters', selectedProduct?.id);
+                const latest = await window.desktopBridge.invoke('get-latest-counters', selectedProduct?.id);
                 if (latest) {
                     if (latest.totalUnits !== undefined) setTotalUnits(latest.totalUnits);
                     if (latest.totalBoxes !== undefined) setTotalBoxes(latest.totalBoxes);
@@ -103,7 +120,9 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
             } catch (e) { console.error('Failed to load counters', e); }
         };
         syncCounters();
-    }, [selectedProduct]);
+        // syncVersion: re-fetch counters after data-updated (e.g. pallet sheet printed → pallet
+        // closed) so box/pallet counters reset instead of showing stale values.
+    }, [selectedProduct, syncVersion]);
 
     // --- HELPER: getNetWeight ---
     const getNetWeight = () => {
@@ -115,7 +134,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
     };
 
     // --- HELPER: getLabelData (reuse pattern from WeighingStation) ---
-    const getLabelData = (overrideWeight?: number, isBoxLabel = false, overrideUnits?: number, overrides?: { totalUnits?: number; totalBoxes?: number; unitsInBox?: number; boxNetWeight?: number }) => {
+    const getLabelData = (overrideWeight?: number, isBoxLabel = false, overrideUnits?: number, overrides?: { totalUnits?: number; totalBoxes?: number; unitsInBox?: number; boxNetWeight?: number; boxesInPallet?: number }) => {
         const currentWeightVal = overrideWeight !== undefined ? overrideWeight : parseFloat(weight);
         const now = labelingDate;
         const expDays = selectedProduct?.exp_date || 0;
@@ -140,6 +159,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
         const effectiveTotalBoxes = overrides?.totalBoxes ?? totalBoxes;
         const effectiveUnitsInBox = overrides?.unitsInBox ?? unitsInBox;
         const effectiveBoxNetWeight = overrides?.boxNetWeight ?? boxNetWeight;
+        const effectiveBoxesInPallet = overrides?.boxesInPallet ?? boxesInPallet;
 
         const weightBruttoPack = currentWeightVal;
         const portionContainer = containers.find(c => String(c.id) === String(selectedProduct?.portion_container_id));
@@ -151,7 +171,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
         const tareBoxGrams = boxContainer?.weight || 0;
         let packsInThisBox = isBoxLabel ? (overrideUnits !== undefined ? overrideUnits : effectiveUnitsInBox) : (effectiveUnitsInBox + 1);
         const weightBruttoBox = effectiveBoxNet + (packsInThisBox * tarePackGrams / 1000) + (tareBoxGrams / 1000);
-        const weightNettoPallet = effectiveBoxNet * (boxesInPallet + 1);
+        const weightNettoPallet = effectiveBoxNet * (effectiveBoxesInPallet + 1);
         const weightBruttoPallet = weightNettoPallet + 20;
         const currentUnits = overrideUnits !== undefined ? overrideUnits : effectiveUnitsInBox;
 
@@ -198,11 +218,14 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
             batch_number: batchNumber || extra.batch_number || '',
             pack_count: String(currentUnits + (isBoxLabel ? 0 : 1)),
             pack_counter: String(currentUnits + (isBoxLabel ? 0 : 1)),
-            box_count: String(boxesInPallet + 1),
+            box_count: String(effectiveBoxesInPallet + 1),
             close_box_counter: String(currentUnits + (isBoxLabel ? 0 : 1)),
             box_limit: selectedProduct?.close_box_counter?.toString() || '',
             _raw_weight_netto_pack: weightNettoPack, _raw_weight_brutto_pack: weightBruttoPack,
             _raw_weight_netto_box: effectiveBoxNet, _raw_weight_brutto_box: weightBruttoBox,
+            // Current station operator (from PIN-login session)
+            operator: operator?.short_code || '',
+            operator_name: operator?.full_name || '',
             ...extra
         };
 
@@ -229,14 +252,15 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
 
     const loadProducts = async (query = '') => {
         try {
-            const list = await window.electron.invoke('get-fixed-weight-products', query);
+            const list = await window.desktopBridge.invoke('get-fixed-weight-products', query);
             setProducts(list);
         } catch (err) { console.error(err); }
     };
 
     // --- EFFECTS ---
     useEffect(() => {
-        const removeReadingListener = window.electron.on('scale-reading', (data: any) => {
+        const removeReadingListener = window.desktopBridge.on('scale-reading', (data: any) => {
+            if (activeTabRef.current !== 'fixedWeight') return; // skip while hidden
             if (data && typeof data === 'object' && 'weight' in data) {
                 const w = typeof data.weight === 'number' ? data.weight : parseFloat(String(data.weight));
                 setWeight(w.toFixed(3)); weightRef.current = w.toFixed(3);
@@ -249,15 +273,15 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
             const match = ws.match(/(\d+\.\d+)/);
             if (match) { setWeight(match[1]); weightRef.current = match[1]; }
         });
-        const removeStatusListener = window.electron.on('scale-status', (s: any) => setStatus(s));
-        const removeErrorListener = window.electron.on('scale-error', (msg: string) => {
+        const removeStatusListener = window.desktopBridge.on('scale-status', (s: any) => setStatus(s));
+        const removeErrorListener = window.desktopBridge.on('scale-error', (msg: string) => {
             setAlertMessage(`${t('ws.errorPrefix')}: ${msg}`);
         });
-        window.electron.invoke('get-scale-status').then((s: string) => { if (s) setStatus(s); });
-        const removeUpdateListener = window.electron.on('data-updated', () => {
+        window.desktopBridge.invoke('get-scale-status').then((s: string) => { if (s) setStatus(s); });
+        const removeUpdateListener = window.desktopBridge.on('data-updated', () => {
             loadProducts();
             setSyncVersion(prev => prev + 1);
-            window.electron.invoke('get-containers').then((cnts: any) => setContainers(cnts)).catch(console.error);
+            window.desktopBridge.invoke('get-containers').then((cnts: any) => setContainers(cnts)).catch(console.error);
         });
         return () => { removeReadingListener(); removeStatusListener(); removeErrorListener(); removeUpdateListener(); };
     }, []);
@@ -279,45 +303,76 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
     }, [selectedProduct]);
 
     useEffect(() => {
-        window.electron.invoke('get-printer-config').then((cfg: any) => { if (cfg) setPrinterConfig(cfg); });
-        const rm = window.electron.on('printer-config-updated', (c: any) => setPrinterConfig(c));
+        window.desktopBridge.invoke('get-printer-config').then((cfg: any) => { if (cfg) setPrinterConfig(cfg); });
+        const rm = window.desktopBridge.on('printer-config-updated', (c: any) => setPrinterConfig(c));
         return () => rm();
     }, []);
 
+    // Eagerly open TCP/Serial to configured printers so first label doesn't pay the handshake.
+    // Re-runs when printerConfig changes (new IP, new connection type).
     useEffect(() => {
-        window.electron.invoke('get-containers').then(setContainers).catch(console.error);
+        if (!printerConfig.packPrinter && !printerConfig.boxPrinter) { setPrinterStatus('unconfigured'); return; }
+        window.desktopBridge.invoke('printer:warmup', { printerIds: ['pack', 'box'] })
+            .then((res: any) => { if (res?.results?.pack) setPrinterStatus(res.results.pack); })
+            .catch(() => { /* best-effort */ });
+    }, [printerConfig]);
+
+    // Live pack-printer status from main-process pushes. Needed because merged
+    // record-and-print dispatches the print in main (no per-print promise to .then).
+    useEffect(() => {
+        const remove = window.desktopBridge.on('printer-status-update', (u: any) => {
+            const packId = (printerConfig.packPrinter as any)?.id;
+            if (!packId || !u || u.id !== packId) return;
+            if (u.status === 'error') setPrinterStatus('unreachable');
+            else if (u.status === 'connected') setPrinterStatus('ready');
+        });
+        return () => remove();
+    }, [printerConfig]);
+
+    // Pre-upload static backgrounds for the current templates so first print is a cache hit.
+    useEffect(() => {
+        if (labelDoc) {
+            window.desktopBridge.invoke('printer:warmup-bg', { labelDoc, role: 'pack' }).catch(() => { /* best-effort */ });
+        }
+        if (boxLabelDoc) {
+            window.desktopBridge.invoke('printer:warmup-bg', { labelDoc: boxLabelDoc, role: 'box' }).catch(() => { /* best-effort */ });
+        }
+    }, [labelDoc, boxLabelDoc]);
+
+    useEffect(() => {
+        window.desktopBridge.invoke('get-containers').then(setContainers).catch(console.error);
     }, []);
 
     useEffect(() => {
-        window.electron.invoke('get-numbering-config').then((cfg: any) => setNumberingConfig(cfg)).catch(console.error);
+        window.desktopBridge.invoke('get-numbering-config').then((cfg: any) => setNumberingConfig(cfg)).catch(console.error);
         loadProducts();
     }, []);
 
     // Fetch labels & barcodes
     useEffect(() => {
         const fetchLabelsAndBarcodes = async () => {
-            if (!selectedProduct) { setLabelDoc(null); setBoxLabelDoc(null); setPackBarcodeTemplate(null); setBoxBarcodeTemplate(null); return; }
+            if (!selectedProduct) { setLabelDoc(null); setLabelDocKey(null); setBoxLabelDoc(null); setBoxLabelDocKey(null); setPackBarcodeTemplate(null); setBoxBarcodeTemplate(null); return; }
             let pDoc = null;
             if (selectedProduct.templates_pack_label) {
                 try {
-                    const doc = await window.electron.invoke('get-label', selectedProduct.templates_pack_label);
-                    if (doc?.structure) { pDoc = JSON.parse(doc.structure); setLabelDoc(pDoc); }
+                    const doc = await window.desktopBridge.invoke('get-label', selectedProduct.templates_pack_label);
+                    if (doc?.structure) { pDoc = JSON.parse(doc.structure); setLabelDoc(pDoc); setLabelDocKey(computeDocKey(doc.structure)); }
                 } catch (err) { console.error(err); }
-            } else { setLabelDoc(null); }
+            } else { setLabelDoc(null); setLabelDocKey(null); }
             let bDoc = null;
             if (selectedProduct.templates_box_label) {
                 try {
-                    const doc = await window.electron.invoke('get-label', selectedProduct.templates_box_label);
-                    if (doc?.structure) { bDoc = JSON.parse(doc.structure); setBoxLabelDoc(bDoc); }
+                    const doc = await window.desktopBridge.invoke('get-label', selectedProduct.templates_box_label);
+                    if (doc?.structure) { bDoc = JSON.parse(doc.structure); setBoxLabelDoc(bDoc); setBoxLabelDocKey(computeDocKey(doc.structure)); }
                 } catch (err) { console.error(err); }
-            } else { setBoxLabelDoc(null); }
+            } else { setBoxLabelDoc(null); setBoxLabelDocKey(null); }
             const fetchBarcode = async (doc: any, setFn: (t: any) => void) => {
                 if (!doc) return setFn(null);
                 const items = doc.elements || doc.objects;
                 if (!items) return setFn(null);
                 const bc = items.find((o: any) => o.type === 'barcode');
                 if (bc?.templateId) {
-                    try { setFn(await window.electron.invoke('get-barcode-template', bc.templateId)); }
+                    try { setFn(await window.desktopBridge.invoke('get-barcode-template', bc.templateId)); }
                     catch { setFn(null); }
                 } else { setFn(null); }
             };
@@ -338,11 +393,19 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
         const max = selectedProduct.max_weight_grams || Infinity;
         if (wGrams < min || wGrams > max) return;
         autoPrintFiredRef.current = true;
-        handlePrint().catch(err => { console.error('Auto-print failed:', err); isPrintingRef.current = false; });
+        handlePrint(true).catch(err => { console.error('Auto-print failed:', err); isPrintingRef.current = false; });
     }, [isStable, selectedProduct, labelDoc, printerConfig.autoPrintOnStable, isReady, stableTrigger, subMode]);
 
+    // Brief auto-dismissing success toast for the manual print (no toast on auto-print).
+    const showPrintToast = (msg: string) => {
+        setPrintToast(msg);
+        if (printToastTimer.current) clearTimeout(printToastTimer.current);
+        printToastTimer.current = setTimeout(() => setPrintToast(null), 1800);
+    };
+    useEffect(() => () => { if (printToastTimer.current) clearTimeout(printToastTimer.current); }, []);
+
     // --- PRINT HANDLER (Scale mode) ---
-    const handlePrint = async () => {
+    const handlePrint = async (isAuto = false) => {
         if (isPrintingRef.current) return;
         isPrintingRef.current = true;
         try {
@@ -360,31 +423,45 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
             const predictedData = getLabelData();
             const predictedBoxNum = currentBoxNumber || predictedData.box_number;
             let packBarcode = '';
+            let packBarcodeSpec: { fields: any[]; data: Record<string, any> } | null = null;
             if (packBarcodeTemplate) {
                 try {
                     const fields = JSON.parse(packBarcodeTemplate.structure).fields;
                     const expDatePack = new Date(labelingDate);
                     expDatePack.setDate(labelingDate.getDate() + (selectedProduct?.exp_date || 0));
-                    packBarcode = generateBarcode(fields, {
+                    const genData = {
+                        ...predictedData,
                         weight_netto_pack: parseFloat(predictedData.weight_netto_pack),
                         weight_brutto_pack: parseFloat(predictedData.weight_brutto_pack),
                         production_date: labelingDate, exp_date: expDatePack,
                         article: (selectedProduct?.article || '').padStart(14, '0'),
                         pack_number: predictedData.pack_number, box_number: predictedBoxNum,
                         batch_number: batchNumber || ''
-                    } as any);
+                    } as any;
+                    packBarcode = generateBarcode(fields, genData);
+                    // Recipe for recordPack to REBUILD the barcode with the ACTUAL box number.
+                    packBarcodeSpec = { fields, data: genData };
                 } catch (err) { console.error(err); }
             }
             const expDatePack = new Date(labelingDate);
             expDatePack.setDate(labelingDate.getDate() + (selectedProduct?.exp_date || 0));
-            const recordResult = await window.electron.invoke('record-pack', {
-                number: predictedData.pack_number, box_number: predictedBoxNum,
-                nomenclature_id: selectedProduct.id,
-                weight_netto: parseFloat(predictedData.weight_netto_pack),
-                weight_brutto: parseFloat(predictedData.weight_brutto_pack),
-                barcode_value: packBarcode, station_number: stationNumber,
-                production_date: labelingDate.toISOString(),
-                expiration_date: expDatePack.toISOString(), batch: batchNumber || ''
+            // Merged record+print: DB transaction and print dispatch in one main-process
+            // turn — no second IPC round trip, no renderer event-loop requeue.
+            const recordResult = await window.desktopBridge.invoke('record-and-print', {
+                record: {
+                    number: predictedData.pack_number, box_number: predictedBoxNum,
+                    nomenclature_id: selectedProduct.id,
+                    weight_netto: parseFloat(predictedData.weight_netto_pack),
+                    weight_brutto: parseFloat(predictedData.weight_brutto_pack),
+                    barcode_value: packBarcode, barcode_spec: packBarcodeSpec || undefined,
+                    station_number: stationNumber,
+                    production_date: labelingDate.toISOString(),
+                    expiration_date: expDatePack.toISOString(), batch: batchNumber || ''
+                },
+                labelDoc,
+                docKey: labelDocKey || undefined,
+                data: predictedData,
+                printerConfig: printerConfig.packPrinter || undefined
             });
             if (!recordResult.success) throw new Error('Database recording failed');
             const actualBoxNumber = recordResult.boxNumber;
@@ -393,12 +470,32 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
             setCurrentBoxId(actualBoxId);
             setCurrentBoxNumber(actualBoxNumber);
 
-            const finalPrintData = getLabelData();
-            finalPrintData.box_number = actualBoxNumber;
-            window.electron.invoke('print-label', {
-                silent: true, labelDoc, data: finalPrintData,
-                printerConfig: printerConfig.packPrinter || undefined
-            }).catch(console.error);
+            const finalPrintData = {
+                ...predictedData,
+                box_number: actualBoxNumber,
+                barcode: recordResult.barcodeValue || predictedData.barcode,
+            };
+            if (recordResult.printDispatched) {
+                // Print already queued in main; failures arrive via printer-status-update.
+                const time = new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+                setLastPrintInfo({ label: String(finalPrintData.pack_number || ''), time });
+                if (!isAuto) showPrintToast(t('ws.printSentToast'));
+            } else if (printerConfig.packPrinter) {
+                // Browser-protocol printer — worker-window path stays renderer-driven.
+                window.desktopBridge.invoke('print-label', {
+                    silent: true, labelDoc, data: finalPrintData,
+                    printerConfig: printerConfig.packPrinter
+                })
+                    .then((ok: any) => {
+                        setPrinterStatus(ok === false ? 'unreachable' : 'ready');
+                        if (ok !== false) {
+                            const time = new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+                            setLastPrintInfo({ label: String(finalPrintData.pack_number || ''), time });
+                            if (!isAuto) showPrintToast(t('ws.printSentToast'));
+                        }
+                    })
+                    .catch((err: any) => { console.error(err); setPrinterStatus('unreachable'); });
+            }
             setLastPrinted({ doc: labelDoc, data: finalPrintData });
 
             const currentNetWeight = parseFloat(finalPrintData.weight_netto_pack);
@@ -416,12 +513,20 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
             }
         } catch (err) {
             console.error('Print Error:', err);
-            setAlertMessage(`Ошибка: ${err instanceof Error ? err.message : String(err)}`);
+            setAlertMessage(`${t('ws.errorPrefix')}: ${err instanceof Error ? err.message : String(err)}`);
         } finally { isPrintingRef.current = false; }
     };
 
     // --- BOX LABEL PRINT HELPER ---
     const printBoxLabel = async (finalBoxWeight: number, finalUnitsInBox: number, boxNumber: string, boxId: number) => {
+        // Close the box in DB FIRST — closing must not depend on a box-label template.
+        // Without this, a template-less product left the box Open forever and every later
+        // pack kept piling into it while the UI showed it closed.
+        {
+            const boxCont = containers.find(c => c.id === selectedProduct?.box_container_id);
+            const brutBox = finalBoxWeight + (boxCont?.weight || 0) / 1000;
+            await window.desktopBridge.invoke('close-box', { boxId, weightNetto: finalBoxWeight, weightBrutto: brutBox });
+        }
         if (!boxLabelDoc) return;
         const boxLimit = selectedProduct?.close_box_counter || 0;
         const baseData = getLabelData(finalBoxWeight, true, finalUnitsInBox);
@@ -435,6 +540,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                 const expDateBox = new Date(labelingDate);
                 expDateBox.setDate(labelingDate.getDate() + (selectedProduct?.exp_date || 0));
                 boxBarcode = generateBarcode(fields, {
+                    ...baseData,
                     weight_netto_box: finalBoxWeight, weight_brutto_box: brutBox,
                     production_date: labelingDate, exp_date: expDateBox,
                     article: (selectedProduct?.article || '').padStart(14, '0'),
@@ -446,29 +552,36 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
         const isDefaultZeros = !resolvedBarcode || /^0+$/.test(resolvedBarcode);
         const finalBarcode = isDefaultZeros ? ((baseData as any)['Код ШК'] || selectedProduct?.barcode || selectedProduct?.article || '0000000000000') : resolvedBarcode;
         const boxData = { ...baseData, is_box: true, count: boxLimit, pack_counter: String(finalUnitsInBox), weight_netto: finalBoxWeight.toFixed(3), barcode: finalBarcode };
-        await window.electron.invoke('print-label', { silent: true, labelDoc: boxLabelDoc, data: boxData, printerConfig: printerConfig.boxPrinter || undefined });
-        const boxCont = containers.find(c => c.id === selectedProduct?.box_container_id);
-        const brutBox = finalBoxWeight + (boxCont?.weight || 0) / 1000;
-        await window.electron.invoke('close-box', { boxId, weightNetto: finalBoxWeight, weightBrutto: brutBox });
+        // Fire-and-forget: the box-label send (150ms TCP … seconds on serial) must not block
+        // the next stable-weight pack — the main-process queues preserve output order.
+        window.desktopBridge.invoke('print-label', { silent: true, labelDoc: boxLabelDoc, docKey: boxLabelDocKey || undefined, data: boxData, printerConfig: printerConfig.boxPrinter || undefined })
+            .catch((err: any) => console.error('[printBoxLabel] print failed', err));
         setLastPrinted({ doc: boxLabelDoc, data: boxData });
     };
 
     // --- CLOSE BOX ---
     const handleCloseBox = async () => {
-        if (unitsInBox === 0) { setAlertMessage('Нельзя закрыть пустой короб!'); return; }
+        if (unitsInBox === 0) { setAlertMessage(t('ws.emptyBox')); return; }
         const finalBoxWeight = boxNetWeight;
         const finalUnitsInBox = unitsInBox;
-        setUnitsInBox(0); setBoxNetWeight(0); setBoxesInPallet(prev => prev + 1); setTotalBoxes(prev => prev + 1);
+        // NOT setTotalBoxes(+1): the box row was already counted when recordPack created
+        // it (COUNT(*) FROM boxes). The auto-close path doesn't increment either.
+        setUnitsInBox(0); setBoxNetWeight(0); setBoxesInPallet(prev => prev + 1);
         if (currentBoxId && currentBoxNumber) {
             await printBoxLabel(finalBoxWeight, finalUnitsInBox, currentBoxNumber, currentBoxId);
+        } else if (currentBoxId) {
+            // No box number (shouldn't happen) — still close the box in DB.
+            const boxCont = containers.find(c => c.id === selectedProduct?.box_container_id);
+            const brutBox = finalBoxWeight + (boxCont?.weight || 0) / 1000;
+            await window.desktopBridge.invoke('close-box', { boxId: currentBoxId, weightNetto: finalBoxWeight, weightBrutto: brutBox });
         }
         setCurrentBoxId(null); setCurrentBoxNumber(null);
     };
 
     // --- REPEAT ---
     const handleRepeat = async () => {
-        if (!lastPrinted) { setAlertMessage('Нет данных для повторной печати.'); return; }
-        await window.electron.invoke('print-label', { silent: true, labelDoc: lastPrinted.doc, data: lastPrinted.data, printerConfig: printerConfig.packPrinter });
+        if (!lastPrinted) { setAlertMessage(t('ws.noReprintData')); return; }
+        await window.desktopBridge.invoke('print-label', { silent: true, labelDoc: lastPrinted.doc, data: lastPrinted.data, printerConfig: printerConfig.packPrinter });
     };
 
     // --- COUNT MODE: Batch print ---
@@ -484,6 +597,12 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
         setCountCurrentPack(0);
 
         const fixedWeightKg = (selectedProduct.fixed_weight_grams || 0) / 1000;
+
+        // Pipeline depth 1: we await the PREVIOUS label's print, not the current one.
+        // The main process already pipelines gen(N+1) with send(N); awaiting the current
+        // print here used to keep exactly one label in flight and added a flat 200ms
+        // sleep — 2-3x slower batches. Depth 1 keeps cancel responsive (≤2 labels lag).
+        let prevPrint: Promise<any> = Promise.resolve();
 
         // Local counters — React state is batched and won't update mid-loop
         let localTotalUnits = totalUnits;
@@ -503,24 +622,28 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                 if (cancelCountRef.current) break;
                 setCountCurrentPack(pack + 1);
 
-                const overrides = { totalUnits: localTotalUnits, totalBoxes: localTotalBoxes, unitsInBox: localUnitsInBox, boxNetWeight: localBoxNetWeight };
+                const overrides = { totalUnits: localTotalUnits, totalBoxes: localTotalBoxes, unitsInBox: localUnitsInBox, boxNetWeight: localBoxNetWeight, boxesInPallet: localBoxesInPallet };
                 const predictedData = getLabelData(fixedWeightKg, false, undefined, overrides);
                 const predictedBoxNum = localCurrentBoxNumber || predictedData.box_number;
 
                 let packBarcode = '';
+                let packBarcodeSpec: { fields: any[]; data: Record<string, any> } | null = null;
                 if (packBarcodeTemplate) {
                     try {
                         const fields = JSON.parse(packBarcodeTemplate.structure).fields;
                         const expDatePack = new Date(labelingDate);
                         expDatePack.setDate(labelingDate.getDate() + (selectedProduct?.exp_date || 0));
-                        packBarcode = generateBarcode(fields, {
+                        const genData = {
+                            ...predictedData,
                             weight_netto_pack: parseFloat(predictedData.weight_netto_pack),
                             weight_brutto_pack: parseFloat(predictedData.weight_brutto_pack),
                             production_date: labelingDate, exp_date: expDatePack,
                             article: (selectedProduct?.article || '').padStart(14, '0'),
                             pack_number: predictedData.pack_number, box_number: predictedBoxNum,
                             batch_number: batchNumber || ''
-                        } as any);
+                        } as any;
+                        packBarcode = generateBarcode(fields, genData);
+                        packBarcodeSpec = { fields, data: genData };
                     } catch (err) { console.error(err); }
                 }
 
@@ -528,12 +651,20 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                 expDatePack.setDate(labelingDate.getDate() + (selectedProduct?.exp_date || 0));
 
                 try {
-                    const recordResult = await window.electron.invoke('record-pack', {
+                    // Throttle (depth-1 pipeline) and honor cancel BEFORE committing the
+                    // pack: once record-pack runs, the pack is in the DB and MUST be both
+                    // printed and counted, or the batch leaves a phantom recorded-but-
+                    // unprinted pack whose number the next print silently duplicates.
+                    await prevPrint;
+                    if (cancelCountRef.current) break;
+
+                    const recordResult = await window.desktopBridge.invoke('record-pack', {
                         number: predictedData.pack_number, box_number: predictedBoxNum,
                         nomenclature_id: selectedProduct.id,
                         weight_netto: parseFloat(predictedData.weight_netto_pack),
                         weight_brutto: parseFloat(predictedData.weight_brutto_pack),
-                        barcode_value: packBarcode, station_number: stationNumber,
+                        barcode_value: packBarcode, barcode_spec: packBarcodeSpec || undefined,
+                        station_number: stationNumber,
                         production_date: labelingDate.toISOString(),
                         expiration_date: expDatePack.toISOString(), batch: batchNumber || ''
                     });
@@ -545,10 +676,18 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
 
                     const finalData = getLabelData(fixedWeightKg, false, undefined, overrides);
                     finalData.box_number = recordResult.boxNumber;
-                    await window.electron.invoke('print-label', {
-                        silent: true, labelDoc, data: finalData,
+                    if (recordResult.barcodeValue) finalData.barcode = recordResult.barcodeValue;
+                    // Dispatch fire-and-forget; a failed print aborts the batch on the
+                    // NEXT lap (this pack is already recorded, so it still gets counted).
+                    prevPrint = window.desktopBridge.invoke('print-label', {
+                        silent: true, labelDoc, docKey: labelDocKey || undefined, data: finalData,
                         printerConfig: printerConfig.packPrinter || undefined
-                    });
+                    }).then((ok: any) => {
+                        if (ok === false) {
+                            cancelCountRef.current = true;
+                            if (printerConfig.packPrinter) setPrinterStatus('unreachable');
+                        }
+                    }).catch(() => { cancelCountRef.current = true; });
 
                     const netW = parseFloat(finalData.weight_netto_pack);
                     localTotalUnits++;
@@ -563,8 +702,10 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                     setCurrentBoxId(localCurrentBoxId);
                     setCurrentBoxNumber(localCurrentBoxNumber);
 
-                    // Auto print box label when pack count reached
+                    // Auto print box label when pack count reached. Drain the pack pipeline
+                    // first so the box label lands after its last pack on a shared printer.
                     if (boxPacksCompleted >= packsPerBoxInput) {
+                        await prevPrint;
                         await printBoxLabel(localBoxNetWeight, packsPerBoxInput, recordResult.boxNumber, recordResult.boxId);
                         localUnitsInBox = 0;
                         localBoxNetWeight = 0;
@@ -577,13 +718,15 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                     }
                 } catch (err) {
                     console.error('Count print error:', err);
-                    setAlertMessage(`Ошибка: ${err instanceof Error ? err.message : String(err)}`);
+                    setAlertMessage(`${t('ws.errorPrefix')}: ${err instanceof Error ? err.message : String(err)}`);
                     cancelCountRef.current = true; break;
                 }
-                // Small delay between prints
-                await new Promise(r => setTimeout(r, 200));
+                // No artificial delay: record-pack/print awaits already yield the event
+                // loop each lap, and the printer paces itself via the send queue.
             }
         }
+        // Drain the pipeline so the last label's outcome lands before we finish.
+        await prevPrint.catch(() => { /* already handled via cancelCountRef */ });
         // Final sync of all local counters to React state
         setTotalUnits(localTotalUnits);
         setTotalBoxes(localTotalBoxes);
@@ -606,44 +749,65 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
     // --- RENDER ---
     const inRange = isWeightInRange();
     const wGrams = getWeightGrams();
+    // Glanceable box-fill progress (scale mode), emerald → amber (≥80%) → red (full).
+    const boxFillLimit = Number(selectedProduct?.close_box_counter) || 0;
+    const boxFillPct = boxFillLimit > 0 ? Math.min(100, Math.round((unitsInBox / boxFillLimit) * 100)) : 0;
+    const boxFillColor = boxFillPct >= 100 ? 'bg-red-500' : boxFillPct >= 80 ? 'bg-amber-500' : 'bg-emerald-500';
+    // "Stable" while out-of-range is a false readiness cue → show amber, not green.
+    const stableOutOfRange = isStable && !!selectedProduct && parseFloat(weight) > 0.010 && !inRange;
 
     return (
-        <div className="grid grid-cols-12 gap-6 h-full p-4 relative">
+        <div className="grid grid-cols-12 gap-6 h-full p-3 relative">
             {/* Main Card */}
-            <div className="col-span-8 bg-white dark:bg-neutral-900/50 border border-neutral-200 dark:border-white/5 rounded-3xl p-8 backdrop-blur shadow-sm dark:shadow-2xl flex flex-col">
+            <div className="col-span-8 bg-white dark:bg-neutral-900/50 border border-neutral-200 dark:border-neutral-600 rounded-2xl p-5 backdrop-blur shadow-sm dark:shadow-2xl flex flex-col">
                 {/* Header */}
-                <div className="flex justify-between items-start mb-6">
+                <div className="flex justify-between items-start mb-4 gap-4">
                     <h2 className="text-2xl font-semibold text-neutral-900 dark:text-white">{t('fw.title')}</h2>
-                    {subMode === 'scale' && (
-                        <div className={`px-4 py-2 rounded-full text-sm font-medium flex items-center gap-2 border ${status === 'connected'
+                    <div className="flex items-center gap-2 flex-wrap justify-end">
+                        {subMode === 'scale' && (
+                            <div className={`px-4 py-2 rounded-full text-sm font-medium flex items-center gap-2 border ${status === 'connected'
+                                ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+                                : 'bg-red-500/10 border-red-500/20 text-red-400'}`}>
+                                <span className={`w-2 h-2 rounded-full ${status === 'connected' ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`}></span>
+                                {t('ws.scaleShort')}: {status === 'connected' ? t('ws.scaleStatus.connected') : t('ws.scaleStatus.disconnected')}
+                            </div>
+                        )}
+                        {/* Printer readiness */}
+                        <div className={`px-4 py-2 rounded-full text-sm font-medium flex items-center gap-2 border ${(printerStatus === 'ready' || printerStatus === 'driver')
                             ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
-                            : 'bg-red-500/10 border-red-500/20 text-red-400'}`}>
-                            <span className={`w-2 h-2 rounded-full ${status === 'connected' ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`}></span>
-                            {status === 'connected' ? t('ws.scaleStatus.connected') : t('ws.scaleStatus.disconnected')}
+                            : printerStatus === 'unknown'
+                                ? 'bg-neutral-500/10 border-neutral-500/20 text-neutral-400'
+                                : 'bg-red-500/10 border-red-500/20 text-red-400'}`}>
+                            <Printer className="w-3.5 h-3.5" />
+                            {printerStatus === 'ready' ? t('ws.printerStatus.ready') :
+                                printerStatus === 'driver' ? t('ws.printerStatus.driver') :
+                                    printerStatus === 'unreachable' ? t('ws.printerStatus.unreachable') :
+                                        printerStatus === 'unconfigured' ? t('ws.printerStatus.unconfigured') :
+                                            t('ws.printerStatus')}
                         </div>
-                    )}
+                    </div>
                 </div>
 
                 {/* Sub-mode tabs */}
-                <div className="flex gap-2 mb-6">
+                <div className="flex gap-2 mb-4">
                     <button onClick={() => setSubMode('scale')}
                         className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-2xl text-sm font-semibold transition-all border ${subMode === 'scale'
                             ? 'bg-emerald-100/50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 shadow-sm'
-                            : 'bg-neutral-100 dark:bg-white/5 text-neutral-500 dark:text-neutral-400 border-neutral-200 dark:border-white/10 hover:bg-neutral-200 dark:hover:bg-white/10'}`}>
+                            : 'bg-neutral-100 dark:bg-white/5 text-neutral-500 dark:text-neutral-400 border-neutral-200 dark:border-neutral-600 hover:bg-neutral-200 dark:hover:bg-white/10'}`}>
                         <Scale className="w-4 h-4" /> {t('fw.modeScale')}
                     </button>
                     <button onClick={() => setSubMode('count')}
                         className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-2xl text-sm font-semibold transition-all border ${subMode === 'count'
                             ? 'bg-blue-100/50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20 shadow-sm'
-                            : 'bg-neutral-100 dark:bg-white/5 text-neutral-500 dark:text-neutral-400 border-neutral-200 dark:border-white/10 hover:bg-neutral-200 dark:hover:bg-white/10'}`}>
+                            : 'bg-neutral-100 dark:bg-white/5 text-neutral-500 dark:text-neutral-400 border-neutral-200 dark:border-neutral-600 hover:bg-neutral-200 dark:hover:bg-white/10'}`}>
                         <Package className="w-4 h-4" /> {t('fw.modeCount')}
                     </button>
                 </div>
 
                 {/* Product selector */}
-                <div onClick={() => setIsProductModalOpen(true)} className="cursor-pointer group mb-6">
+                <div onClick={() => setIsProductModalOpen(true)} className="cursor-pointer group mb-4">
                     <label className="block text-sm font-medium text-neutral-400 mb-2">{t('ws.search')}</label>
-                    <div className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-300 dark:border-white/10 rounded-2xl px-5 py-4 text-lg text-neutral-500 dark:text-neutral-400 flex items-center justify-between group-hover:bg-neutral-100 dark:group-hover:bg-black/40 transition-all">
+                    <div className="w-full bg-neutral-50 dark:bg-black/20 border border-neutral-300 dark:border-neutral-600 rounded-2xl px-5 py-4 text-lg text-neutral-500 dark:text-neutral-400 flex items-center justify-between group-hover:bg-neutral-100 dark:group-hover:bg-black/40 transition-all">
                         <span className={selectedProduct ? "text-neutral-900 dark:text-white" : ""}>{selectedProduct ? selectedProduct.name : "..."}</span>
                         <Search className="w-6 h-6 text-neutral-400" />
                     </div>
@@ -651,7 +815,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
 
                 {/* Product info */}
                 {selectedProduct && (
-                    <div className="p-5 bg-emerald-50 dark:bg-emerald-500/5 border border-emerald-200 dark:border-emerald-500/10 rounded-2xl mb-6">
+                    <div className="p-4 bg-emerald-50 dark:bg-emerald-500/5 border border-emerald-200 dark:border-emerald-500/10 rounded-2xl mb-4">
                         <h3 className="text-sm uppercase tracking-wider text-emerald-600 dark:text-emerald-500/60 font-bold mb-1">{t('products.name')}</h3>
                         <div className="text-2xl font-bold text-emerald-700 dark:text-emerald-100 mb-2">{selectedProduct.name}</div>
                         <div className="flex flex-wrap gap-4 text-sm">
@@ -670,18 +834,18 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                 {subMode === 'scale' && (
                     <div className="flex-1 flex flex-col">
                         <div className="grid grid-cols-2 gap-4 flex-1">
-                            <div className="bg-neutral-50 dark:bg-black/30 border border-neutral-200 dark:border-white/10 rounded-3xl p-8 text-center relative overflow-hidden">
+                            <div className="bg-neutral-50 dark:bg-black/30 border border-neutral-200 dark:border-neutral-600 rounded-2xl p-4 text-center relative overflow-hidden">
                                 <label className="text-xs uppercase tracking-widest text-neutral-500 font-bold">{t('ws.gross')}</label>
                                 <div className="text-6xl font-mono text-emerald-600 dark:text-emerald-400 mt-2 font-light tracking-tighter">
                                     {weight} <span className="text-2xl text-emerald-500/50">{t('ws.kg')}</span>
                                 </div>
                                 {isStable && (
-                                    <div className="mt-2 text-emerald-600 dark:text-emerald-500/60 text-xs font-bold uppercase tracking-widest animate-pulse flex items-center justify-center gap-2">
-                                        <div className="w-1 h-1 rounded-full bg-emerald-500"></div> {t('ws.stable')}
+                                    <div className={`mt-2 text-xs font-bold uppercase tracking-widest animate-pulse flex items-center justify-center gap-2 ${stableOutOfRange ? 'text-amber-600 dark:text-amber-500' : 'text-emerald-600 dark:text-emerald-500/60'}`}>
+                                        <div className={`w-1 h-1 rounded-full ${stableOutOfRange ? 'bg-amber-500' : 'bg-emerald-500'}`}></div> {t('ws.stable')}
                                     </div>
                                 )}
                             </div>
-                            <div className="bg-neutral-50 dark:bg-black/30 border border-neutral-200 dark:border-white/10 rounded-3xl p-8 text-center">
+                            <div className="bg-neutral-50 dark:bg-black/30 border border-neutral-200 dark:border-neutral-600 rounded-2xl p-4 text-center">
                                 <label className="text-xs uppercase tracking-widest text-neutral-500 font-bold">{t('ws.net')}</label>
                                 <div className="text-6xl font-mono text-neutral-700 dark:text-neutral-300 mt-2 font-light tracking-tighter">
                                     {getNetWeight()} <span className="text-2xl text-neutral-500 dark:text-neutral-600">{t('ws.kg')}</span>
@@ -709,12 +873,12 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                     <div className="flex-1 flex flex-col gap-4">
                         <div className="grid grid-cols-2 gap-4">
                             <div onClick={() => !isCountPrinting && setShowPacksKeypad(true)}
-                                className="cursor-pointer p-6 bg-blue-50 dark:bg-blue-500/5 border border-blue-200 dark:border-blue-500/10 rounded-2xl text-center hover:bg-blue-100 dark:hover:bg-blue-500/10 transition-all">
+                                className="cursor-pointer p-4 bg-blue-50 dark:bg-blue-500/5 border border-blue-200 dark:border-blue-500/10 rounded-2xl text-center hover:bg-blue-100 dark:hover:bg-blue-500/10 transition-all">
                                 <label className="text-xs uppercase tracking-widest text-blue-500 font-bold">{t('fw.packsPerBox')}</label>
                                 <div className="text-5xl font-mono text-blue-700 dark:text-blue-300 mt-2 font-bold">{packsPerBoxInput || '—'}</div>
                             </div>
                             <div onClick={() => !isCountPrinting && setShowBoxesKeypad(true)}
-                                className="cursor-pointer p-6 bg-amber-50 dark:bg-amber-500/5 border border-amber-200 dark:border-amber-500/10 rounded-2xl text-center hover:bg-amber-100 dark:hover:bg-amber-500/10 transition-all">
+                                className="cursor-pointer p-4 bg-amber-50 dark:bg-amber-500/5 border border-amber-200 dark:border-amber-500/10 rounded-2xl text-center hover:bg-amber-100 dark:hover:bg-amber-500/10 transition-all">
                                 <label className="text-xs uppercase tracking-widest text-amber-500 font-bold">{t('fw.totalBoxes')}</label>
                                 <div className="text-5xl font-mono text-amber-700 dark:text-amber-300 mt-2 font-bold">{totalBoxesInput || '—'}</div>
                             </div>
@@ -722,7 +886,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
 
                         {/* Progress */}
                         {isCountPrinting && (
-                            <div className="p-6 bg-neutral-50 dark:bg-black/30 border border-neutral-200 dark:border-white/10 rounded-2xl">
+                            <div className="p-4 bg-neutral-50 dark:bg-black/30 border border-neutral-200 dark:border-neutral-600 rounded-2xl">
                                 <div className="flex justify-between mb-3">
                                     <span className="text-sm font-bold text-neutral-500 uppercase tracking-widest">{t('fw.progress')}</span>
                                     <span className="text-sm font-mono text-neutral-700 dark:text-neutral-300">
@@ -739,29 +903,27 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                 )}
             </div>
 
-            {/* Control Panel */}
-            <div className="col-span-4 space-y-4 flex flex-col">
+            {/* Control Panel (scrolls if it doesn't fit, so nothing clips on small screens) */}
+            <div className="col-span-4 space-y-4 flex flex-col overflow-y-auto min-h-0">
                 {subMode === 'scale' ? (
                     <>
-                        <button onClick={handlePrint}
-                            disabled={subMode === 'scale' && selectedProduct && parseFloat(weight) > 0.010 && !inRange}
-                            className={`w-full py-8 transition-all rounded-3xl font-bold text-2xl flex items-center justify-center gap-3 border-t border-white/10 ${selectedProduct && parseFloat(weight) > 0.010 && !inRange
-                                ? 'bg-neutral-400 dark:bg-neutral-700 cursor-not-allowed opacity-60'
-                                : 'bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 shadow-[0_10px_40px_-10px_rgba(16,185,129,0.5)]'}`}>
-                            <Printer className="w-8 h-8" /> {t('ws.print')}
+                        <button onClick={() => handlePrint()}
+                            disabled={!selectedProduct || !labelDoc || status !== 'connected' || !inRange}
+                            className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 transition-all rounded-3xl font-bold text-xl flex items-center justify-center gap-3 border-t border-white/10 shadow-[0_10px_40px_-10px_rgba(16,185,129,0.5)] disabled:opacity-40 disabled:pointer-events-none disabled:shadow-none">
+                            <Printer className="w-6 h-6" /> {t('ws.print')}
                         </button>
                         <div className="grid grid-cols-2 gap-4">
-                            <button onClick={handleRepeat} className="py-6 bg-neutral-100 dark:bg-neutral-800/50 hover:bg-neutral-200 dark:hover:bg-neutral-800 border border-neutral-300 dark:border-white/5 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group">
+                            <button onClick={handleRepeat} className="py-4 bg-neutral-100 dark:bg-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-600 border border-neutral-300 dark:border-neutral-600 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group">
                                 <RefreshCw className="w-6 h-6 text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-800 dark:group-hover:text-white transition-colors" />
                                 <span className="text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-800 dark:group-hover:text-white uppercase text-xs tracking-widest">{t('ws.reprintSmall')}</span>
                             </button>
-                            <button onClick={handleCloseBox} className="py-6 bg-neutral-100 dark:bg-neutral-800/50 hover:bg-neutral-200 dark:hover:bg-neutral-800 border border-neutral-300 dark:border-white/5 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group">
+                            <button onClick={handleCloseBox} disabled={unitsInBox === 0} className="py-4 bg-neutral-100 dark:bg-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-600 border border-neutral-300 dark:border-neutral-600 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group disabled:opacity-40 disabled:pointer-events-none">
                                 <Box className="w-6 h-6 text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-800 dark:group-hover:text-white transition-colors" />
                                 <span className="text-neutral-500 dark:text-neutral-400 group-hover:text-neutral-800 dark:group-hover:text-white uppercase text-xs tracking-widest">{t('ws.closeBox')}</span>
                             </button>
-                            <button onClick={() => setIsDeleteModalOpen(true)} className="py-6 bg-neutral-100 dark:bg-neutral-800/50 hover:bg-red-100 dark:hover:bg-red-900/30 border border-neutral-300 dark:border-white/5 hover:border-red-400 dark:hover:border-red-500/30 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group col-span-2">
-                                <Layers className="w-6 h-6 text-neutral-500 dark:text-neutral-400 group-hover:text-red-600 dark:group-hover:text-red-400 transition-colors" />
-                                <span className="text-neutral-500 dark:text-neutral-400 group-hover:text-red-600 dark:group-hover:text-red-400 uppercase text-xs tracking-widest">{t('ws.delete')}</span>
+                            <button onClick={() => setIsDeleteModalOpen(true)} className="py-4 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/40 border border-red-300 dark:border-red-500/30 hover:border-red-400 dark:hover:border-red-500/50 rounded-2xl font-semibold transition-all flex flex-col items-center gap-2 group col-span-2">
+                                <Trash2 className="w-6 h-6 text-red-500 dark:text-red-400 transition-colors" />
+                                <span className="text-red-600 dark:text-red-400 uppercase text-xs tracking-widest">{t('ws.delete')}</span>
                             </button>
                         </div>
                     </>
@@ -769,63 +931,92 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                     <>
                         {!isCountPrinting ? (
                             <button onClick={handleCountStart}
-                                className="w-full py-8 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 transition-all rounded-3xl font-bold text-2xl shadow-[0_10px_40px_-10px_rgba(59,130,246,0.5)] flex items-center justify-center gap-3 border-t border-white/10 text-white">
+                                className="w-full py-4 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 transition-all rounded-3xl font-bold text-2xl shadow-[0_10px_40px_-10px_rgba(59,130,246,0.5)] flex items-center justify-center gap-3 border-t border-white/10 text-white">
                                 <Play className="w-8 h-8" /> {t('fw.start')}
                             </button>
                         ) : (
                             <button onClick={() => { cancelCountRef.current = true; }}
-                                className="w-full py-8 bg-red-600 hover:bg-red-500 active:bg-red-700 transition-all rounded-3xl font-bold text-2xl shadow-[0_10px_40px_-10px_rgba(239,68,68,0.5)] flex items-center justify-center gap-3 border-t border-white/10 text-white animate-pulse">
+                                className="w-full py-4 bg-red-600 hover:bg-red-500 active:bg-red-700 transition-all rounded-3xl font-bold text-2xl shadow-[0_10px_40px_-10px_rgba(239,68,68,0.5)] flex items-center justify-center gap-3 border-t border-white/10 text-white animate-pulse">
                                 <Square className="w-8 h-8" /> {t('fw.stop')}
                             </button>
                         )}
                     </>
                 )}
 
+                <button
+                    onClick={() => printPalletSheet({ printerConfig, selectedProduct, t, setAlert: setAlertMessage, operatorName: operator?.full_name || '', busyRef: isPalletPrintingRef })}
+                    className="w-full py-3 bg-amber-600 hover:bg-amber-500 active:bg-amber-700 transition-all rounded-2xl font-bold text-lg text-white flex items-center justify-center gap-3 shadow-[0_10px_30px_-12px_rgba(217,119,6,0.6)] border-t border-white/10"
+                >
+                    <Layers className="w-6 h-6" />
+                    {t('pallet.printSheet')}
+                </button>
+
                 {/* Session Stats */}
-                <div className="mt-auto p-6 bg-white dark:bg-neutral-900/50 border border-neutral-200 dark:border-white/5 shadow-sm dark:shadow-none rounded-3xl backdrop-blur">
-                    <h3 className="text-sm font-semibold mb-4 text-neutral-500 dark:text-white/60 uppercase tracking-widest">{t('ws.sessionStats')}</h3>
-                    <div className="space-y-3">
-                        <div className="flex justify-between items-center p-3 bg-neutral-100 dark:bg-white/5 border border-neutral-300 dark:border-white/10 rounded-xl group cursor-pointer hover:bg-emerald-50 dark:hover:bg-emerald-500/10 transition-all"
-                            onClick={() => { if (unitsInBox > 0) { setAlertMessage(t('ws.closeBoxBeforeChange')); return; } setIsKeypadOpen(true); }}>
-                            <span className="text-xs uppercase tracking-wider text-neutral-500 font-bold">Партия</span>
+                <div className="mt-auto p-4 bg-white dark:bg-neutral-900/50 border border-neutral-200 dark:border-neutral-600 shadow-sm dark:shadow-none rounded-2xl backdrop-blur">
+                    <h3 className="text-sm font-semibold mb-3 text-neutral-500 dark:text-white/60 uppercase tracking-widest">{t('ws.sessionStats')}</h3>
+                    <div className="space-y-2">
+                        <div className="flex justify-between items-center p-2.5 bg-neutral-100 dark:bg-white/5 border border-neutral-300 dark:border-neutral-600 rounded-xl group cursor-pointer hover:bg-emerald-50 dark:hover:bg-emerald-500/10 transition-all"
+                            onClick={() => { setIsKeypadOpen(true); }}>
+                            <span className="text-xs uppercase tracking-wider text-neutral-500 font-bold">{t('ws.batchLabel')}</span>
                             <div className="flex items-center gap-3">
-                                <span className="text-xl font-mono font-bold text-neutral-900 dark:text-white group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
-                                    {batchNumber || <span className="text-neutral-400 dark:text-neutral-700 italic text-sm">Ввести...</span>}
+                                <span className="text-lg font-mono font-bold text-neutral-900 dark:text-white group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
+                                    {batchNumber || <span className="text-neutral-400 dark:text-neutral-700 italic text-sm">{t('ws.enterPlaceholder')}</span>}
                                 </span>
-                                <div className="p-2 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-white/10 rounded-lg"><Hash className="w-4 h-4 text-emerald-600 dark:text-emerald-500" /></div>
+                                <div className="p-2 bg-white dark:bg-neutral-700 border border-neutral-300 dark:border-neutral-600 rounded-lg"><Hash className="w-4 h-4 text-emerald-600 dark:text-emerald-500" /></div>
                             </div>
                         </div>
-                        <div className="flex justify-between items-center p-3 bg-neutral-100 dark:bg-white/5 border border-neutral-300 dark:border-white/10 rounded-xl group cursor-pointer hover:bg-emerald-50 dark:hover:bg-emerald-500/10 transition-all"
+                        <div className="flex justify-between items-center p-2.5 bg-neutral-100 dark:bg-white/5 border border-neutral-300 dark:border-neutral-600 rounded-xl group cursor-pointer hover:bg-emerald-50 dark:hover:bg-emerald-500/10 transition-all"
                             onClick={() => { if (unitsInBox > 0) { setAlertMessage(t('ws.closeBoxBeforeChange')); return; } setIsDatePickerOpen(true); }}>
-                            <span className="text-xs uppercase tracking-wider text-neutral-500 font-bold">Дата марк.</span>
+                            <span className="text-xs uppercase tracking-wider text-neutral-500 font-bold">{t('ws.dateLabel')}</span>
                             <div className="flex items-center gap-3">
-                                <span className="text-xl font-mono font-bold text-neutral-900 dark:text-white">{labelingDate.toLocaleDateString('ru-RU')}</span>
-                                <div className="p-2 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-white/10 rounded-lg"><Calendar className="w-4 h-4 text-emerald-600 dark:text-emerald-500" /></div>
+                                <span className="text-lg font-mono font-bold text-neutral-900 dark:text-white">{labelingDate.toLocaleDateString('ru-RU')}</span>
+                                <div className="p-2 bg-white dark:bg-neutral-700 border border-neutral-300 dark:border-neutral-600 rounded-lg"><Calendar className="w-4 h-4 text-emerald-600 dark:text-emerald-500" /></div>
                             </div>
                         </div>
-                        <div className="flex justify-between text-sm py-2 border-b border-neutral-200 dark:border-white/5">
-                            <span className="text-neutral-500">{t('ws.inBox')}</span>
-                            <div className="flex items-center gap-2">
-                                <span className="font-mono text-neutral-900 dark:text-white">{unitsInBox}</span>
-                                <span className="text-neutral-500 dark:text-neutral-600">/ {selectedProduct?.close_box_counter || '-'}</span>
+                        <div className="py-1.5 border-b border-neutral-200 dark:border-neutral-600">
+                            <div className="flex justify-between text-sm mb-1.5">
+                                <span className="text-neutral-500">{t('ws.inBox')}</span>
+                                <div className="flex items-center gap-2">
+                                    <span className="font-mono text-neutral-900 dark:text-white">{unitsInBox}</span>
+                                    <span className="text-neutral-500 dark:text-neutral-600">/ {selectedProduct?.close_box_counter || '-'}</span>
+                                </div>
                             </div>
+                            {boxFillLimit > 0 && (
+                                <div className="h-2 w-full rounded-full bg-neutral-200 dark:bg-white/10 overflow-hidden">
+                                    <div className={`h-full rounded-full transition-all duration-300 ${boxFillColor}`} style={{ width: `${boxFillPct}%` }}></div>
+                                </div>
+                            )}
                         </div>
-                        <div className="flex justify-between text-sm py-2 border-b border-neutral-200 dark:border-white/5">
+                        <div className="flex justify-between text-sm py-1.5 border-b border-neutral-200 dark:border-neutral-600">
                             <span className="text-neutral-500">{t('ws.boxesOnPallet')}</span>
                             <span className="font-mono text-amber-600 dark:text-amber-400">{boxesInPallet}</span>
                         </div>
-                        <div className="flex justify-between text-sm py-2">
+                        <div className="flex justify-between text-sm py-1.5">
                             <span className="text-neutral-500">{t('ws.totalUnits')}</span>
                             <span className="font-mono text-neutral-900 dark:text-white">{totalUnits}</span>
                         </div>
+                        {lastPrintInfo && (
+                            <div className="flex justify-between text-xs pt-1 text-amber-600 dark:text-amber-400/80">
+                                <span className="uppercase tracking-wider">{t('ws.lastPrinted')}</span>
+                                <span className="font-mono">#{lastPrintInfo.label} · {lastPrintInfo.time}</span>
+                            </div>
+                        )}
                     </div>
                 </div>
             </div>
 
+            {/* Transient print-success toast (manual print) */}
+            {printToast && (
+                <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[250] px-6 py-3 rounded-2xl bg-emerald-600 text-white font-semibold shadow-[0_10px_30px_-8px_rgba(16,185,129,0.6)] flex items-center gap-2 animate-in fade-in slide-in-from-bottom-2 duration-200">
+                    <Printer className="w-5 h-5" />
+                    {printToast}
+                </div>
+            )}
+
             {/* MODALS */}
             {alertMessage && (
                 <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[300] flex items-center justify-center p-4 animate-in fade-in duration-200">
-                    <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-white/10 rounded-[2rem] p-10 max-w-2xl w-full text-center shadow-2xl relative">
+                    <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-600 rounded-[2rem] p-10 max-w-2xl w-full text-center shadow-2xl relative">
                         <button onClick={() => setAlertMessage(null)} className="absolute top-6 right-6 p-2 bg-neutral-100 dark:bg-white/5 hover:bg-neutral-200 dark:hover:bg-white/10 rounded-full transition-colors">
                             <X className="w-8 h-8 text-neutral-500 dark:text-neutral-400" />
                         </button>
@@ -839,13 +1030,13 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                 </div>
             )}
 
-            {isKeypadOpen && <NumericKeypad value={batchNumber} onUpdate={setBatchNumber} onClose={() => setIsKeypadOpen(false)} title="Номер партии" />}
-            {isDatePickerOpen && <DatePickerModal value={labelingDate} onUpdate={setLabelingDate} onClose={() => setIsDatePickerOpen(false)} title="Дата маркировки" />}
+            {isKeypadOpen && <NumericKeypad value={batchNumber} onUpdate={setBatchNumber} onClose={() => setIsKeypadOpen(false)} title={t('ws.batchModalTitle')} />}
+            {isDatePickerOpen && <Suspense fallback={null}><DatePickerModal value={labelingDate} onUpdate={setLabelingDate} onClose={() => setIsDatePickerOpen(false)} title={t('ws.dateModalTitle')} /></Suspense>}
             {showPacksKeypad && <NumericKeypad value={String(packsPerBoxInput)} onUpdate={(v) => setPacksPerBoxInput(parseInt(v) || 0)} onClose={() => setShowPacksKeypad(false)} title={t('fw.packsPerBox')} />}
             {showBoxesKeypad && <NumericKeypad value={String(totalBoxesInput)} onUpdate={(v) => setTotalBoxesInput(parseInt(v) || 0)} onClose={() => setShowBoxesKeypad(false)} title={t('fw.totalBoxes')} />}
-            <DeleteItemsModal isOpen={isDeleteModalOpen} onClose={() => setIsDeleteModalOpen(false)}
+            <DeleteItemsModal isOpen={isDeleteModalOpen} nomenclatureId={selectedProduct?.id ?? null} onClose={() => setIsDeleteModalOpen(false)}
                 onDeleted={async () => {
-                    const latest = await window.electron.invoke('get-latest-counters', selectedProduct?.id);
+                    const latest = await window.desktopBridge.invoke('get-latest-counters', selectedProduct?.id);
                     if (latest) {
                         setTotalUnits(latest.totalUnits); setTotalBoxes(latest.totalBoxes);
                         setUnitsInBox(latest.unitsInBox); setBoxesInPallet(latest.boxesInPallet);
@@ -853,7 +1044,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                         setBoxNetWeight(latest.boxNetWeight || 0);
                     }
                 }} />
-            {isProductModalOpen && <ProductSelectionModal products={products} onSelect={handleSelectProduct} onClose={() => setIsProductModalOpen(false)} />}
+            {isProductModalOpen && <Suspense fallback={null}><ProductSelectionModal products={products} onSelect={handleSelectProduct} onClose={() => setIsProductModalOpen(false)} /></Suspense>}
         </div>
     );
 };
