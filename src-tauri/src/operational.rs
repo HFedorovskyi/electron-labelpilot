@@ -388,29 +388,58 @@ impl OperationalState {
         payload: RecordPackPayload,
         operator: Option<OperatorAttribution>,
     ) -> Result<RecordPackResult, String> {
+        self.record_pack_with_outbox(payload, operator, |_, _| Ok(()))
+            .map(|(result, ())| result)
+    }
+
+    pub(crate) fn record_pack_with_outbox<T>(
+        &self,
+        payload: RecordPackPayload,
+        operator: Option<OperatorAttribution>,
+        prepare_outbox: impl FnOnce(&Transaction<'_>, &RecordPackResult) -> Result<T, String>,
+    ) -> Result<(RecordPackResult, T), String> {
         payload.validate()?;
         self.with_connection(|connection| {
             let transaction = connection
-                .transaction()
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
                 .map_err(|error| format!("failed to begin record-pack transaction: {error}"))?;
             let result = record_pack_transaction(&transaction, payload, operator)?;
+            let outbox = prepare_outbox(&transaction, &result)?;
             transaction
                 .commit()
                 .map_err(|error| format!("failed to commit record-pack transaction: {error}"))?;
-            Ok(result)
+            Ok((result, outbox))
         })
     }
 
     pub fn close_box(&self, payload: CloseBoxPayload) -> Result<Value, String> {
+        self.close_box_with_outbox(payload, |_| Ok(()))
+            .map(|result| json!({ "success": result.is_some() }))
+    }
+
+    pub(crate) fn close_box_with_outbox<T>(
+        &self,
+        payload: CloseBoxPayload,
+        prepare_outbox: impl FnOnce(&Transaction<'_>) -> Result<T, String>,
+    ) -> Result<Option<T>, String> {
         payload.validate()?;
         self.with_connection(|connection| {
-            let changes = connection
+            let transaction = connection
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                .map_err(|error| format!("failed to begin close-box transaction: {error}"))?;
+            let changes = transaction
                 .execute(
                     "UPDATE boxes SET status = 'Closed', weight_netto = ?1, weight_brutto = ?2, updated_at = CURRENT_TIMESTAMP WHERE id = ?3 AND status = 'Open'",
                     params![payload.weight_netto, payload.weight_brutto, payload.box_id],
                 )
                 .map_err(|error| format!("failed to close box {}: {error}", payload.box_id))?;
-            Ok(json!({ "success": changes > 0 }))
+            if changes == 0 {
+                return Ok(None);
+            }
+            let outbox = prepare_outbox(&transaction)?;
+            transaction.commit()
+                .map_err(|error| format!("failed to commit close-box transaction: {error}"))?;
+            Ok(Some(outbox))
         })
     }
 
@@ -720,7 +749,7 @@ fn record_pack_transaction(
                 Err(error) if is_unique_constraint(&error) => {
                     let next_attempt = attempts + 1;
                     let count: i64 = transaction
-                        .query_row("SELECT COUNT(*) FROM boxes WHERE status != 'Deleted'", [], |row| row.get(0))
+                        .query_row("SELECT total_boxes FROM operational_totals WHERE id = 1", [], |row| row.get(0))
                         .map_err(db_error("count boxes after number collision"))?;
                     actual_number = if actual_number.chars().all(|character| character.is_ascii_digit()) {
                         (count + 1).to_string()
@@ -821,20 +850,13 @@ fn latest_counters(connection: &Connection, nomenclature_id: Option<i64>) -> Res
         )
         .optional()
         .map_err(db_error("read latest box number"))?;
-    let total_units: i64 = connection
+    let (total_units, total_boxes): (i64, i64) = connection
         .query_row(
-            "SELECT COUNT(*) FROM pack WHERE status != 'Deleted'",
+            "SELECT total_units, total_boxes FROM operational_totals WHERE id = 1",
             [],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
-        .map_err(db_error("count packs"))?;
-    let total_boxes: i64 = connection
-        .query_row(
-            "SELECT COUNT(*) FROM boxes WHERE status != 'Deleted'",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(db_error("count boxes"))?;
+        .map_err(db_error("read operational totals"))?;
     let open_pallet: Option<i64> = connection
         .query_row(
             "SELECT id FROM pallet WHERE status = 'Open' ORDER BY id DESC LIMIT 1",
@@ -1353,7 +1375,7 @@ fn query_json_rows(
     values: &[SqlValue],
 ) -> Result<Vec<Value>, String> {
     let mut statement = connection
-        .prepare(sql)
+        .prepare_cached(sql)
         .map_err(db_error("prepare JSON query"))?;
     let columns: Vec<String> = statement
         .column_names()
@@ -1885,4 +1907,236 @@ mod tests {
             "Deleted"
         );
     }
+    fn assert_materialized_totals(state: &OperationalState, units: i64, boxes: i64) {
+        state
+            .with_connection(|connection| {
+                let actual: (i64, i64) = connection
+                    .query_row(
+                        "SELECT total_units, total_boxes FROM operational_totals WHERE id=1",
+                        [],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )
+                    .unwrap();
+                let scan: (i64, i64) = connection
+                    .query_row(
+                        "SELECT (SELECT COUNT(*) FROM pack WHERE status != 'Deleted'),
+                        (SELECT COUNT(*) FROM boxes WHERE status != 'Deleted')",
+                        [],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )
+                    .unwrap();
+                assert_eq!(actual, (units, boxes));
+                assert_eq!(actual, scan);
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn materialized_totals_follow_soft_delete_restore_hard_delete_and_rollback() {
+        let (_directory, persisted, state) = fixture("materialized-totals");
+        let first = state.record_pack(pack("1", "B1"), None).unwrap();
+        state.record_pack(pack("2", "B1"), None).unwrap();
+        assert_materialized_totals(&state, 2, 1);
+        state
+            .with_connection(|connection| {
+                let transaction = connection.transaction().unwrap();
+                transaction
+                    .execute(
+                        "UPDATE pack SET status='Deleted' WHERE id=?1",
+                        [first.pack_id],
+                    )
+                    .unwrap();
+                transaction
+                    .execute(
+                        "UPDATE boxes SET status='Deleted' WHERE id=?1",
+                        [first.box_id],
+                    )
+                    .unwrap();
+                transaction.rollback().unwrap();
+                Ok(())
+            })
+            .unwrap();
+        assert_materialized_totals(&state, 2, 1);
+        state.delete_pack(first.pack_id).unwrap();
+        assert_materialized_totals(&state, 1, 1);
+        // A second writer must see and update the same persisted aggregates.
+        let second_connection = crate::processor::open_database(&persisted).unwrap();
+        second_connection
+            .execute(
+                "UPDATE pack SET status='Printed' WHERE id=?1",
+                [first.pack_id],
+            )
+            .unwrap();
+        assert_materialized_totals(&state, 2, 1);
+        state.delete_box(first.box_id).unwrap();
+        assert_materialized_totals(&state, 0, 0);
+        second_connection
+            .execute_batch("DELETE FROM pack; DELETE FROM boxes;")
+            .unwrap();
+        assert_materialized_totals(&state, 0, 0);
+        state.record_pack(pack("3", "B2"), None).unwrap();
+        assert_materialized_totals(&state, 1, 1);
+        state.reset_database().unwrap();
+        assert_materialized_totals(&state, 0, 0);
+    }
+
+    #[test]
+    fn materialized_totals_migrate_existing_history_once_and_survive_reopen() {
+        let (_directory, persisted, state) = fixture("materialized-migrate");
+        let first = state.record_pack(pack("1", "B1"), None).unwrap();
+        state.record_pack(pack("2", "B1"), None).unwrap();
+        state.delete_pack(first.pack_id).unwrap();
+        state
+            .with_connection(|connection| {
+                connection
+                    .execute_batch(
+                        "
+                DROP TRIGGER operational_totals_pack_insert;
+                DROP TRIGGER operational_totals_pack_delete;
+                DROP TRIGGER operational_totals_pack_status;
+                DROP TRIGGER operational_totals_box_insert;
+                DROP TRIGGER operational_totals_box_delete;
+                DROP TRIGGER operational_totals_box_status;
+                DROP TABLE operational_totals;
+            ",
+                    )
+                    .unwrap();
+                Ok(())
+            })
+            .unwrap();
+        drop(state);
+        let state = OperationalState::new(&persisted).unwrap();
+        assert_materialized_totals(&state, 1, 1);
+        state.record_pack(pack("3", "B1"), None).unwrap();
+        drop(state);
+        let state = OperationalState::new(&persisted).unwrap();
+        assert_materialized_totals(&state, 2, 1);
+        let counters = state.latest_counters(Some(1)).unwrap();
+        assert_eq!(counters["totalUnits"], 2);
+        assert_eq!(counters["unitsInBox"], 2);
+    }
+    #[cfg(feature = "slint-ui")]
+    fn outbox_job(printer: &crate::printer::PrinterTransportState, key: &str, port: u16)
+        -> crate::printer::PreparedPrinterJob
+    {
+        printer.prepare_generated(json!({
+            "id":"outbox-test", "connection":"tcp", "protocol":"zpl",
+            "ip":"127.0.0.1", "port":port, "jobIdempotencyKey":key,
+            "persistentConnection":false
+        }), b"^XA^FDOUTBOX^FS^XZ".to_vec()).unwrap()
+    }
+
+    #[test]
+    #[cfg(feature = "slint-ui")]
+    fn outbox_insert_failure_rolls_back_pack_box_pallet_and_totals() {
+        let (_directory, persisted, state) = fixture("outbox-rollback");
+        let printer = crate::printer::PrinterTransportState::with_database(&persisted.database_path()).unwrap();
+        let observer = Connection::open(persisted.database_path()).unwrap();
+        observer.execute_batch("CREATE TRIGGER reject_outbox BEFORE INSERT ON printer_delivery_jobs
+            BEGIN SELECT RAISE(ABORT, 'injected outbox failure'); END;").unwrap();
+        let error = state.record_pack_with_outbox(pack("1", "B1"), None, |tx, _| {
+            outbox_job(&printer, "pack-1", 1).persist(tx)
+        }).unwrap_err();
+        assert!(error.contains("injected outbox failure"), "{error}");
+        for table in ["pack", "boxes", "pallet", "printer_delivery_jobs"] {
+            let count: i64 = observer.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0)).unwrap();
+            assert_eq!(count, 0, "{table}");
+        }
+        assert_materialized_totals(&state, 0, 0);
+        observer.execute_batch("DROP TRIGGER reject_outbox").unwrap();
+        let error = state.record_pack_with_outbox(pack("1", "B1"), None, |tx, _| -> Result<(), String> {
+            outbox_job(&printer, "pack-1", 1).persist(tx)?;
+            Err("injected failure after outbox INSERT, before commit".to_owned())
+        }).unwrap_err();
+        assert!(error.contains("before commit"));
+        assert_materialized_totals(&state, 0, 0);
+        assert_eq!(observer.query_row("SELECT COUNT(*) FROM printer_delivery_jobs", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+    }
+
+    #[test]
+    #[cfg(feature = "slint-ui")]
+    fn outbox_close_failure_preserves_open_box_and_already_closed_skips_callback() {
+        let (_directory, persisted, state) = fixture("outbox-box-rollback");
+        let printer = crate::printer::PrinterTransportState::with_database(&persisted.database_path()).unwrap();
+        let pack = state.record_pack(pack("1", "B1"), None).unwrap();
+        let observer = Connection::open(persisted.database_path()).unwrap();
+        let before: (String, Option<f64>, Option<f64>) = observer.query_row(
+            "SELECT status, weight_netto, weight_brutto FROM boxes WHERE id=?1", [pack.box_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
+        observer.execute_batch("CREATE TRIGGER reject_outbox BEFORE INSERT ON printer_delivery_jobs
+            BEGIN SELECT RAISE(ABORT, 'injected box outbox failure'); END;").unwrap();
+        let payload = || CloseBoxPayload { box_id:pack.box_id, weight_netto:5.0, weight_brutto:6.0 };
+        let error = state.close_box_with_outbox(payload(), |tx| outbox_job(&printer, "box-1", 1).persist(tx)).unwrap_err();
+        assert!(error.contains("injected box outbox failure"));
+        let after: (String, Option<f64>, Option<f64>) = observer.query_row(
+            "SELECT status, weight_netto, weight_brutto FROM boxes WHERE id=?1", [pack.box_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
+        assert_eq!(before, after);
+        assert_materialized_totals(&state, 1, 1);
+        observer.execute_batch("DROP TRIGGER reject_outbox").unwrap();
+        let job_id = state.close_box_with_outbox(payload(), |tx| outbox_job(&printer, "box-1", 1).persist(tx)).unwrap().unwrap();
+        assert_eq!(observer.query_row("SELECT state FROM printer_delivery_jobs WHERE job_id=?1", [job_id], |r| r.get::<_, String>(0)).unwrap(), "queued");
+        assert!(state.close_box_with_outbox(payload(), |_| -> Result<(), String> {
+            panic!("closed box must not enqueue another label")
+        }).unwrap().is_none());
+    }
+
+    #[test]
+    #[cfg(feature = "slint-ui")]
+    fn outbox_commit_is_visible_atomically_and_recovers_exact_bytes_after_restart() {
+        use crate::printer::PrinterTransportState;
+        use crate::runtime_events::RuntimeEventSink;
+        use std::io::Read;
+        use std::net::TcpListener;
+        use std::time::{Duration, Instant};
+        let (_directory, persisted, state) = fixture("outbox-recovery");
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let printer = PrinterTransportState::with_database(&persisted.database_path()).unwrap();
+        let observer = Connection::open(persisted.database_path()).unwrap();
+        let (pack, job_id) = state.record_pack_with_outbox(pack("1", "B1"), None, |tx, pack| {
+            let id = outbox_job(&printer, &format!("native-pack:{}", pack.pack_id), port).persist(tx)?;
+            assert_eq!(observer.query_row("SELECT COUNT(*) FROM pack", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+            assert_eq!(observer.query_row("SELECT COUNT(*) FROM printer_delivery_jobs", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+            assert!(printer.submit_committed_with_sink(RuntimeEventSink::detached(), &id).is_err());
+            Ok(id)
+        }).unwrap();
+        assert_eq!(observer.query_row("SELECT COUNT(*) FROM pack WHERE id=?1", [pack.pack_id], |r| r.get::<_, i64>(0)).unwrap(), 1);
+        assert_eq!(observer.query_row("SELECT state FROM printer_delivery_jobs WHERE job_id=?1", [&job_id], |r| r.get::<_, String>(0)).unwrap(), "queued");
+        assert_eq!(listener.accept().unwrap_err().kind(), std::io::ErrorKind::WouldBlock);
+        drop(printer);
+        drop(state);
+        let printer = PrinterTransportState::with_database(&persisted.database_path()).unwrap();
+        assert_eq!(printer.recover_pending_with_sink(RuntimeEventSink::detached()).unwrap(), 1);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut stream = loop {
+            match listener.accept() {
+                Ok((stream, _)) => break stream,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock && Instant::now() < deadline => std::thread::sleep(Duration::from_millis(10)),
+                Err(error) => panic!("recovery did not connect: {error}"),
+            }
+        };
+        stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        let mut received = vec![0; b"^XA^FDOUTBOX^FS^XZ".len()];
+        stream.read_exact(&mut received).unwrap();
+        assert_eq!(received, b"^XA^FDOUTBOX^FS^XZ");
+        loop {
+            let state: String = observer.query_row("SELECT state FROM printer_delivery_jobs WHERE job_id=?1", [&job_id], |r| r.get(0)).unwrap();
+            if state == "accepted" { break; }
+            assert!(Instant::now() < deadline, "recovery state: {state}");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(printer.recover_pending_with_sink(RuntimeEventSink::detached()).unwrap(), 0);
+        let receipt = printer.submit_generated_with_sink(RuntimeEventSink::detached(), json!({
+            "id":"outbox-test", "connection":"tcp", "protocol":"zpl", "ip":"127.0.0.1",
+            "port":port, "jobIdempotencyKey":format!("native-pack:{}", pack.pack_id)
+        }), received).unwrap();
+        assert!(receipt.deduplicated);
+        assert_eq!(receipt.durable_job_id.as_deref(), Some(job_id.as_str()));
+        assert_eq!(listener.accept().unwrap_err().kind(), std::io::ErrorKind::WouldBlock);
+        printer.disconnect_all();
+    }
+
 }

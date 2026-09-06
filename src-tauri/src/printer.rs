@@ -3,6 +3,10 @@ mod durable;
 mod serial;
 mod spooler;
 mod status;
+mod write;
+use self::write::write_job_once;
+#[cfg(test)]
+mod regression_tests;
 
 pub use backend::{plan_backend, BackendPlanPayload, UniversalPrinterPlan};
 pub use durable::{DurablePrintJobRecord, DurableQueueSummary};
@@ -15,8 +19,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serial::SerialConnection;
 use std::collections::{HashMap, HashSet};
-use std::io::{self, Write};
-use std::net::{Shutdown, SocketAddr, TcpStream, ToSocketAddrs};
+use std::io;
+use std::net::{IpAddr, Shutdown, SocketAddr, TcpStream, ToSocketAddrs};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
@@ -182,7 +186,7 @@ pub struct PrinterDeviceConfig {
     #[serde(default)]
     pub port: Option<u64>,
     #[serde(default)]
-    pub persistent_connection: bool,
+    tcp_job_boundary: Option<String>,
     #[serde(default)]
     pub serial_port: Option<String>,
     #[serde(default)]
@@ -202,6 +206,10 @@ impl PrinterDeviceConfig {
         config.connection = config.connection.trim().to_ascii_lowercase();
         config.protocol = config.protocol.trim().to_ascii_lowercase();
         config.ip = config.ip.map(|value| value.trim().to_owned());
+        config.tcp_job_boundary = config
+            .tcp_job_boundary
+            .map(|value| value.trim().to_ascii_lowercase())
+            .filter(|value| !value.is_empty());
         config.serial_port = config.serial_port.map(|value| value.trim().to_owned());
         config.driver_name = config.driver_name.map(|value| value.trim().to_owned());
         config.job_idempotency_key = config
@@ -230,6 +238,13 @@ impl PrinterDeviceConfig {
                 let port = config.port.unwrap_or(DEFAULT_TCP_PORT as u64);
                 if !(1..=u16::MAX as u64).contains(&port) {
                     return Err("TCP printer port must be in 1..65535".to_owned());
+                }
+                if config
+                    .tcp_job_boundary
+                    .as_deref()
+                    .is_some_and(|value| !matches!(value, "stream" | "eof"))
+                {
+                    return Err("TCP job boundary must be stream or eof".to_owned());
                 }
             }
             "serial" => {
@@ -291,11 +306,90 @@ impl PrinterDeviceConfig {
         }
     }
 
+    fn tcp_job_boundary(&self) -> TcpJobBoundary {
+        match self.tcp_job_boundary.as_deref() {
+            Some("stream") => TcpJobBoundary::Protocol,
+            Some("eof") => TcpJobBoundary::Eof,
+            _ => automatic_tcp_job_boundary(self.ip.as_deref().unwrap_or_default(), &self.protocol),
+        }
+    }
+
+    fn keep_tcp_connection_open(&self) -> bool {
+        self.connection == "tcp" && self.tcp_job_boundary() == TcpJobBoundary::Protocol
+    }
+
     fn display_name(&self) -> &str {
         if self.name.is_empty() {
             &self.id
         } else {
             &self.name
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TcpJobBoundary {
+    /// The printer language carries its own end-of-job marker (`^XZ`, `PRINT`, and so on).
+    Protocol,
+    /// A bridge consumes one job only after the sender closes the socket.
+    Eof,
+}
+
+fn automatic_tcp_job_boundary(host: &str, protocol: &str) -> TcpJobBoundary {
+    // Local virtual-printer bridges commonly buffer until EOF. Physical printers on
+    // port 9100 consume the language's explicit end marker and benefit from reuse.
+    if is_loopback_printer_host(host) {
+        return TcpJobBoundary::Eof;
+    }
+    if matches!(
+        protocol,
+        "zpl" | "image" | "tspl" | "epl" | "cpcl" | "dpl" | "sbpl"
+    ) {
+        TcpJobBoundary::Protocol
+    } else {
+        TcpJobBoundary::Eof
+    }
+}
+
+fn is_loopback_printer_host(host: &str) -> bool {
+    let host = host
+        .trim()
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .trim_end_matches('.');
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<IpAddr>()
+            .map(|address| address.is_loopback())
+            .unwrap_or(false)
+}
+
+/// Validated, fully encoded material. Constructed without any transport side effects.
+#[cfg(feature = "slint-ui")]
+pub(crate) struct PreparedPrinterJob {
+    config: PrinterDeviceConfig,
+    action: JobAction,
+}
+
+#[cfg(feature = "slint-ui")]
+impl PreparedPrinterJob {
+    pub(crate) fn with_idempotency_key(mut self, key: &str) -> Result<Self, String> {
+        let key = key.trim();
+        if key.is_empty() || key.len() > 128 || key.chars().any(char::is_control) {
+            return Err("job idempotency key must contain 1..128 printable bytes".to_owned());
+        }
+        self.config.job_idempotency_key = Some(key.to_owned());
+        Ok(self)
+    }
+
+    pub(crate) fn persist(self, transaction: &rusqlite::Transaction<'_>) -> Result<String, String> {
+        let physical_key = self.config.physical_key();
+        let fingerprint = action_fingerprint(&self.action);
+        match durable::DurablePrintStore::prepare_on_connection(
+            transaction, &self.config, &physical_key, fingerprint, &self.action,
+        )? {
+            durable::PrepareOutcome::New(job_id) => Ok(job_id),
+            durable::PrepareOutcome::Cached(_) => Err("business print job already accepted".to_owned()),
         }
     }
 }
@@ -449,6 +543,7 @@ enum IdempotencyOutcome {
 struct IdempotencyEntry {
     fingerprint: u64,
     created_at: Instant,
+    last_used_at: Instant,
     outcome: IdempotencyOutcome,
 }
 
@@ -570,14 +665,47 @@ impl PrinterTransportState {
     }
 
     #[cfg(feature = "slint-ui")]
-    pub(crate) fn submit_driver_bitmap_with_sink(
+    pub(crate) fn prepare_generated(
+        &self,
+        config: Value,
+        data: Vec<u8>,
+    ) -> Result<PreparedPrinterJob, String> {
+        let config = PrinterDeviceConfig::from_value(config)?;
+        if data.is_empty() || data.len() > MAX_RAW_JOB_BYTES {
+            return Err(format!("raw print job must contain 1..{MAX_RAW_JOB_BYTES} bytes"));
+        }
+        Ok(PreparedPrinterJob { config, action: JobAction::Print(data) })
+    }
+
+    #[cfg(feature = "slint-ui")]
+    pub(crate) fn submit_prepared_with_sink(
         &self,
         app: RuntimeEventSink,
+        job: PreparedPrinterJob,
+    ) -> Result<PrintReceipt, String> {
+        self.submit(app, job.config, job.action)
+    }
+
+    #[cfg(feature = "slint-ui")]
+    pub(crate) fn submit_committed_with_sink(
+        &self,
+        app: RuntimeEventSink,
+        job_id: &str,
+    ) -> Result<PrintReceipt, String> {
+        // Reload through a different connection: uncommitted jobs are never dispatchable.
+        let job = self.inner.durable.committed_job(job_id)?;
+        emit_durable_status(&app, Some(job_id), "queued", None);
+        self.submit_stored(app, job)
+    }
+
+    #[cfg(feature = "slint-ui")]
+    pub(crate) fn prepare_driver_bitmap(
+        &self,
         config: Value,
         width: u32,
         height: u32,
         mono: Vec<u8>,
-    ) -> Result<PrintReceipt, String> {
+    ) -> Result<PreparedPrinterJob, String> {
         let config = PrinterDeviceConfig::from_value(config)?;
         if config.connection != "windows_driver" {
             return Err("driver bitmap printing requires windows_driver connection".to_owned());
@@ -592,21 +720,19 @@ impl PrinterTransportState {
                 mono.len()
             ));
         }
-        self.submit(
-            app,
+        Ok(PreparedPrinterJob {
             config,
-            JobAction::DriverBitmap {
+            action: JobAction::DriverBitmap {
                 width,
                 height,
                 mono,
             },
-        )
+        })
     }
     #[cfg(feature = "slint-ui")]
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn submit_driver_page_with_sink(
+    pub(crate) fn prepare_driver_page(
         &self,
-        app: RuntimeEventSink,
         config: Value,
         width: u32,
         height: u32,
@@ -616,7 +742,7 @@ impl PrinterTransportState {
         margins_mm: PageMarginsMm,
         fit_mode: String,
         document_name: String,
-    ) -> Result<PrintReceipt, String> {
+    ) -> Result<PreparedPrinterJob, String> {
         let config = PrinterDeviceConfig::from_value(config)?;
         if config.connection != "windows_driver" {
             return Err("page-sheet printing requires windows_driver connection".to_owned());
@@ -659,10 +785,9 @@ impl PrinterTransportState {
                 mono.len()
             ));
         }
-        self.submit(
-            app,
+        Ok(PreparedPrinterJob {
             config,
-            JobAction::DriverPage {
+            action: JobAction::DriverPage {
                 width,
                 height,
                 mono,
@@ -674,7 +799,7 @@ impl PrinterTransportState {
                     document_name,
                 },
             },
-        )
+        })
     }
     #[cfg(feature = "desktop")]
     pub fn submit_driver_bitmap(
@@ -836,7 +961,8 @@ impl PrinterTransportState {
                 || entry.created_at.elapsed() <= IDEMPOTENCY_TTL
         });
         loop {
-            if let Some(entry) = cache.entries.get(&scope) {
+            if let Some(entry) = cache.entries.get_mut(&scope) {
+                entry.last_used_at = Instant::now();
                 let existing_fingerprint = entry.fingerprint;
                 let existing_outcome = entry.outcome.clone();
                 if existing_fingerprint != fingerprint {
@@ -888,15 +1014,28 @@ impl PrinterTransportState {
                 continue;
             }
             if cache.entries.len() >= MAX_IDEMPOTENCY_ENTRIES {
-                return Err(format!(
-                    "printer idempotency cache reached {MAX_IDEMPOTENCY_ENTRIES} entries"
-                ));
+                // Terminal outcomes are also in SQLite. Evict only those: a
+                // cache miss must still pass durable.prepare before sending.
+                let oldest = cache
+                    .entries
+                    .iter()
+                    .filter(|(_, entry)| !matches!(entry.outcome, IdempotencyOutcome::Pending))
+                    .min_by_key(|(_, entry)| entry.last_used_at)
+                    .map(|(scope, _)| scope.clone());
+                if let Some(oldest) = oldest {
+                    cache.entries.remove(&oldest);
+                } else {
+                    return Err(format!(
+                        "printer idempotency cache reached {MAX_IDEMPOTENCY_ENTRIES} in-flight entries"
+                    ));
+                }
             }
             cache.entries.insert(
                 scope.clone(),
                 IdempotencyEntry {
                     fingerprint,
                     created_at: Instant::now(),
+                    last_used_at: Instant::now(),
                     outcome: IdempotencyOutcome::Pending,
                 },
             );
@@ -1797,7 +1936,7 @@ impl DeviceConnection {
 struct TcpConnection {
     stream: Option<TcpStream>,
     endpoint: Option<String>,
-    persistent: bool,
+    keep_open: bool,
     last_write: Option<Instant>,
 }
 
@@ -1819,13 +1958,18 @@ impl TcpConnection {
         let endpoint = config.physical_key();
         let reused = self.stream.is_some() && self.endpoint.as_deref() == Some(&endpoint);
         self.ensure_connected(config)?;
-        self.persistent = config.persistent_connection;
+        let keep_open = config.keep_tcp_connection_open();
+        self.keep_open = keep_open;
         self.last_write = Some(Instant::now());
-        Ok(SendOutcome {
+        let outcome = SendOutcome {
             bytes: 0,
             attempts: 1,
             reused_connection: reused,
-        })
+        };
+        if !keep_open {
+            self.close();
+        }
+        Ok(outcome)
     }
 
     fn send(
@@ -1847,26 +1991,29 @@ impl TcpConnection {
                 self.close();
                 continue;
             }
-            let write_result = self
-                .stream
-                .as_mut()
-                .expect("connected stream")
-                .write_all(data)
-                .and_then(|_| self.stream.as_mut().expect("connected stream").flush());
+            let write_result =
+                write_job_once(self.stream.as_mut().expect("connected stream"), data);
             match write_result {
                 Ok(()) => {
-                    self.persistent = config.persistent_connection;
+                    let keep_open = config.keep_tcp_connection_open();
+                    self.keep_open = keep_open;
                     self.last_write = Some(Instant::now());
-                    return Ok(SendOutcome {
+                    let outcome = SendOutcome {
                         bytes: data.len(),
                         attempts,
                         reused_connection: reused && attempts == 1,
-                    });
+                    };
+                    if !keep_open {
+                        // EOF is the automatically selected boundary for virtual bridges.
+                        self.close();
+                    }
+                    return Ok(outcome);
                 }
                 Err(error) => {
-                    let failure = io_failure("TCP printer write", error);
+                    let retryable = error.can_retry(attempts);
+                    let failure = error.into_transport_failure("TCP printer write");
                     self.close();
-                    if failure.timed_out || attempts >= 2 {
+                    if !retryable {
                         return Err(failure);
                     }
                     stats.reconnects.fetch_add(1, Ordering::AcqRel);
@@ -1898,7 +2045,7 @@ impl TcpConnection {
     }
 
     fn close_if_idle(&mut self) {
-        if self.persistent {
+        if self.keep_open {
             return;
         }
         if self
@@ -1915,7 +2062,7 @@ impl TcpConnection {
         }
         self.endpoint = None;
         self.last_write = None;
-        self.persistent = false;
+        self.keep_open = false;
     }
 }
 
@@ -2017,26 +2164,44 @@ mod tests {
     use std::io::Read;
     use std::net::TcpListener;
 
-    fn config(port: u16, id: &str, persistent: bool) -> PrinterDeviceConfig {
-        PrinterDeviceConfig::from_value(serde_json::json!({
+    fn config(port: u16, id: &str, boundary: Option<&str>) -> PrinterDeviceConfig {
+        let mut value = serde_json::json!({
             "id": id,
             "active": true,
             "name": "Loopback printer",
             "connection": "tcp",
             "protocol": "zpl",
             "ip": "127.0.0.1",
-            "port": port,
-            "persistentConnection": persistent
-        }))
-        .unwrap()
+            "port": port
+        });
+        if let Some(boundary) = boundary {
+            value["tcpJobBoundary"] = serde_json::json!(boundary);
+        }
+        PrinterDeviceConfig::from_value(value).unwrap()
     }
 
     #[test]
     fn validates_all_transport_configs_and_physical_queue_keys() {
-        let a = config(9100, "pack", true);
-        let b = config(9100, "box", false);
+        let a = config(9100, "pack", None);
+        let b = config(9100, "box", None);
+        let pallet = config(9100, "pallet", None);
         assert_eq!(a.physical_key(), "tcp:127.0.0.1:9100");
         assert_eq!(a.physical_key(), b.physical_key());
+        assert_eq!(a.physical_key(), pallet.physical_key());
+
+        let other = PrinterDeviceConfig::from_value(serde_json::json!({
+            "id": "other", "connection": "tcp", "protocol": "zpl",
+            "ip": "192.0.2.20", "port": 9100
+        }))
+        .unwrap();
+        assert_ne!(a.physical_key(), other.physical_key());
+        let state = PrinterTransportState::new();
+        let pack_queue = state.queue_for(&a.physical_key()).unwrap();
+        let box_queue = state.queue_for(&b.physical_key()).unwrap();
+        let other_queue = state.queue_for(&other.physical_key()).unwrap();
+        assert!(Arc::ptr_eq(&pack_queue, &box_queue));
+        assert!(!Arc::ptr_eq(&pack_queue, &other_queue));
+        assert_eq!(state.summary().worker_count, 2);
 
         let serial = PrinterDeviceConfig::from_value(serde_json::json!({
             "id": "serial", "connection": "serial", "serialPort": "COM1", "baudRate": 9600
@@ -2064,6 +2229,36 @@ mod tests {
         }
     }
 
+    #[test]
+    fn automatic_tcp_job_boundaries_ignore_the_legacy_operator_switch() {
+        let legacy_on = PrinterDeviceConfig::from_value(serde_json::json!({
+            "id": "legacy-on", "connection": "tcp", "protocol": "zpl",
+            "ip": "127.0.0.1", "port": 9100, "persistentConnection": true
+        }))
+        .unwrap();
+        let legacy_off = PrinterDeviceConfig::from_value(serde_json::json!({
+            "id": "legacy-off", "connection": "tcp", "protocol": "zpl",
+            "ip": "127.0.0.1", "port": 9100, "persistentConnection": false
+        }))
+        .unwrap();
+        assert_eq!(legacy_on.tcp_job_boundary(), TcpJobBoundary::Eof);
+        assert_eq!(legacy_off.tcp_job_boundary(), TcpJobBoundary::Eof);
+
+        let network = PrinterDeviceConfig::from_value(serde_json::json!({
+            "id": "network", "connection": "tcp", "protocol": "image",
+            "ip": "192.0.2.21", "port": 9100
+        }))
+        .unwrap();
+        assert_eq!(network.tcp_job_boundary(), TcpJobBoundary::Protocol);
+
+        let detected_bridge = PrinterDeviceConfig::from_value(serde_json::json!({
+            "id": "bridge", "connection": "tcp", "protocol": "image",
+            "ip": "192.0.2.22", "port": 9100, "tcpJobBoundary": "eof"
+        }))
+        .unwrap();
+        assert_eq!(detected_bridge.tcp_job_boundary(), TcpJobBoundary::Eof);
+    }
+
     #[cfg(windows)]
     #[test]
     fn missing_windows_spooler_queue_fails_during_probe_without_printing() {
@@ -2080,7 +2275,7 @@ mod tests {
     }
 
     #[test]
-    fn persistent_connection_preserves_order_and_is_reused() {
+    fn protocol_boundary_preserves_order_and_reuses_the_connection() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         let server = thread::spawn(move || {
@@ -2094,7 +2289,7 @@ mod tests {
         });
         let stats = PrinterStats::default();
         let mut connection = DeviceConnection::default();
-        let config = config(port, "pack", true);
+        let config = config(port, "pack", Some("stream"));
         let first = connection.send(&config, b"AAA", &stats).unwrap();
         let second = connection.send(&config, b"BBB", &stats).unwrap();
         assert!(!first.reused_connection);
@@ -2105,7 +2300,7 @@ mod tests {
     }
 
     #[test]
-    fn nonpersistent_connection_closes_after_idle_window() {
+    fn eof_boundary_closes_immediately_after_each_job() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         let server = thread::spawn(move || {
@@ -2118,12 +2313,63 @@ mod tests {
         });
         let stats = PrinterStats::default();
         let mut connection = DeviceConnection::default();
-        let config = config(port, "pack", false);
-        connection.send(&config, b"Z", &stats).unwrap();
-        thread::sleep(IDLE_CLOSE + Duration::from_millis(20));
-        connection.close_if_idle();
+        let config = config(port, "pack", None);
+        let receipt = connection.send(&config, b"Z", &stats).unwrap();
+        assert!(!receipt.reused_connection);
         assert!(connection.tcp.stream.is_none());
         assert_eq!(server.join().unwrap(), b'Z');
+    }
+
+    #[test]
+    fn pack_box_and_pallet_roles_share_one_ordered_physical_queue() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = thread::spawn(move || {
+            let mut jobs = Vec::new();
+            for _ in 0..3 {
+                let (mut socket, _) = listener.accept().unwrap();
+                socket
+                    .set_read_timeout(Some(Duration::from_secs(2)))
+                    .unwrap();
+                let mut bytes = Vec::new();
+                socket.read_to_end(&mut bytes).unwrap();
+                jobs.push(bytes);
+            }
+            jobs
+        });
+        let state = PrinterTransportState::new();
+        let sink = RuntimeEventSink::detached();
+        let payloads = [
+            ("pack", "image", b"^XA^FDpack^FS^XZ".as_slice()),
+            ("box", "zpl", b"^XA^FDbox^FS^XZ".as_slice()),
+            ("pallet", "zpl", b"^XA^FDpallet^FS^XZ".as_slice()),
+        ];
+        for (role, protocol, payload) in payloads {
+            let config = serde_json::json!({
+                "id": role,
+                "active": true,
+                "name": role,
+                "connection": "tcp",
+                "protocol": protocol,
+                "ip": "127.0.0.1",
+                "port": port
+            });
+            state
+                .submit_generated_with_sink(sink.clone(), config, payload.to_vec())
+                .unwrap();
+        }
+        assert_eq!(
+            server.join().unwrap(),
+            vec![
+                b"^XA^FDpack^FS^XZ".to_vec(),
+                b"^XA^FDbox^FS^XZ".to_vec(),
+                b"^XA^FDpallet^FS^XZ".to_vec(),
+            ]
+        );
+        let summary = state.summary();
+        assert_eq!(summary.worker_count, 1);
+        assert_eq!(summary.completed_jobs, 3);
+        assert_eq!(summary.tcp_jobs, 3);
     }
 
     #[test]
@@ -2134,7 +2380,7 @@ mod tests {
         let stats = PrinterStats::default();
         let mut connection = DeviceConnection::default();
         let error = connection
-            .send(&config(port, "pack", true), b"^XA^XZ", &stats)
+            .send(&config(port, "pack", None), b"^XA^XZ", &stats)
             .unwrap_err();
         assert!(error.message.contains("connect"));
         assert!(!error.timed_out);
@@ -2210,7 +2456,7 @@ mod tests {
     #[test]
     fn idempotency_cache_suppresses_duplicates_conflicts_and_uncertain_retries() {
         let state = PrinterTransportState::new();
-        let mut device = config(9100, "dedup", false);
+        let mut device = config(9100, "dedup", None);
         device.job_idempotency_key = Some("job-42".to_owned());
         let key = device.physical_key();
         let action = JobAction::Print(b"LABEL".to_vec());
@@ -2281,3 +2527,6 @@ mod tests {
         assert_eq!(summary.idempotency_ttl_ms, 600_000);
     }
 }
+
+#[cfg(all(test, feature = "slint-ui"))]
+mod outbox_tests;

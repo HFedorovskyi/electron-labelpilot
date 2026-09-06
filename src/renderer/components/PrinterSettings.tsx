@@ -57,7 +57,6 @@ export interface PrinterDeviceConfig {
     dpi?: number; // 203 | 300 | 600
     ramCache?: 'auto' | 'on' | 'off'; // image protocol: printer RAM-drive background caching
     z64?: boolean;                    // image protocol: Z64 (zlib) graphic encoding vs hex RLE
-    persistentConnection?: boolean;   // tcp: keep the socket open between labels
 }
 
 interface PrinterSettingsProps {
@@ -322,26 +321,9 @@ const PrinterSettings = ({
                                                 className="min-h-12 w-full bg-white dark:bg-black/30 border border-neutral-200 dark:border-neutral-600 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"
                                             />
                                         </div>
-                                        <div className="sm:col-span-3">
-                                            <label className="block text-sm text-neutral-600 dark:text-neutral-400 mb-2">{t('settings.tcpConnModeLabel')}</label>
-                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                                {([
-                                                    { id: false, label: t('settings.tcpConnModeClose') },
-                                                    { id: true, label: t('settings.tcpConnModeKeep') },
-                                                ] as const).map((mode) => (
-                                                    <button
-                                                        type="button"
-                                                        key={String(mode.id)}
-                                                        onClick={() => update('persistentConnection', mode.id)}
-                                                        className={`min-h-12 p-3 rounded-xl border transition-colors duration-150 ${!!config.persistentConnection === mode.id
-                                                            ? 'bg-emerald-50 dark:bg-emerald-500/15 border-emerald-400 dark:border-emerald-500/50 text-emerald-800 dark:text-emerald-200 ring-1 ring-emerald-200/70 dark:ring-emerald-500/20'
-                                                            : 'bg-neutral-50 dark:bg-neutral-700/70 border-neutral-200 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700'
-                                                            }`}
-                                                    >
-                                                        <span className="text-xs font-semibold text-center">{mode.label}</span>
-                                                    </button>
-                                                ))}
-                                            </div>
+                                        <div className="sm:col-span-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-center dark:border-emerald-500/30 dark:bg-emerald-500/10">
+                                            <div className="text-xs font-bold text-emerald-800 dark:text-emerald-200">{t('settings.tcpConnAutoLabel')}</div>
+                                            <div className="mt-1 text-xs text-neutral-600 dark:text-neutral-300">{t('settings.tcpConnAutoHint')}</div>
                                         </div>
                                     </div>
                                 )}

@@ -149,6 +149,17 @@ impl DurablePrintStore {
         action: &JobAction,
     ) -> Result<PrepareOutcome, String> {
         let connection = self.lock()?;
+        Self::prepare_on_connection(&connection, config, physical_key, fingerprint, action)
+    }
+
+    // The caller's business transaction owns this INSERT; never acquire our connection here.
+    pub(super) fn prepare_on_connection(
+        connection: &Connection,
+        config: &PrinterDeviceConfig,
+        physical_key: &str,
+        fingerprint: u64,
+        action: &JobAction,
+    ) -> Result<PrepareOutcome, String> {
         let fingerprint = format!("{fingerprint:016X}");
         if let Some(key) = config.job_idempotency_key.as_deref() {
             let existing = connection
@@ -238,6 +249,12 @@ impl DurablePrintStore {
             )
             .map_err(db_error("insert durable print job"))?;
         Ok(PrepareOutcome::New(job_id))
+    }
+
+    #[cfg(feature = "slint-ui")]
+    pub(super) fn committed_job(&self, job_id: &str) -> Result<StoredPrintJob, String> {
+        let connection = self.lock()?;
+        load_stored_job(&connection, job_id)
     }
 
     pub(super) fn queued_jobs(&self) -> Result<Vec<StoredPrintJob>, String> {

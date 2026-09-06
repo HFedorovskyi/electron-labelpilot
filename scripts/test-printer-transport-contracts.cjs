@@ -38,12 +38,16 @@ assert.equal(rustNumber('MAX_PRINTER_WORKERS'), 12);
 assert.equal(rustNumber('MAX_RAW_JOB_BYTES'), 16 * 1024 * 1024);
 assert.equal(rustNumber('MAX_IDEMPOTENCY_ENTRIES'), 2048);
 assert.match(rust, /IDEMPOTENCY_TTL: Duration = Duration::from_secs\(10 \* 60\)/);
+assert.match(rust, /fn automatic_tcp_job_boundary\([\s\S]*?is_loopback_printer_host[\s\S]*?TcpJobBoundary::Protocol/);
+assert.match(rust, /let keep_open = config\.keep_tcp_connection_open\(\);[\s\S]*?if !keep_open \{\s*\/\/ EOF is the automatically selected boundary[\s\S]*?self\.close\(\);/);
+assert.doesNotMatch(rust, /pub persistent_connection:/);
+assert.match(rust, /automatic_tcp_job_boundaries_ignore_the_legacy_operator_switch/);
 
 for (const marker of [
     'set_nodelay(true)',
     'try_send(job)',
     'physical_key',
-    'persistent_connection',
+    'tcp_job_boundary',
     'printer-status-update',
     'reconnects.fetch_add',
     'BASE64_STANDARD',
@@ -83,6 +87,6 @@ assert.match(screen, /getTauriPrinterTransportSummary/);
 assert.match(css, /migration-split \{[^}]*repeat\(3,/);
 assert.match(css, /migration-printer span/);
 
-console.log('Tauri printer transport contracts: TCP 9100, connect/write 3000 ms, idle close 400 ms');
+console.log('Tauri printer transport contracts: automatic stream/EOF framing, shared endpoint ordering, connect/write 3000 ms');
 console.log('Printer transport bounds: 16 jobs/printer, 12 workers, 16 MiB/job, breaker 5000 ms');
 console.log('Printer transport bridge: raw queue plus bounded Windows label/page GDI and 10-minute idempotency');

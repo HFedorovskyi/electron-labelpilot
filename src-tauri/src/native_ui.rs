@@ -158,6 +158,20 @@ pub struct NativeWeighingSnapshot {
     pub open_entities: NativeUiOpenEntities,
 }
 
+/// Post-print data only; catalog and session changes use their own refresh paths.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeProductionDelta {
+    pub selected_product_id: Option<i64>,
+    pub counters: NativeUiCounters,
+}
+
+impl NativeProductionDelta {
+    pub fn matches_selection(&self, selected_product_id: Option<i64>) -> bool {
+        self.selected_product_id == selected_product_id
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NativeFixedWeightSnapshot {
@@ -265,7 +279,6 @@ pub struct NativePrinterRoleSettings {
     pub dpi: i32,
     pub ram_cache: String,
     pub z64: bool,
-    pub persistent_connection: bool,
     pub darkness: Option<f64>,
     pub print_speed: Option<f64>,
     pub gap_mm: Option<f64>,
@@ -289,7 +302,6 @@ pub struct NativePrinterRoleSettingsInput {
     pub dpi: i32,
     pub ram_cache: String,
     pub z64: bool,
-    pub persistent_connection: bool,
     pub darkness: Option<f64>,
     pub print_speed: Option<f64>,
     pub gap_mm: Option<f64>,
@@ -852,19 +864,28 @@ impl NativeUiRuntime {
                 };
                 let applied = report.reachable && !recommended_profile.is_empty();
                 if applied {
-                    let target = config
-                        .get_mut(role)
-                        .and_then(Value::as_object_mut)
-                        .ok_or_else(|| format!("конфигурация {role} повреждена"))?;
-                    target.insert(
-                        "detectedProfileId".to_owned(),
-                        Value::String(recommended_profile.clone()),
-                    );
-                    target.insert(
-                        "detectedEndpointKey".to_owned(),
-                        Value::String(endpoint_key.clone()),
-                    );
-                    target.insert("detectedProfileAt".to_owned(), json!(unix_ms()));
+                    {
+                        let target = config
+                            .get_mut(role)
+                            .and_then(Value::as_object_mut)
+                            .ok_or_else(|| format!("конфигурация {role} повреждена"))?;
+                        target.insert(
+                            "detectedProfileId".to_owned(),
+                            Value::String(recommended_profile.clone()),
+                        );
+                        target.insert(
+                            "detectedEndpointKey".to_owned(),
+                            Value::String(endpoint_key.clone()),
+                        );
+                        target.insert("detectedProfileAt".to_owned(), json!(unix_ms()));
+                    }
+                    if input.connection == "tcp" {
+                        let boundary = detected_tcp_job_boundary(
+                            &input.ip,
+                            report.supports_bidirectional_status,
+                        );
+                        set_shared_tcp_job_boundary(&mut config, &endpoint_key, boundary);
+                    }
                     self.commit_printer_config(config)?;
                 }
                 Ok(NativePrinterCapability {
@@ -950,10 +971,9 @@ impl NativeUiRuntime {
         device.insert("dpi".to_owned(), json!(input.dpi));
         set_string(device, "ramCache", &input.ram_cache);
         device.insert("z64".to_owned(), Value::Bool(input.z64));
-        device.insert(
-            "persistentConnection".to_owned(),
-            Value::Bool(input.persistent_connection),
-        );
+        // Connection lifetime is transport-owned. Old operator-selected values are
+        // removed so a saved role cannot reintroduce delayed EOF-driven printing.
+        device.remove("persistentConnection");
         set_optional_number(device, "darkness", input.darkness);
         set_optional_number(device, "printSpeed", input.print_speed);
         set_optional_number(device, "gapMm", input.gap_mm);
@@ -964,8 +984,10 @@ impl NativeUiRuntime {
             device.remove("detectedProfileId");
             device.remove("detectedEndpointKey");
             device.remove("detectedProfileAt");
+            device.remove("tcpJobBoundary");
         }
         config["autoPrintOnStable"] = Value::Bool(auto_print_on_stable);
+        synchronize_shared_tcp_job_boundaries(&mut config);
         Ok(config)
     }
 
@@ -1217,6 +1239,18 @@ impl NativeUiRuntime {
             selected_job_id,
             selected_product,
             counters,
+        })
+    }
+
+    pub fn production_delta(
+        &self,
+        selected_product_id: Option<i64>,
+    ) -> Result<NativeProductionDelta, String> {
+        Ok(NativeProductionDelta {
+            selected_product_id,
+            counters: NativeUiCounters::try_from(
+                &self.operational()?.latest_counters(selected_product_id)?,
+            )?,
         })
     }
 
@@ -1772,10 +1806,6 @@ fn printer_role_settings(
         dpi: normalized_dpi(value_i64(device.get("dpi")).unwrap_or(203) as i32),
         ram_cache: value_string(device.get("ramCache")).unwrap_or_else(|| "auto".to_owned()),
         z64: device.get("z64").and_then(Value::as_bool).unwrap_or(false),
-        persistent_connection: device
-            .get("persistentConnection")
-            .and_then(Value::as_bool)
-            .unwrap_or(false),
         darkness: value_f64(device.get("darkness")),
         print_speed: value_f64(device.get("printSpeed")),
         gap_mm: value_f64(device.get("gapMm")),
@@ -1946,6 +1976,62 @@ fn printer_endpoint_key(device: &Value) -> String {
                 .unwrap_or_default()
                 .to_ascii_lowercase()
         ),
+    }
+}
+
+fn detected_tcp_job_boundary(host: &str, supports_bidirectional_status: bool) -> &'static str {
+    let host = host.trim().trim_start_matches('[').trim_end_matches(']');
+    let loopback =
+        host.eq_ignore_ascii_case("localhost") || host == "::1" || host.starts_with("127.");
+    if supports_bidirectional_status || !loopback {
+        "stream"
+    } else {
+        "eof"
+    }
+}
+
+fn set_shared_tcp_job_boundary(config: &mut Value, endpoint: &str, boundary: &str) {
+    for role in ["packPrinter", "boxPrinter", "palletPrinter"] {
+        let same_endpoint = config
+            .get(role)
+            .filter(|device| value_string(device.get("connection")).as_deref() == Some("tcp"))
+            .is_some_and(|device| printer_endpoint_key(device) == endpoint);
+        if same_endpoint {
+            if let Some(device) = config.get_mut(role).and_then(Value::as_object_mut) {
+                device.insert(
+                    "tcpJobBoundary".to_owned(),
+                    Value::String(boundary.to_owned()),
+                );
+                device.remove("persistentConnection");
+            }
+        }
+    }
+}
+
+fn synchronize_shared_tcp_job_boundaries(config: &mut Value) {
+    let roles = ["packPrinter", "boxPrinter", "palletPrinter"];
+    let configured = roles
+        .iter()
+        .filter_map(|role| {
+            let device = config.get(*role)?;
+            if value_string(device.get("connection")).as_deref() != Some("tcp") {
+                return None;
+            }
+            let boundary = value_string(device.get("tcpJobBoundary"))?;
+            matches!(boundary.as_str(), "stream" | "eof")
+                .then(|| (printer_endpoint_key(device), boundary))
+        })
+        .collect::<Vec<_>>();
+    for (endpoint, _) in &configured {
+        let boundary = if configured
+            .iter()
+            .any(|(candidate, mode)| candidate == endpoint && mode == "eof")
+        {
+            "eof"
+        } else {
+            "stream"
+        };
+        set_shared_tcp_job_boundary(config, endpoint, boundary);
     }
 }
 
@@ -2230,7 +2316,6 @@ fn warmup_role_config(config: &Value, key: &str) -> Option<Value> {
                 "protocol": "image",
                 "ip": host,
                 "port": port,
-                "persistentConnection": true,
             }));
         }
     }
@@ -2442,6 +2527,37 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn detected_tcp_boundary_is_shared_by_roles_on_one_physical_printer() {
+        assert_eq!(detected_tcp_job_boundary("127.0.0.1", false), "eof");
+        assert_eq!(detected_tcp_job_boundary("127.0.0.1", true), "stream");
+        assert_eq!(detected_tcp_job_boundary("192.0.2.40", false), "stream");
+
+        let mut config = json!({
+            "packPrinter": {
+                "connection": "tcp", "protocol": "image",
+                "ip": "192.0.2.40", "port": 9100
+            },
+            "boxPrinter": {
+                "connection": "tcp", "protocol": "image",
+                "ip": "192.0.2.40", "port": 9100
+            },
+            "palletPrinter": {
+                "connection": "tcp", "protocol": "zpl",
+                "ip": "192.0.2.41", "port": 9100
+            }
+        });
+        let shared = printer_endpoint_key(&config["packPrinter"]);
+        set_shared_tcp_job_boundary(&mut config, &shared, "eof");
+        assert_eq!(config["packPrinter"]["tcpJobBoundary"], "eof");
+        assert_eq!(config["boxPrinter"]["tcpJobBoundary"], "eof");
+        assert!(config["palletPrinter"].get("tcpJobBoundary").is_none());
+
+        set_shared_tcp_job_boundary(&mut config, &shared, "stream");
+        assert_eq!(config["packPrinter"]["tcpJobBoundary"], "stream");
+        assert_eq!(config["boxPrinter"]["tcpJobBoundary"], "stream");
     }
 
     #[test]
@@ -2825,6 +2941,7 @@ mod tests {
         initial["customRoot"] = json!({"keep": true});
         initial["packPrinter"]["vendorOption"] = json!("keep-me");
         initial["packPrinter"]["pageFit"] = json!("actual-size");
+        initial["packPrinter"]["persistentConnection"] = json!(true);
         persisted.save_printer_config(initial).unwrap();
 
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -2873,7 +2990,6 @@ mod tests {
             dpi: 300,
             ram_cache: "auto".to_owned(),
             z64: false,
-            persistent_connection: false,
             darkness: Some(12.0),
             print_speed: Some(6.0),
             gap_mm: Some(2.0),
@@ -2903,6 +3019,10 @@ mod tests {
             detected["packPrinter"]["detectedProfileId"],
             "generic-zpl-safe"
         );
+        assert_eq!(detected["packPrinter"]["tcpJobBoundary"], "stream");
+        assert!(detected["packPrinter"]
+            .get("persistentConnection")
+            .is_none());
 
         let saved = runtime
             .save_printer_role_settings(input.clone(), false)
@@ -2919,6 +3039,9 @@ mod tests {
         assert_eq!(reloaded["packPrinter"]["darkness"], 12.0);
         assert_eq!(reloaded["packPrinter"]["dpi"], 300);
         assert!(reloaded["packPrinter"].get("detectedProfileId").is_none());
+        assert!(reloaded["packPrinter"]
+            .get("persistentConnection")
+            .is_none());
 
         let mut invalid = input.clone();
         invalid.port = 0;
@@ -3383,5 +3506,30 @@ mod tests {
         runtime.shutdown();
         scale_server.join().unwrap();
         printer_server.join().unwrap();
+    }
+    #[test]
+    fn production_delta_preserves_selection_and_does_not_reload_catalogs() {
+        let directory = TestDirectory::new("production-delta");
+        let persisted = PersistedState::for_data_dir(directory.0.clone());
+        let runtime = NativeUiRuntime::with_persisted(persisted, |_| {}).unwrap();
+        let full = runtime.weighing_snapshot(None, None).unwrap();
+        let delta = runtime.production_delta(None).unwrap();
+        assert_eq!(delta.counters, full.counters);
+        assert!(delta.matches_selection(None));
+        assert!(!delta.matches_selection(Some(7)));
+        let json = serde_json::to_value(&delta).unwrap();
+        assert_eq!(json.as_object().unwrap().len(), 2);
+        assert!(json.get("products").is_none());
+        let connection = Connection::open(runtime.persisted().unwrap().database_path()).unwrap();
+        // The normal snapshot now fails on this missing catalog, but printing
+        // counters must remain independent from operator/catalog refreshes.
+        connection
+            .execute_batch("ALTER TABLE operators RENAME TO hidden_operators;")
+            .unwrap();
+        assert!(runtime.weighing_snapshot(None, None).is_err());
+        let delta = runtime.production_delta(Some(7)).unwrap();
+        assert!(delta.matches_selection(Some(7)));
+        assert!(!delta.matches_selection(Some(8)));
+        assert_eq!(delta.counters.total_units, 0);
     }
 }

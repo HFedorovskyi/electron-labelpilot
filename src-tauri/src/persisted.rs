@@ -5,7 +5,7 @@ use std::fs::{self, OpenOptions};
 use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Mutex, RwLock};
 
 // Immutable deployed data path; renaming it would orphan station state during the 2.0 upgrade.
 const LEGACY_APP_DIRECTORY: &str = "electron-labelpilot";
@@ -22,6 +22,8 @@ static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 pub struct PersistedState {
     data_dir: PathBuf,
     sequence_guard: Mutex<()>,
+    numbering_cache: RwLock<Option<Value>>,
+    printer_cache: RwLock<Option<Value>>,
 }
 
 impl PersistedState {
@@ -50,6 +52,8 @@ impl PersistedState {
         Self {
             data_dir,
             sequence_guard: Mutex::new(()),
+            numbering_cache: RwLock::new(None),
+            printer_cache: RwLock::new(None),
         }
     }
 
@@ -95,25 +99,40 @@ impl PersistedState {
     }
 
     pub fn load_numbering_config(&self) -> Value {
-        normalize_numbering(
+        if let Some(value) = self.load_cached(&self.numbering_cache) {
+            return value;
+        }
+        let value = normalize_numbering(
             read_json(&self.data_dir.join(NUMBERING_FILE))
                 .ok()
                 .flatten(),
-        )
+        );
+        self.store_cached(&self.numbering_cache, value.clone());
+        value
     }
 
     pub fn save_numbering_config(&self, value: Value) -> Result<(), String> {
         validate_numbering(&value)?;
-        atomic_write_json(&self.data_dir.join(NUMBERING_FILE), &value)
+        atomic_write_json(&self.data_dir.join(NUMBERING_FILE), &value)?;
+        self.store_cached(&self.numbering_cache, value);
+        Ok(())
     }
 
     pub fn load_printer_config(&self) -> Value {
-        normalize_printer(read_json(&self.data_dir.join(PRINTER_FILE)).ok().flatten())
+        if let Some(value) = self.load_cached(&self.printer_cache) {
+            return value;
+        }
+        let value = normalize_printer(read_json(&self.data_dir.join(PRINTER_FILE)).ok().flatten());
+        self.store_cached(&self.printer_cache, value.clone());
+        value
     }
 
     pub fn save_printer_config(&self, value: Value) -> Result<(), String> {
+        let value = normalize_printer(Some(value));
         validate_printer(&value)?;
-        atomic_write_json(&self.data_dir.join(PRINTER_FILE), &value)
+        atomic_write_json(&self.data_dir.join(PRINTER_FILE), &value)?;
+        self.store_cached(&self.printer_cache, value);
+        Ok(())
     }
 
     pub fn load_identity(&self) -> Option<Value> {
@@ -124,6 +143,16 @@ impl PersistedState {
             .ok()
             .flatten()
             .filter(Value::is_object)
+    }
+
+    fn load_cached(&self, cache: &RwLock<Option<Value>>) -> Option<Value> {
+        cache.read().ok().and_then(|value| value.clone())
+    }
+
+    fn store_cached(&self, cache: &RwLock<Option<Value>>, value: Value) {
+        if let Ok(mut cached) = cache.write() {
+            *cached = Some(value);
+        }
     }
 
     pub fn next_sequence(&self, sequence_type: &str) -> Result<String, String> {
@@ -250,6 +279,20 @@ fn normalize_printer(value: Option<Value>) -> Value {
             device.remove("widthMm");
             device.remove("heightMm");
         }
+        // Connection framing is selected by the transport. This legacy operator
+        // switch caused EOF-driven bridges to release many labels at box close.
+        device.remove("persistentConnection");
+        if let Some(boundary) = device
+            .get("tcpJobBoundary")
+            .and_then(Value::as_str)
+            .map(|value| value.trim().to_ascii_lowercase())
+        {
+            if matches!(boundary.as_str(), "stream" | "eof") {
+                device.insert("tcpJobBoundary".to_owned(), Value::String(boundary));
+            } else {
+                device.remove("tcpJobBoundary");
+            }
+        }
     }
     result
 }
@@ -350,7 +393,7 @@ fn validate_printer(value: &Value) -> Result<(), String> {
         }
         optional_enum(device, "ramCache", &["auto", "on", "off"])?;
         optional_boolean(device, "z64")?;
-        optional_boolean(device, "persistentConnection")?;
+        optional_enum(device, "tcpJobBoundary", &["stream", "eof"])?;
     }
     expect_boolean(object, "autoPrintOnStable")?;
     expect_string(object, "serverIp")?;
@@ -445,7 +488,7 @@ fn read_json(path: &Path) -> Result<Option<Value>, String> {
     }
 }
 
-fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> Result<(), String> {
+pub(crate) fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let parent = path
         .parent()
         .ok_or_else(|| format!("{} has no parent directory", path.display()))?;
@@ -692,6 +735,86 @@ mod tests {
             .filter(|entry| entry.file_name().to_string_lossy().ends_with(".tmp"))
             .collect();
         assert!(leftovers.is_empty(), "temporary file was not cleaned up");
+    }
+
+    #[test]
+    fn printer_config_removes_the_legacy_connection_switch() {
+        let directory = TestDirectory::new("printer-framing-migration");
+        let state = PersistedState::for_data_dir(directory.0.clone());
+        let mut printer = default_printer();
+        printer["packPrinter"]["persistentConnection"] = json!(true);
+        printer["boxPrinter"]["persistentConnection"] = json!(false);
+        printer["packPrinter"]["tcpJobBoundary"] = json!("EOF");
+        state.save_printer_config(printer).unwrap();
+
+        let saved = state.load_printer_config();
+        assert!(saved["packPrinter"].get("persistentConnection").is_none());
+        assert!(saved["boxPrinter"].get("persistentConnection").is_none());
+        assert_eq!(saved["packPrinter"]["tcpJobBoundary"], "eof");
+    }
+
+    #[test]
+    fn config_caches_follow_successful_atomic_saves() {
+        let directory = TestDirectory::new("config-cache");
+        let state = PersistedState::for_data_dir(directory.0.clone());
+
+        let mut printer = default_printer();
+        printer["packPrinter"]["name"] = json!("Line A");
+        state
+            .save_printer_config(printer.clone())
+            .expect("save printer config");
+        assert_eq!(state.load_printer_config(), printer);
+        printer["packPrinter"]["name"] = json!("Line B");
+        state
+            .save_printer_config(printer.clone())
+            .expect("replace printer config");
+        assert_eq!(state.load_printer_config(), printer);
+
+        let mut numbering = default_numbering();
+        numbering["unit"]["prefix"] = json!("PK");
+        state
+            .save_numbering_config(numbering.clone())
+            .expect("save numbering config");
+        assert_eq!(state.load_numbering_config(), numbering);
+    }
+
+    #[test]
+    #[ignore = "manual persisted print-config cache benchmark"]
+    fn benchmark_cached_print_configuration_reads() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        let directory = TestDirectory::new("config-cache-benchmark");
+        let state = PersistedState::for_data_dir(directory.0.clone());
+        state
+            .save_printer_config(default_printer())
+            .expect("save printer config");
+        state
+            .save_numbering_config(default_numbering())
+            .expect("save numbering config");
+        let iterations = 10_000_u64;
+
+        let uncached_started = Instant::now();
+        for _ in 0..iterations {
+            black_box(normalize_printer(
+                read_json(&directory.0.join(PRINTER_FILE)).unwrap(),
+            ));
+            black_box(normalize_numbering(
+                read_json(&directory.0.join(NUMBERING_FILE)).unwrap(),
+            ));
+        }
+        let uncached_micros = uncached_started.elapsed().as_micros();
+
+        let cached_started = Instant::now();
+        for _ in 0..iterations {
+            black_box(state.load_printer_config());
+            black_box(state.load_numbering_config());
+        }
+        let cached_micros = cached_started.elapsed().as_micros();
+        println!(
+            "PRINT_CONFIG_CACHE_BENCH iterations={iterations} uncached_us={uncached_micros} cached_us={cached_micros} speedup_x={:.2}",
+            uncached_micros as f64 / cached_micros.max(1) as f64
+        );
     }
 
     #[test]

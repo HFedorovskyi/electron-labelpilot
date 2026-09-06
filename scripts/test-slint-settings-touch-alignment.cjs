@@ -59,9 +59,14 @@ for (const fragment of [
   'root.settings-input-target = "printer-ip";',
   'root.settings-input-target = "printer-port";',
   'root.settings-input-target = "printer-baud";',
+  'text: root.settings-connection-auto-label;',
+  'text: root.settings-connection-auto-hint;',
 ]) {
   assert.ok(printers.includes(fragment), `printer touch contract missing: ${fragment}`);
 }
+
+assert.ok(!printers.includes('settings-persistent-connection'),
+  'manual TCP connection switch must not be available to an operator');
 
 for (const fragment of [
   'scale-page-scroll := ScrollView {',

@@ -56,7 +56,9 @@ export function normalizePrinterConfig(value: unknown): PersistedRecord {
     const result = mergeRoot(DEFAULT_PRINTER_CONFIG, value);
     for (const role of ['packPrinter', 'boxPrinter', 'palletPrinter']) {
         const device = result[role];
-        if (!isRecord(device) || device.widthMm !== 58 || device.heightMm !== 40) continue;
+        if (!isRecord(device)) continue;
+        delete device.persistentConnection;
+        if (device.widthMm !== 58 || device.heightMm !== 40) continue;
         delete device.widthMm;
         delete device.heightMm;
     }

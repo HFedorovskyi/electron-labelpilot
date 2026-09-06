@@ -1,8 +1,8 @@
 use super::{
-    io_failure, PrinterDeviceConfig, PrinterStats, SendOutcome, TransportFailure, WRITE_TIMEOUT,
+    write::write_job_once, PrinterDeviceConfig, PrinterStats, SendOutcome, TransportFailure,
+    WRITE_TIMEOUT,
 };
 use serialport::{DataBits, FlowControl, Parity, SerialPort, StopBits};
-use std::io::Write;
 use std::time::Instant;
 
 #[derive(Default)]
@@ -49,12 +49,7 @@ impl SerialConnection {
                 self.close();
                 continue;
             }
-            let result = self
-                .port
-                .as_mut()
-                .expect("connected serial port")
-                .write_all(data)
-                .and_then(|_| self.port.as_mut().expect("connected serial port").flush());
+            let result = write_job_once(self.port.as_mut().expect("connected serial port"), data);
             match result {
                 Ok(()) => {
                     self.last_write = Some(Instant::now());
@@ -65,9 +60,10 @@ impl SerialConnection {
                     });
                 }
                 Err(error) => {
-                    let failure = io_failure("serial printer write", error);
+                    let retryable = error.can_retry(attempts);
+                    let failure = error.into_transport_failure("serial printer write");
                     self.close();
-                    if failure.timed_out || attempts >= 2 {
+                    if !retryable {
                         return Err(failure);
                     }
                     stats

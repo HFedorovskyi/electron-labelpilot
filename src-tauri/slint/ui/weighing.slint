@@ -1020,8 +1020,8 @@ export component WeighingPrototype inherits Window {
     property <string> settings-serial-hint: root.ui-language == "en" ? "Cable connection" : root.ui-language == "de" ? "Kabelverbindung" : root.ui-language == "uk" ? "Підключення кабелем" : "Подключение кабелем";
     property <string> settings-address-placeholder: root.ui-language == "en" ? "Printer address, e.g. 192.168.1.50" : root.ui-language == "de" ? "Druckeradresse, z. B. 192.168.1.50" : root.ui-language == "uk" ? "Адреса принтера, наприклад 192.168.1.50" : "Адрес принтера, например 192.168.1.50";
     property <string> settings-port-placeholder: root.ui-language == "en" ? "Port" : root.ui-language == "de" ? "Port" : root.ui-language == "uk" ? "Порт" : "Порт";
-    property <string> settings-fast-print-label: root.ui-language == "en" ? "FAST PRINT" : root.ui-language == "de" ? "SCHNELLDRUCK" : root.ui-language == "uk" ? "ШВИДКИЙ ДРУК" : "БЫСТРАЯ ПЕЧАТЬ";
-    property <string> settings-fast-print-hint: root.ui-language == "en" ? "Keep the printer connection open" : root.ui-language == "de" ? "Verbindung zum Drucker offen halten" : root.ui-language == "uk" ? "Не закривати з’єднання з принтером" : "Не закрывать соединение с принтером";
+    property <string> settings-connection-auto-label: root.ui-language == "en" ? "CONNECTION: AUTOMATIC" : root.ui-language == "de" ? "VERBINDUNG: AUTOMATISCH" : root.ui-language == "uk" ? "З’ЄДНАННЯ: АВТОМАТИЧНО" : "СОЕДИНЕНИЕ: АВТОМАТИЧЕСКИ";
+    property <string> settings-connection-auto-hint: root.ui-language == "en" ? "Shared printer: ordered queue; separate printers: parallel work" : root.ui-language == "de" ? "Gemeinsamer Drucker: geordnet; getrennte Drucker: parallel" : root.ui-language == "uk" ? "Спільний принтер: черга; окремі принтери: паралельно" : "Общий принтер — единая очередь, разные принтеры работают параллельно";
     property <string> settings-driver-placeholder: root.ui-language == "en" ? "Windows printer name (empty = default)" : root.ui-language == "de" ? "Windows-Druckername (leer = Standard)" : root.ui-language == "uk" ? "Назва принтера Windows (порожньо = типовий)" : "Имя принтера Windows (пусто = по умолчанию)";
     property <string> settings-windows-empty-label: root.ui-language == "en" ? "No Windows printers found" : root.ui-language == "de" ? "Keine Windows-Drucker gefunden" : root.ui-language == "uk" ? "Принтери Windows не знайдено" : "Принтеры Windows не найдены";
     property <string> settings-com-placeholder: root.ui-language == "en" ? "COM port" : root.ui-language == "de" ? "COM-Anschluss" : root.ui-language == "uk" ? "COM-порт" : "COM-порт";
@@ -1187,7 +1187,6 @@ export component WeighingPrototype inherits Window {
     in-out property <string> settings-dpi: "203";
     in-out property <string> settings-ram-cache: "auto";
     in-out property <bool> settings-z64: false;
-    in-out property <bool> settings-persistent-connection: false;
     in-out property <string> settings-darkness: "";
     in-out property <string> settings-print-speed: "";
     in-out property <string> settings-gap-mm: "";
@@ -2916,13 +2915,24 @@ export component WeighingPrototype inherits Window {
                                     }
                                 }
                             }
-                            if root.settings-connection == "tcp": SettingsChoiceButton {
+                            if root.settings-connection == "tcp": Rectangle {
                                 height: 60px;
-                                text: root.settings-fast-print-label + ": " + (root.settings-persistent-connection ? root.settings-on-label : root.settings-off-label);
-                                subtext: root.settings-fast-print-hint;
-                                selected: root.settings-persistent-connection;
-                                enabled: !root.settings-busy;
-                                clicked => { root.settings-persistent-connection = !root.settings-persistent-connection; root.settings-dirty = true; }
+                                border-radius: 13px;
+                                border-width: 1px;
+                                border-color: Palette.e200;
+                                background: Palette.e50;
+                                HorizontalLayout {
+                                    padding-left: 16px;
+                                    padding-right: 16px;
+                                    spacing: 12px;
+                                    Text { width: 30px; text: "↔"; color: Palette.e700; font-size: 20px; font-weight: 800; horizontal-alignment: center; vertical-alignment: center; }
+                                    VerticalLayout {
+                                        alignment: center;
+                                        spacing: 2px;
+                                        Text { text: root.settings-connection-auto-label; color: Palette.e700; font-size: 12px; font-weight: 800; horizontal-alignment: center; vertical-alignment: center; }
+                                        Text { text: root.settings-connection-auto-hint; color: Palette.n600; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
+                                    }
+                                }
                             }
 
                             if root.settings-connection == "windows_driver": Rectangle {

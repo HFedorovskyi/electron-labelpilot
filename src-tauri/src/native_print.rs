@@ -3,14 +3,14 @@ use crate::generator::{GenerationPayload, GeneratorState};
 use crate::native_raster::{self, RasterizedLabel};
 use crate::operational::{BarcodeSpec, CloseBoxPayload, OperationalState, RecordPackPayload};
 use crate::persisted::PersistedState;
-use crate::printer::{PageMarginsMm, PrintReceipt, PrinterTransportState};
+use crate::printer::{PageMarginsMm, PreparedPrinterJob, PrintReceipt, PrinterTransportState};
 use crate::runtime_events::RuntimeEventSink;
 use crate::session::SessionState;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::fs;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use time::{Date, Duration, Month, OffsetDateTime};
 use uuid::Uuid;
 
@@ -33,6 +33,17 @@ pub struct NativePrintOutcome {
     pub pack_id: Option<i64>,
     pub auto_closed_box: bool,
     pub receipt: Option<PrintReceipt>,
+    pub warnings: Vec<String>,
+}
+
+impl NativePrintOutcome {
+    pub(crate) fn success_message(&self, message: &str) -> String {
+        if self.warnings.is_empty() {
+            message.to_owned()
+        } else {
+            format!("{message} · {}", self.warnings.join(" · "))
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -51,6 +62,7 @@ pub struct NativePrintService {
     generator: Arc<GeneratorState>,
     last_print: Arc<Mutex<Option<StoredPrint>>>,
     last_print_path: PathBuf,
+    station_number_cache: Arc<OnceLock<String>>,
 }
 
 impl NativePrintService {
@@ -63,6 +75,7 @@ impl NativePrintService {
             generator: Arc::new(GeneratorState::default()),
             last_print: Arc::new(Mutex::new(last_print)),
             last_print_path,
+            station_number_cache: Arc::new(OnceLock::new()),
         }
     }
 
@@ -160,13 +173,14 @@ impl NativePrintService {
         let config = role_config(persisted, "packPrinter")?;
         ensure_active_printer(&config, "упаковки")?;
         let counters = operational.latest_counters(Some(request.product_id))?;
-        let station_number = station_number(persisted, operational)?;
+        let station_number = self.cached_station_number(persisted, operational)?;
+        let numbering = persisted.load_numbering_config();
         let pack_number = formatted_counter(
             integer(counters.get("totalUnits")).unwrap_or(0) + 1,
             &station_number,
             &doc,
             "pack_number",
-            &persisted.load_numbering_config(),
+            &numbering,
             "unit",
         );
         let predicted_box = string(counters.get("currentBoxNumber"))
@@ -177,7 +191,7 @@ impl NativePrintService {
                     &station_number,
                     &doc,
                     "box_number",
-                    &persisted.load_numbering_config(),
+                    &numbering,
                     "box",
                 )
             });
@@ -186,8 +200,9 @@ impl NativePrintService {
         let portion_tare = number(product.get("portion_weight")).unwrap_or(0.0) / 1_000.0;
         let pack_net = (request.gross_weight_kg - portion_tare).max(0.0);
         let current_box_net = number(counters.get("boxNetWeight")).unwrap_or(0.0);
-        let box_tare =
-            self.container_tare_kg(operational, integer(product.get("box_container_id")))?;
+        let box_tare = self.product_box_tare_kg(operational, &product)?;
+        let predicted_units_in_box = integer(counters.get("unitsInBox")).unwrap_or(0) + 1;
+        let predicted_boxes_in_pallet = next_boxes_in_pallet(&counters);
         let current_operator = session.current();
         let mut data = build_label_data(LabelDataContext {
             product: &product,
@@ -209,8 +224,8 @@ impl NativePrintService {
             pack_gross: request.gross_weight_kg,
             box_net: current_box_net + pack_net,
             box_gross: current_box_net + pack_net + box_tare,
-            units_in_box: integer(counters.get("unitsInBox")).unwrap_or(0) + 1,
-            boxes_in_pallet: integer(counters.get("boxesInPallet")).unwrap_or(0) + 1,
+            units_in_box: predicted_units_in_box,
+            boxes_in_pallet: predicted_boxes_in_pallet,
         })?;
         let barcode_fields = barcode_fields_for_doc(operational, &doc)?;
         let preliminary_barcode = resolve_barcode(&barcode_fields, &data, &product);
@@ -220,9 +235,9 @@ impl NativePrintService {
         );
 
         // Render before the DB mutation. Invalid templates and unsupported routes never create a pack row.
-        let mut prepared =
-            self.prepare(config.clone(), doc.clone(), Value::Object(data.clone()))?;
-        let result = operational.record_pack(
+        let rendered = self.prepare(config.clone(), doc.clone(), Value::Object(data.clone()))?;
+        let mut prepared = self.prepare_delivery(printer, rendered, "")?;
+        let (result, (stored, job_id)) = operational.record_pack_with_outbox(
             RecordPackPayload {
                 number: pack_number.clone(),
                 box_number: predicted_box.clone(),
@@ -240,37 +255,39 @@ impl NativePrintService {
                 }),
             },
             session.attribution(),
+            |transaction, result| {
+                let actual_barcode = if result.barcode_value.is_empty() {
+                    resolve_barcode(&barcode_fields, &data, &product)
+                } else {
+                    result.barcode_value.clone()
+                };
+                if result.box_number != predicted_box
+                    || actual_barcode != data.get("barcode").map(value_string).unwrap_or_default()
+                {
+                    data.insert(
+                        "box_number".to_owned(),
+                        Value::String(result.box_number.clone()),
+                    );
+                    data.insert("barcode".to_owned(), Value::String(actual_barcode));
+                    let rendered = self.prepare(config.clone(), doc.clone(), Value::Object(data.clone()))?;
+                    prepared = self.prepare_delivery(printer, rendered, "")?;
+                }
+                let job_id = prepared
+                    .with_idempotency_key(&format!("native-pack:{}", result.pack_id))?
+                    .persist(transaction)?;
+                let stored = StoredPrint {
+                    config,
+                    doc,
+                    data: Value::Object(data),
+                    number: pack_number.clone(),
+                    kind: "pack".to_owned(),
+                    pack_id: Some(result.pack_id),
+                };
+                Ok((stored, job_id))
+            },
         )?;
-        let actual_barcode = if result.barcode_value.is_empty() {
-            resolve_barcode(&barcode_fields, &data, &product)
-        } else {
-            result.barcode_value.clone()
-        };
-        if result.box_number != predicted_box
-            || actual_barcode != data.get("barcode").map(value_string).unwrap_or_default()
-        {
-            data.insert(
-                "box_number".to_owned(),
-                Value::String(result.box_number.clone()),
-            );
-            data.insert("barcode".to_owned(), Value::String(actual_barcode));
-            prepared = self.prepare(config.clone(), doc.clone(), Value::Object(data.clone()))?;
-        }
-        let stored = StoredPrint {
-            config,
-            doc,
-            data: Value::Object(data),
-            number: pack_number.clone(),
-            kind: "pack".to_owned(),
-            pack_id: Some(result.pack_id),
-        };
-        let send_result = self
-            .send_prepared(
-                printer,
-                events,
-                prepared,
-                &format!("native-pack:{}", result.pack_id),
-            )
+        let send_result = printer
+            .submit_committed_with_sink(events.clone(), &job_id)
             .map_err(|error| {
                 operational.record_print_error(
                     &format!("pack {} transport: {error}", result.pack_id),
@@ -305,26 +322,32 @@ impl NativePrintService {
                 return Err(error);
             }
         };
-        self.remember(stored)?;
+        let mut warnings = Vec::new();
+        self.remember_accepted(stored, operational, events, &mut warnings);
 
-        let after_pack = operational.latest_counters(Some(request.product_id))?;
-        let limit = integer(product.get("close_box_counter")).unwrap_or(0);
-        let auto_closed_box =
+        // Follow-up bookkeeping must not turn an accepted package into a failed print.
+        let auto_close = (|| -> Result<bool, String> {
+            let after_pack = operational.latest_counters(Some(request.product_id))?;
+            let limit = integer(product.get("close_box_counter")).unwrap_or(0);
             if limit > 0 && integer(after_pack.get("unitsInBox")).unwrap_or(0) >= limit {
-                self.close_box_internal(
-                    persisted,
-                    operational,
-                    session,
-                    printer,
-                    events,
-                    &product,
-                    &request.batch_number,
-                    production,
+                let closed = self.close_box_internal(
+                    persisted, operational, session, printer, events,
+                    &product, &request.batch_number, production,
                 )?;
-                true
+                warnings.extend(closed.warnings);
+                Ok(true)
             } else {
+                Ok(false)
+            }
+        })();
+        let auto_closed_box = match auto_close {
+            Ok(closed) => closed,
+            Err(error) => {
+                Self::record_warning(operational, events, &mut warnings,
+                    format!("Упаковка {} принята принтером; проверьте закрытие короба: {error}", result.pack_id));
                 false
-            };
+            }
+        };
         Ok(NativePrintOutcome {
             kind: "pack".to_owned(),
             number: pack_number,
@@ -332,6 +355,7 @@ impl NativePrintService {
             pack_id: Some(result.pack_id),
             auto_closed_box,
             receipt: Some(receipt),
+            warnings,
         })
     }
 
@@ -385,8 +409,7 @@ impl NativePrintService {
             .unwrap_or("0")
             .to_owned();
         let box_net = number(counters.get("boxNetWeight")).unwrap_or(0.0);
-        let box_tare =
-            self.container_tare_kg(operational, integer(product.get("box_container_id")))?;
+        let box_tare = self.product_box_tare_kg(operational, product)?;
         let box_gross = box_net + box_tare;
         let expiration = production + Duration::days(integer(product.get("exp_date")).unwrap_or(0));
 
@@ -395,7 +418,7 @@ impl NativePrintService {
                 let doc = self.label_document(operational, label_id)?;
                 let config = role_config(persisted, "boxPrinter")?;
                 ensure_active_printer(&config, "короба")?;
-                let station = station_number(persisted, operational)?;
+                let station = self.cached_station_number(persisted, operational)?;
                 let current_operator = session.current();
                 let mut data = build_label_data(LabelDataContext {
                     product,
@@ -429,31 +452,29 @@ impl NativePrintService {
                     json!(integer(product.get("close_box_counter")).unwrap_or(0)),
                 );
                 let data = Value::Object(data);
-                let prepared = self.prepare(config.clone(), doc.clone(), data.clone())?;
+                let rendered = self.prepare(config.clone(), doc.clone(), data.clone())?;
+                let prepared = self.prepare_delivery(printer, rendered, &format!("native-box:{box_id}"))?;
                 Some((config, doc, data, prepared))
             }
             None => None,
         };
 
-        let closed = operational.close_box(CloseBoxPayload {
-            box_id,
-            weight_netto: box_net,
-            weight_brutto: box_gross,
-        })?;
-        if closed.get("success").and_then(Value::as_bool) != Some(true) {
-            return Err(format!("короб {box_number} уже закрыт или удалён"));
-        }
-        let receipt = if let Some((config, doc, data, prepared)) = print_input {
-            let receipt =
-                self.send_prepared(printer, events, prepared, &format!("native-box:{box_id}"))?;
-            self.remember(StoredPrint {
-                config,
-                doc,
-                data,
-                number: box_number.clone(),
-                kind: "box".to_owned(),
-                pack_id: None,
-            })?;
+        let committed = operational.close_box_with_outbox(
+            CloseBoxPayload { box_id, weight_netto: box_net, weight_brutto: box_gross },
+            |transaction| {
+                print_input.map(|(config, doc, data, prepared)| {
+                    let job_id = prepared.persist(transaction)?;
+                    Ok((StoredPrint {
+                        config, doc, data, number: box_number.clone(),
+                        kind: "box".to_owned(), pack_id: None,
+                    }, job_id))
+                }).transpose()
+            },
+        )?.ok_or_else(|| format!("короб {box_number} уже закрыт или удалён"))?;
+        let mut warnings = Vec::new();
+        let receipt = if let Some((stored, job_id)) = committed {
+            let receipt = printer.submit_committed_with_sink(events.clone(), &job_id)?;
+            self.remember_accepted(stored, operational, events, &mut warnings);
             Some(receipt)
         } else {
             None
@@ -465,6 +486,7 @@ impl NativePrintService {
             pack_id: None,
             auto_closed_box: false,
             receipt,
+            warnings,
         })
     }
 
@@ -529,14 +551,15 @@ impl NativePrintService {
                 "ERROR",
             ),
         }
-        self.remember(StoredPrint {
+        let mut warnings = Vec::new();
+        self.remember_accepted(StoredPrint {
             config,
             doc,
             data,
             number: pallet_number.clone(),
             kind: "pallet".to_owned(),
             pack_id: None,
-        })?;
+        }, operational, events, &mut warnings);
         Ok(NativePrintOutcome {
             kind: "pallet".to_owned(),
             number: pallet_number,
@@ -544,6 +567,7 @@ impl NativePrintService {
             pack_id: None,
             auto_closed_box: false,
             receipt: Some(receipt),
+            warnings,
         })
     }
     pub fn repeat_last(
@@ -575,6 +599,7 @@ impl NativePrintService {
             pack_id: stored.pack_id,
             auto_closed_box: false,
             receipt: Some(receipt),
+            warnings: Vec::new(),
         })
     }
 
@@ -645,6 +670,30 @@ impl NativePrintService {
             .map_err(|error| format!("шаблон этикетки #{id} повреждён: {error}"))
     }
 
+    fn cached_station_number(
+        &self,
+        persisted: &PersistedState,
+        operational: &OperationalState,
+    ) -> Result<String, String> {
+        if let Some(station) = self.station_number_cache.get() {
+            return Ok(station.clone());
+        }
+        let station = station_number(persisted, operational)?;
+        let _ = self.station_number_cache.set(station.clone());
+        Ok(station)
+    }
+
+    fn product_box_tare_kg(
+        &self,
+        operational: &OperationalState,
+        product: &Value,
+    ) -> Result<f64, String> {
+        if let Some(weight_grams) = number(product.get("box_weight")) {
+            return Ok(weight_grams / 1_000.0);
+        }
+        self.container_tare_kg(operational, integer(product.get("box_container_id")))
+    }
+
     fn container_tare_kg(
         &self,
         operational: &OperationalState,
@@ -671,11 +720,22 @@ impl NativePrintService {
             doc: doc.clone(),
             data: data.clone(),
         };
-        let plan = self.generator.plan(&payload)?;
-        let material = if plan.native_eligible {
-            PreparedMaterial::Raw(self.generator.generate(payload)?.bytes)
+        let protocol = string(config.get("protocol"))
+            .unwrap_or("zpl")
+            .to_ascii_lowercase();
+        let material = if raster_only_protocol(&protocol) {
+            let bitmap = native_raster::render(&payload)?;
+            self.generator.record_renderer_fallback(bitmap.mono.len());
+            PreparedMaterial::Raster(bitmap)
         } else {
-            PreparedMaterial::Raster(native_raster::render(&payload)?)
+            match self.generator.generate_if_native(&payload)? {
+                Some(generated) => PreparedMaterial::Raw(generated.bytes),
+                None => {
+                    let bitmap = native_raster::render(&payload)?;
+                    self.generator.record_renderer_fallback(bitmap.mono.len());
+                    PreparedMaterial::Raster(bitmap)
+                }
+            }
         };
         Ok(PreparedPrint {
             config,
@@ -688,9 +748,19 @@ impl NativePrintService {
         &self,
         printer: &PrinterTransportState,
         events: &RuntimeEventSink,
-        mut prepared: PreparedPrint,
+        prepared: PreparedPrint,
         idempotency_key: &str,
     ) -> Result<PrintReceipt, String> {
+        let job = self.prepare_delivery(printer, prepared, idempotency_key)?;
+        printer.submit_prepared_with_sink(events.clone(), job)
+    }
+
+    fn prepare_delivery(
+        &self,
+        printer: &PrinterTransportState,
+        mut prepared: PreparedPrint,
+        idempotency_key: &str,
+    ) -> Result<PreparedPrinterJob, String> {
         let config = prepared
             .config
             .as_object_mut()
@@ -704,7 +774,7 @@ impl NativePrintService {
             .to_ascii_lowercase();
         match prepared.material {
             PreparedMaterial::Raw(bytes) => {
-                printer.submit_generated_with_sink(events.clone(), prepared.config, bytes)
+                printer.prepare_generated(prepared.config, bytes)
             }
             PreparedMaterial::Raster(bitmap)
                 if connection == "windows_driver" && prepared.page_sheet =>
@@ -721,8 +791,7 @@ impl NativePrintService {
                 let document_name = string(prepared.config.get("documentName"))
                     .unwrap_or("LabelPilot pallet sheet")
                     .to_owned();
-                printer.submit_driver_page_with_sink(
-                    events.clone(),
+                printer.prepare_driver_page(
                     prepared.config,
                     bitmap.width_dots as u32,
                     bitmap.height_dots as u32,
@@ -735,8 +804,7 @@ impl NativePrintService {
                 )
             }
             PreparedMaterial::Raster(bitmap) if connection == "windows_driver" => printer
-                .submit_driver_bitmap_with_sink(
-                    events.clone(),
+                .prepare_driver_bitmap(
                     prepared.config,
                     bitmap.width_dots as u32,
                     bitmap.height_dots as u32,
@@ -745,40 +813,46 @@ impl NativePrintService {
             PreparedMaterial::Raster(bitmap) => {
                 let protocol = string(config.get("protocol")).unwrap_or("zpl").to_owned();
                 let bytes = native_raster::encode(&protocol, &bitmap, &prepared.config)?;
-                printer.submit_generated_with_sink(events.clone(), prepared.config, bytes)
+                printer.prepare_generated(prepared.config, bytes)
             }
         }
     }
 
-    fn remember(&self, stored: StoredPrint) -> Result<(), String> {
-        let bytes =
-            serde_json::to_vec(&stored).map_err(|error| format!("encode last print: {error}"))?;
-        if let Some(parent) = self.last_print_path.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|error| format!("create last print directory: {error}"))?;
-        }
-        let temporary = self.last_print_path.with_extension("json.tmp");
-        {
-            use std::io::Write as _;
-            let mut file = fs::File::create(&temporary)
-                .map_err(|error| format!("write last print: {error}"))?;
-            file.write_all(&bytes)
-                .map_err(|error| format!("write last print: {error}"))?;
-            file.sync_all()
-                .map_err(|error| format!("sync last print: {error}"))?;
-        }
-        if self.last_print_path.exists() {
-            fs::remove_file(&self.last_print_path)
-                .map_err(|error| format!("replace last print: {error}"))?;
-        }
-        fs::rename(&temporary, &self.last_print_path)
-            .map_err(|error| format!("commit last print: {error}"))?;
-        *self
-            .last_print
-            .lock()
-            .map_err(|_| "last print lock is poisoned".to_owned())? = Some(stored);
-        Ok(())
+    fn record_warning(
+        operational: &OperationalState,
+        events: &RuntimeEventSink,
+        warnings: &mut Vec<String>,
+        message: String,
+    ) {
+        operational.record_print_error(&message, "WARN");
+        events.log("printer", "WARN", &message);
+        warnings.push(message);
     }
+
+    fn remember_accepted(
+        &self,
+        stored: StoredPrint,
+        operational: &OperationalState,
+        events: &RuntimeEventSink,
+        warnings: &mut Vec<String>,
+    ) {
+        if let Err(error) = self.remember(stored) {
+            Self::record_warning(operational, events, warnings, format!(
+                "Этикетка принята принтером; сохранение для повтора после перезапуска: {error}"
+            ));
+        }
+    }
+
+    fn remember(&self, stored: StoredPrint) -> Result<(), String> {
+        // Serialize writers, and preserve the accepted label for repeat even when disk IO fails.
+        let mut last_print = self.last_print.lock()
+            .map_err(|_| "last print lock is poisoned".to_owned())?;
+        *last_print = Some(stored);
+        let bytes = serde_json::to_vec(last_print.as_ref().unwrap())
+            .map_err(|error| format!("encode last print: {error}"))?;
+        crate::persisted::atomic_write_bytes(&self.last_print_path, &bytes)
+    }
+
 }
 
 enum PreparedMaterial {
@@ -1081,8 +1155,7 @@ fn role_config(persisted: &PersistedState, role: &str) -> Result<Value, String> 
                 "protocol": "image",
                 "ip": host,
                 "port": port,
-                "dpi": std::env::var("LABELPILOT_PRINTER_DPI").ok().and_then(|value| value.parse::<u16>().ok()).unwrap_or(300),
-                "persistentConnection": true
+                "dpi": std::env::var("LABELPILOT_PRINTER_DPI").ok().and_then(|value| value.parse::<u16>().ok()).unwrap_or(300)
             }));
         }
     }
@@ -1164,6 +1237,18 @@ fn pad_start(value: &str, length: usize) -> String {
         format!("{}{}", "0".repeat(length - value.chars().count()), value)
     }
 }
+fn raster_only_protocol(protocol: &str) -> bool {
+    matches!(
+        protocol,
+        "image" | "browser" | "epl" | "cpcl" | "dpl" | "sbpl"
+    )
+}
+
+fn next_boxes_in_pallet(counters: &Value) -> i64 {
+    integer(counters.get("boxesInPallet")).unwrap_or(0)
+        + i64::from(integer(counters.get("currentBoxId")).is_none())
+}
+
 fn integer(value: Option<&Value>) -> Option<i64> {
     match value? {
         Value::Number(value) => value
@@ -1205,6 +1290,71 @@ mod tests {
         );
     }
     #[test]
+    fn skips_native_planning_for_raster_only_protocols() {
+        for protocol in ["image", "browser", "epl", "cpcl", "dpl", "sbpl"] {
+            assert!(raster_only_protocol(protocol), "{protocol}");
+        }
+        assert!(!raster_only_protocol("zpl"));
+        assert!(!raster_only_protocol("tspl"));
+    }
+
+    #[test]
+    #[ignore = "manual raster hot-path benchmark"]
+    fn benchmark_direct_raster_vs_plan_then_render() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        let payload = GenerationPayload {
+            config: json!({"connection":"windows_driver", "protocol":"image", "dpi":300}),
+            doc: json!({
+                "canvas":{"width":600,"height":300,"widthCm":5.08,"heightCm":2.54,"dpi":300},
+                "elements":[
+                    {"id":"name","type":"text","x":10,"y":10,"w":580,"h":100,"text":"Этикетка {{name}}","fontFamily":"Inter","fontSize":24,"fontWeight":600,"textAlign":"center"},
+                    {"id":"barcode","type":"barcode","x":100,"y":140,"w":400,"h":120,"barcodeType":"ean13","value":"{{barcode}}","showText":true}
+                ]
+            }),
+            data: json!({"name":"готова","barcode":"4870254930240"}),
+        };
+        let _ = native_raster::warmup_static_assets();
+        black_box(native_raster::render(&payload).unwrap());
+        let iterations = 2_000_u64;
+        let generator = GeneratorState::default();
+
+        let legacy_started = Instant::now();
+        let mut legacy_bytes = 0_usize;
+        for _ in 0..iterations {
+            black_box(generator.plan(&payload).unwrap());
+            legacy_bytes += black_box(native_raster::render(&payload).unwrap().mono.len());
+        }
+        let legacy_micros = legacy_started.elapsed().as_micros();
+
+        let direct_started = Instant::now();
+        let mut direct_bytes = 0_usize;
+        for _ in 0..iterations {
+            direct_bytes += black_box(native_raster::render(&payload).unwrap().mono.len());
+        }
+        let direct_micros = direct_started.elapsed().as_micros();
+
+        assert_eq!(legacy_bytes, direct_bytes);
+        println!(
+            "PRINT_RASTER_ROUTE_BENCH iterations={iterations} legacy_us={legacy_micros} direct_us={direct_micros} speedup_x={:.2}",
+            legacy_micros as f64 / direct_micros.max(1) as f64
+        );
+    }
+
+    #[test]
+    fn pallet_box_count_advances_only_when_opening_a_new_box() {
+        assert_eq!(
+            next_boxes_in_pallet(&json!({"boxesInPallet": 7, "currentBoxId": 42})),
+            7
+        );
+        assert_eq!(
+            next_boxes_in_pallet(&json!({"boxesInPallet": 7, "currentBoxId": null})),
+            8
+        );
+    }
+
+    #[test]
     fn parses_both_ui_and_iso_dates() {
         assert_eq!(
             format_full_date(parse_date("24.08.2026").unwrap()),
@@ -1218,6 +1368,20 @@ mod tests {
 
     #[test]
     fn production_lifecycle_records_repeats_deletes_and_closes_over_tcp() {
+        production_lifecycle(false, false, false);
+    }
+
+    #[test]
+    fn accepted_print_survives_last_print_disk_failure_and_still_auto_closes() {
+        production_lifecycle(true, true, false);
+    }
+
+    #[test]
+    fn accepted_pack_preserves_receipt_when_box_outbox_fails() {
+        production_lifecycle(false, true, true);
+    }
+
+    fn production_lifecycle(fail_remember: bool, auto_close: bool, fail_box_outbox: bool) {
         use crate::runtime_events::RuntimeEventSink;
         use rusqlite::Connection;
         use std::io::Read;
@@ -1386,12 +1550,26 @@ mod tests {
         let mut printer = PrinterTransportState::with_database(&persisted.database_path()).unwrap();
         let events = RuntimeEventSink::callback(|_| {});
         let service = NativePrintService::new(directory.0.clone());
+        if fail_remember {
+            // A directory at the destination forces atomic file replacement to fail.
+            fs::create_dir(&service.last_print_path).unwrap();
+        }
         let request = PackPrintRequest {
             product_id: 1,
             gross_weight_kg: 1.1,
             batch_number: "B-1".to_owned(),
             production_date: "24.08.2026".to_owned(),
         };
+        if fail_remember {
+            let connection = Connection::open(persisted.database_path()).unwrap();
+            connection.execute_batch("CREATE TRIGGER reject_native_outbox BEFORE INSERT ON printer_delivery_jobs
+                BEGIN SELECT RAISE(ABORT, 'injected native outbox failure'); END;").unwrap();
+            let error = service.record_and_print_pack(&persisted, &operational, &session, &printer, &events, request.clone()).unwrap_err();
+            assert!(error.contains("injected native outbox failure"));
+            assert_eq!(operational.latest_counters(Some(1)).unwrap()["totalUnits"], 0);
+            assert_eq!(connection.query_row("SELECT COUNT(*) FROM printer_delivery_jobs", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+            connection.execute_batch("DROP TRIGGER reject_native_outbox").unwrap();
+        }
         let first = service
             .record_and_print_pack(
                 &persisted,
@@ -1403,6 +1581,12 @@ mod tests {
             )
             .unwrap();
         assert_eq!(first.number, "07000001");
+        assert_eq!(first.warnings.is_empty(), !fail_remember);
+        assert_eq!(first.receipt.as_ref().unwrap().durable_state.as_deref(), Some("accepted"));
+        if !fail_remember {
+            let restarted = NativePrintService::new(directory.0.clone());
+            assert_eq!(restarted.last_print.lock().unwrap().as_ref().unwrap().pack_id, first.pack_id);
+        }
         assert_eq!(
             operational.latest_counters(Some(1)).unwrap()["totalUnits"],
             1
@@ -1419,6 +1603,17 @@ mod tests {
         );
 
         printer = PrinterTransportState::with_database(&persisted.database_path()).unwrap();
+        if auto_close {
+            Connection::open(persisted.database_path()).unwrap().execute(
+                "UPDATE nomenclature SET close_box_counter=1 WHERE id=1", []).unwrap();
+        }
+        if fail_box_outbox {
+            Connection::open(persisted.database_path()).unwrap().execute_batch(
+                "CREATE TRIGGER reject_box_outbox BEFORE INSERT ON printer_delivery_jobs
+                 WHEN NEW.idempotency_key LIKE 'native-box:%'
+                 BEGIN SELECT RAISE(ABORT, 'injected auto-close outbox failure'); END;"
+            ).unwrap();
+        }
         let second = service
             .record_and_print_pack(
                 &persisted,
@@ -1432,19 +1627,32 @@ mod tests {
         assert_eq!(second.number, "07000001");
         printer.disconnect_all();
         printer = PrinterTransportState::with_database(&persisted.database_path()).unwrap();
-        let closed = service
-            .close_box(
-                &persisted,
-                &operational,
-                &session,
-                &printer,
-                &events,
-                1,
-                "B-1",
-                "24.08.2026",
-            )
-            .unwrap();
-        assert_eq!(closed.kind, "box");
+        assert_eq!(second.auto_closed_box, auto_close && !fail_box_outbox);
+        assert_eq!(second.warnings.is_empty(), !fail_remember && !fail_box_outbox);
+        if fail_box_outbox {
+            assert_eq!(second.receipt.as_ref().unwrap().durable_state.as_deref(), Some("accepted"));
+            assert!(second.warnings.iter().any(|warning| warning.contains("injected auto-close outbox failure")));
+            assert_ne!(operational.latest_counters(Some(1)).unwrap()["currentBoxId"], Value::Null);
+            Connection::open(persisted.database_path()).unwrap().execute_batch("DROP TRIGGER reject_box_outbox").unwrap();
+        }
+        if !auto_close || fail_box_outbox {
+            let closed = service
+                .close_box(
+                    &persisted,
+                    &operational,
+                    &session,
+                    &printer,
+                    &events,
+                    1,
+                    "B-1",
+                    "24.08.2026",
+                )
+                .unwrap();
+            assert_eq!(closed.kind, "box");
+        } else {
+            assert_eq!(operational.latest_counters(Some(1)).unwrap()["currentBoxId"], Value::Null);
+            assert_eq!(service.last_print.lock().unwrap().as_ref().unwrap().kind, "box");
+        }
         printer.disconnect_all();
         printer = PrinterTransportState::with_database(&persisted.database_path()).unwrap();
         let pallet = service
@@ -1458,6 +1666,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(pallet.kind, "pallet");
+        assert_eq!(pallet.warnings.is_empty(), !fail_remember);
         assert_eq!(
             operational.latest_counters(Some(1)).unwrap()["currentBoxId"],
             Value::Null
@@ -1465,6 +1674,7 @@ mod tests {
         printer.disconnect_all();
         let jobs = server.join().unwrap();
         assert_eq!(jobs.len(), 5);
+        assert_eq!(jobs[0], jobs[1], "repeat must resend the accepted label exactly");
         assert!(jobs
             .iter()
             .all(|job| job.starts_with(b"^XA") && job.ends_with(b"^XZ")));

@@ -38,12 +38,15 @@ for (const fragment of [
   'root.settings-input-target = "printer-ip";',
   'root.settings-input-target = "printer-port";',
   'root.settings-input-target = "printer-baud";',
+  'text: root.settings-connection-auto-label;',
+  'text: root.settings-connection-auto-hint;',
 ]) assert.ok(page.includes(fragment), 'missing friendly connection control: ' + fragment);
 
 assert.match(page, /height: 68px;\s*text: root\.settings-auto-print-label \+ ": " \+ \(root\.settings-auto-print \? root\.settings-on-label : root\.settings-off-label\);\s*subtext: root\.settings-auto-print-hint;/);
 assert.match(ui, /settings-auto-print-hint:[^\n]+"Печатать этикетку упаковки после стабилизации веса в пределах допуска"/);
 assert.doesNotMatch(page, /settings-main-title|settings-use-printer-label|settings-disable-printer-label/);
 assert.doesNotMatch(ui, /Использование принтера|Printer use|Drucker verwenden|Використання принтера/);
+assert.doesNotMatch(ui, /settings-persistent-connection|settings-fast-print-label|settings-fast-print-hint/);
 
 const roleCardsEnd = page.indexOf('ScrollView {');
 const roleCards = page.slice(0, roleCardsEnd);
@@ -71,6 +74,8 @@ for (const prop of [
   'settings-windows-label',
   'settings-network-label',
   'settings-serial-label',
+  'settings-connection-auto-label',
+  'settings-connection-auto-hint',
   'settings-advanced-title',
   'settings-test-label',
   'settings-detect-label',

@@ -46,7 +46,7 @@ const PUBLIC_CONFIG_KEYS = [
     'id', 'name', 'active', 'connection', 'protocol', 'compatibilityMode',
     'detectedProfileId', 'ip', 'port', 'serialPort', 'baudRate', 'driverName',
     'dpi', 'widthMm', 'heightMm', 'printTarget', 'pageFit',
-    'persistentConnection', 'darkness', 'printSpeed', 'gapMm',
+    'darkness', 'printSpeed', 'gapMm',
 ] as const;
 
 function errorMessage(error: unknown): string {

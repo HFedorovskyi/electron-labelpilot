@@ -468,6 +468,9 @@ pub(crate) fn open_database(persisted: &PersistedState) -> Result<Connection, St
     ensure_column(&connection, "pack", "operator_uuid", "TEXT")?;
     ensure_column(&connection, "pack", "operator_name", "TEXT")?;
     ensure_column(&connection, "pack", "deleted_at", "TEXT")?;
+    connection
+        .execute_batch(include_str!("operational_counters.sql"))
+        .map_err(|error| format!("failed to initialize operational counters: {error}"))?;
     Ok(connection)
 }
 

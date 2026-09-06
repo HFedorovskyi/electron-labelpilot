@@ -70,13 +70,7 @@ impl GeneratorState {
 
     pub fn generate(&self, payload: GenerationPayload) -> Result<NativeGeneration, String> {
         let started = Instant::now();
-        let input = match ParsedInput::parse(&payload) {
-            Ok(input) => input,
-            Err(error) => {
-                self.failed_jobs.fetch_add(1, Ordering::AcqRel);
-                return Err(error);
-            }
-        };
+        let input = self.parse_tracked(&payload)?;
         let plan = input.plan();
         if !plan.native_eligible {
             self.fallback_jobs.fetch_add(1, Ordering::AcqRel);
@@ -85,6 +79,35 @@ impl GeneratorState {
                 plan.reasons.join(",")
             ));
         }
+        self.generate_parsed(input, started)
+    }
+
+    /// Attempts native generation after parsing and validating the payload once.
+    /// `None` means the validated document must use the raster path.
+    pub fn generate_if_native(
+        &self,
+        payload: &GenerationPayload,
+    ) -> Result<Option<NativeGeneration>, String> {
+        let started = Instant::now();
+        let input = self.parse_tracked(payload)?;
+        if !input.plan().native_eligible {
+            return Ok(None);
+        }
+        self.generate_parsed(input, started).map(Some)
+    }
+
+    fn parse_tracked(&self, payload: &GenerationPayload) -> Result<ParsedInput, String> {
+        ParsedInput::parse(payload).map_err(|error| {
+            self.failed_jobs.fetch_add(1, Ordering::AcqRel);
+            error
+        })
+    }
+
+    fn generate_parsed(
+        &self,
+        input: ParsedInput,
+        started: Instant,
+    ) -> Result<NativeGeneration, String> {
         let geometry = match input.geometry() {
             Ok(geometry) => geometry,
             Err(error) => {

@@ -4,9 +4,10 @@ use crate::{
         NativeFixedWeightSnapshot, NativeJobPrintOutcome, NativeLicenseStatus,
         NativePrintJobsSnapshot, NativePrinterCapability, NativePrinterDiagnostic,
         NativePrinterQueueSnapshot, NativePrinterRoleSettings, NativePrinterRoleSettingsInput,
-        NativePrinterSettingsSnapshot, NativeProductionPrintJob, NativeScaleSettingsInput,
-        NativeScaleSettingsSnapshot, NativeServerLicenseSnapshot, NativeUiOperator,
-        NativeUiProduct, NativeUiRevision, NativeUiRuntime, NativeWeighingSnapshot,
+        NativePrinterSettingsSnapshot, NativeProductionDelta, NativeProductionPrintJob,
+        NativeScaleSettingsInput, NativeScaleSettingsSnapshot, NativeServerLicenseSnapshot,
+        NativeUiCounters, NativeUiOperator, NativeUiProduct, NativeUiRevision, NativeUiRuntime,
+        NativeWeighingSnapshot,
     },
     native_update::{NativeUpdateManager, NativeUpdateSnapshot},
     persisted::PersistedState,
@@ -42,7 +43,7 @@ enum UiMessage {
     ProductionFinished {
         action: String,
         outcome: Result<crate::native_print::NativePrintOutcome, String>,
-        snapshot: Box<Result<NativeWeighingSnapshot, String>>,
+        delta: Result<NativeProductionDelta, String>,
     },
     DeleteFinished {
         outcome: Result<i64, String>,
@@ -528,7 +529,6 @@ fn printer_config() -> Value {
             .ok()
             .and_then(|value| value.parse::<u16>().ok())
             .unwrap_or(9100),
-        "persistentConnection": true
     })
 }
 
@@ -1114,7 +1114,6 @@ fn apply_printer_role_editor(ui: &WeighingPrototype, role: &NativePrinterRoleSet
     ui.set_settings_dpi(role.dpi.to_string().into());
     ui.set_settings_ram_cache(role.ram_cache.clone().into());
     ui.set_settings_z64(role.z64);
-    ui.set_settings_persistent_connection(role.persistent_connection);
     ui.set_settings_darkness(format_optional_setting(role.darkness).into());
     ui.set_settings_print_speed(format_optional_setting(role.print_speed).into());
     ui.set_settings_gap_mm(format_optional_setting(role.gap_mm).into());
@@ -1191,7 +1190,6 @@ fn printer_settings_input(
         dpi: parse_settings_i32("DPI", &ui.get_settings_dpi())?,
         ram_cache: ui.get_settings_ram_cache().to_string(),
         z64: ui.get_settings_z64(),
-        persistent_connection: ui.get_settings_persistent_connection(),
         darkness: parse_optional_settings_f64("Темнота", &ui.get_settings_darkness())?,
         print_speed: parse_optional_settings_f64(
             "Скорость печати",
@@ -2202,6 +2200,29 @@ fn apply_selected_product(ui: &WeighingPrototype, product: Option<&NativeUiProdu
     }
 }
 
+fn apply_print_counters(ui: &WeighingPrototype, counters: &NativeUiCounters, update_box: bool) {
+    ui.set_boxes_on_pallet(clamp_i32(counters.boxes_in_pallet));
+    ui.set_total_units(clamp_i32(counters.total_units));
+    ui.set_pack_number(if counters.last_pack_number == "0" {
+        "—".into()
+    } else {
+        counters.last_pack_number.clone().into()
+    });
+    if update_box {
+        ui.set_units_in_box(clamp_i32(counters.units_in_box));
+        ui.set_box_number(
+            counters
+                .current_box_number
+                .clone()
+                .or_else(|| {
+                    (counters.last_box_number != "0").then(|| counters.last_box_number.clone())
+                })
+                .unwrap_or_else(|| "—".to_owned())
+                .into(),
+        );
+    }
+}
+
 fn apply_snapshot(
     ui: &WeighingPrototype,
     snapshot: NativeWeighingSnapshot,
@@ -2266,21 +2287,7 @@ fn apply_snapshot(
     apply_products(ui, snapshot.products, product_store);
 
     let counters = snapshot.counters;
-    ui.set_units_in_box(clamp_i32(counters.units_in_box));
-    ui.set_boxes_on_pallet(clamp_i32(counters.boxes_in_pallet));
-    ui.set_total_units(clamp_i32(counters.total_units));
-    ui.set_pack_number(if counters.last_pack_number == "0" {
-        "—".into()
-    } else {
-        counters.last_pack_number.clone().into()
-    });
-    ui.set_box_number(
-        counters
-            .current_box_number
-            .or_else(|| (counters.last_box_number != "0").then_some(counters.last_box_number))
-            .unwrap_or_else(|| "—".to_owned())
-            .into(),
-    );
+    apply_print_counters(ui, &counters, true);
     ui.set_last_print(
         if counters.total_units > 0 && counters.last_pack_number != "0" {
             format!("#{} · из базы", counters.last_pack_number).into()
@@ -2941,11 +2948,11 @@ pub fn run() -> Result<(), String> {
                         batch_number,
                         production_date,
                     );
-                    let snapshot = runtime.weighing_snapshot(Some(product_id), None);
+                    let delta = runtime.production_delta(Some(product_id));
                     let _ = message_tx.send(UiMessage::ProductionFinished {
                         action: "pack".to_owned(),
                         outcome,
-                        snapshot: Box::new(snapshot),
+                        delta,
                     });
                 });
                 return;
@@ -2972,11 +2979,11 @@ pub fn run() -> Result<(), String> {
                 let message_tx = message_tx.clone();
                 thread::spawn(move || {
                     let outcome = runtime.repeat_production_print();
-                    let snapshot = runtime.weighing_snapshot(selected_id, None);
+                    let delta = runtime.production_delta(selected_id);
                     let _ = message_tx.send(UiMessage::ProductionFinished {
                         action: "repeat".to_owned(),
                         outcome,
-                        snapshot: Box::new(snapshot),
+                        delta,
                     });
                 });
             } else {
@@ -3040,11 +3047,11 @@ pub fn run() -> Result<(), String> {
                 thread::spawn(move || {
                     let outcome =
                         runtime.close_production_box(product_id, &batch_number, &production_date);
-                    let snapshot = runtime.weighing_snapshot(Some(product_id), None);
+                    let delta = runtime.production_delta(Some(product_id));
                     let _ = message_tx.send(UiMessage::ProductionFinished {
                         action: "box".to_owned(),
                         outcome,
-                        snapshot: Box::new(snapshot),
+                        delta,
                     });
                 });
                 return;
@@ -3083,11 +3090,11 @@ pub fn run() -> Result<(), String> {
                 let message_tx = message_tx.clone();
                 thread::spawn(move || {
                     let outcome = runtime.print_production_pallet(selected_id);
-                    let snapshot = runtime.weighing_snapshot(selected_id, None);
+                    let delta = runtime.production_delta(selected_id);
                     let _ = message_tx.send(UiMessage::ProductionFinished {
                         action: "pallet".to_owned(),
                         outcome,
-                        snapshot: Box::new(snapshot),
+                        delta,
                     });
                 });
             } else {
@@ -4473,13 +4480,12 @@ pub fn run() -> Result<(), String> {
                                                         batch_number,
                                                         production_date,
                                                     );
-                                                    let snapshot = runtime
-                                                        .weighing_snapshot(Some(product_id), None);
+                                                    let delta = runtime.production_delta(Some(product_id));
                                                     let _ = message_tx.send(
                                                         UiMessage::ProductionFinished {
                                                             action: "auto-pack".to_owned(),
                                                             outcome,
-                                                            snapshot: Box::new(snapshot),
+                                                            delta,
                                                         },
                                                     );
                                                 });
@@ -4641,7 +4647,7 @@ pub fn run() -> Result<(), String> {
                     Ok(UiMessage::ProductionFinished {
                         action,
                         outcome,
-                        snapshot,
+                        delta,
                     }) => {
                         let Some(ui) = weak.upgrade() else { return };
                         if matches!(action.as_str(), "box" | "pallet") {
@@ -4650,15 +4656,17 @@ pub fn run() -> Result<(), String> {
                         if matches!(action.as_str(), "pack" | "auto-pack") {
                             auto_print_gate.borrow_mut().finish_print();
                         }
-                        if let Ok(snapshot) = *snapshot {
-                            apply_snapshot(
-                                &ui,
-                                snapshot,
-                                &product_store,
-                                &operator_store,
-                                &selected_product,
-                                &selected_product_details,
-                            );
+                        match delta {
+                            Ok(delta) => {
+                                // A result for the previous product must not
+                                // replace the operator's current box counters.
+                                let update_box = delta.matches_selection(selected_product.get());
+                                apply_print_counters(&ui, &delta.counters, update_box);
+                            }
+                            Err(error) => {
+                                append_runtime_log(&format!("post-print counters: {error}"));
+                                show_toast(&ui, "Счётчики требуют обновления");
+                            }
                         }
                         match outcome {
                             Ok(result) => {
@@ -4688,7 +4696,7 @@ pub fn run() -> Result<(), String> {
                                 {
                                     ui.set_auto_print_status("СНИМИТЕ ТОВАР".into());
                                 }
-                                show_toast(&ui, message);
+                                show_toast(&ui, &result.success_message(message));
                             }
                             Err(error) => {
                                 if ui.get_auto_print_enabled()
@@ -4696,9 +4704,11 @@ pub fn run() -> Result<(), String> {
                                 {
                                     ui.set_auto_print_status("ОШИБКА ПЕЧАТИ".into());
                                 }
-                                // Latch the gate: without a working printer the same
-                                // product must not loop failed packs and alerts.
-                                auto_print_gate.borrow_mut().mark_failed();
+                                // Only a package print owns the stabilization gate.
+                                // Box, pallet and repeat failures must not disable package auto-print.
+                                if matches!(action.as_str(), "pack" | "auto-pack") {
+                                    auto_print_gate.borrow_mut().mark_failed();
+                                }
                                 ui.set_printer_ready(false);
                                 ui.set_printer_status("Принтер: ошибка".into());
                                 show_alert(&ui, &format!("Операция {action}: {error}"));
@@ -5043,11 +5053,11 @@ pub fn run() -> Result<(), String> {
                                 }
                                 show_toast(
                                     &ui,
-                                    if automatic {
+                                    &result.success_message(if automatic {
                                         "Автопечать фиксированного веса выполнена"
                                     } else {
                                         "Этикетка фиксированного веса напечатана"
-                                    },
+                                    }),
                                 );
                             }
                             Err(error) => {
@@ -5101,19 +5111,20 @@ pub fn run() -> Result<(), String> {
                                     }
                                     .into(),
                                 );
+                                let message = if result.cancelled {
+                                    "Пакетная печать остановлена"
+                                } else {
+                                    "Пакетная печать завершена"
+                                };
+                                let message = result.last_print.as_ref()
+                                    .map(|last| last.success_message(message))
+                                    .unwrap_or_else(|| message.to_owned());
                                 if let Some(last) = result.last_print {
                                     ui.set_last_print(
                                         format!("#{} · {}", last.number, chrono_like_time()).into(),
                                     );
                                 }
-                                show_toast(
-                                    &ui,
-                                    if result.cancelled {
-                                        "Пакетная печать остановлена"
-                                    } else {
-                                        "Пакетная печать завершена"
-                                    },
-                                );
+                                show_toast(&ui, &message);
                             }
                             Err(error) => {
                                 ui.set_fixed_status("Ошибка пакетной печати".into());
@@ -5179,11 +5190,11 @@ pub fn run() -> Result<(), String> {
                                 ui.set_printer_ready(true);
                                 show_toast(
                                     &ui,
-                                    if result.status == "completed" {
+                                    &result.print.success_message(if result.status == "completed" {
                                         "Последняя этикетка задания напечатана"
                                     } else {
                                         "Прогресс задания обновлён"
-                                    },
+                                    }),
                                 );
                             }
                             Err(error) => {

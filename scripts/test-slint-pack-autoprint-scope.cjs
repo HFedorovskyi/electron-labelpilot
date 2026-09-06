@@ -44,7 +44,10 @@ const palletStart = nativePrint.indexOf('pub fn print_pallet(', closeBodyStart);
 const closeBody = nativePrint.slice(closeBodyStart, palletStart);
 assert.match(closeBody, /templates_box_label/);
 assert.match(closeBody, /operational\.close_box/);
-assert.match(closeBody, /send_prepared/);
+assert.match(closeBody, /prepare_delivery/);
+assert.match(closeBody, /close_box_with_outbox/);
+assert.match(closeBody, /submit_committed_with_sink/);
+assert.ok(closeBody.indexOf('close_box_with_outbox') < closeBody.indexOf('submit_committed_with_sink'));
 
 const repeatStart = nativePrint.indexOf('pub fn repeat_last(', palletStart);
 const palletBody = nativePrint.slice(palletStart, repeatStart);
