@@ -13,6 +13,18 @@
 
 Идентификатор `com.labelpilot.electron`, каталог `%APPDATA%/electron-labelpilot` и имя GitHub-репозитория сохранены как неизменяемые compatibility identifiers: это обеспечивает обновление существующих станций и чтение накопленной базы/настроек.
 
+## Структура репозитория
+
+- `src-tauri/` — общий Rust backend, production Slint UI, Windows installer и updater.
+- `src/` и `public/` — React/Tauri fallback UI и его статические ресурсы.
+- `native/labelpilot-contracts/` — общие Rust-контракты; используется backend-сборкой.
+- `resources/fonts/` — шрифты native-печати; копии в `public/fonts/label-fonts/` нужны WebView renderer, а в `src-tauri/slint/assets/fonts/` — Slint UI.
+- `build/` — иконка и оформление действующего NSIS installer.
+- `scripts/` и `tests/fixtures/` — актуальные проверки, диагностика и release tooling. Golden fixtures сохраняют эталонные данные миграции даже после удаления старых Electron-генераторов.
+- `docs/` — контракты и история миграции; отчёты отдельных фаз описывают состояние на указанную в них дату.
+
+Локальные дампы, временные файлы, результаты проверок и сборки хранятся вне отслеживаемых исходников (`artifacts/`, `dist/`, `src-tauri/target/`, `release-tauri/`). Старый Slint PoC и Electron-only утилиты доступны в истории Git, но не входят в текущую сборку. Скрипты миграции старых установок и публикации `latest.yml` сохранены намеренно.
+
 ## Команды
 
 - `npm run dev` — Vite renderer.

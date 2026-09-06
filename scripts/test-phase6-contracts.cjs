@@ -11,6 +11,7 @@ const commands = read('src-tauri/src/commands.rs');
 const runtime = read('src-tauri/src/lib.rs');
 const lifecycle = read('src-tauri/src/lifecycle.rs');
 const transfer = read('src-tauri/src/transfer.rs');
+const spooler = read('src-tauri/src/printer/spooler.rs');
 const cargo = read('src-tauri/Cargo.toml');
 const config = JSON.parse(read('src-tauri/tauri.conf.json'));
 const packageJson = JSON.parse(read('package.json'));
@@ -52,13 +53,15 @@ assert.equal(config.bundle.createUpdaterArtifacts, true);
 assert.equal(config.bundle.windows.nsis.installMode, 'currentUser');
 assert.equal(config.bundle.windows.nsis.compression, 'lzma');
 assert.equal(config.bundle.windows.webviewInstallMode.type, 'downloadBootstrapper');
-assert.ok(config.bundle.resources['../resources/fonts/']);
-assert.ok(config.bundle.resources['../resources/printer/']);
+assert.deepEqual(config.bundle.resources, { '../resources/fonts/': 'fonts/' });
+for (const api of ['OpenPrinterW', 'StartDocPrinterW', 'WritePrinter', 'ClosePrinter']) {
+  assert.ok(spooler.includes(api), `native Windows spooler API is missing: ${api}`);
+}
 assert.ok(config.plugins.updater.pubkey.length > 80, 'updater public key is missing');
 assert.ok(config.plugins.updater.endpoints[0].endsWith('/latest/download/latest.json'));
 
-assert.match(cargo, /tauri-plugin-updater\s*=\s*"2"/);
-assert.match(cargo, /tauri-plugin-dialog\s*=\s*"2"/);
+assert.match(cargo, /tauri-plugin-updater\s*=\s*\{\s*version\s*=\s*"2",\s*optional\s*=\s*true\s*\}/);
+assert.match(cargo, /tauri-plugin-dialog\s*=\s*\{\s*version\s*=\s*"2",\s*optional\s*=\s*true\s*\}/);
 assert.match(cargo, /rustls[^\n]+default-features\s*=\s*false[^\n]+"ring"/);
 assert.match(runtime, /tauri_plugin_updater::Builder::new\(\)\.build\(\)/);
 assert.match(runtime, /tauri_plugin_dialog::init\(\)/);
@@ -75,7 +78,7 @@ assert.match(transfer, /write_bytes_atomic/);
 assert.match(transfer, /seed_demo_data/);
 assert.match(transfer, /exit_demo_data/);
 
-assert.equal(packageJson.scripts['tauri:build'], 'tauri build --bundles nsis');
+assert.equal(packageJson.scripts['tauri:build'], 'powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-dual-runtime.ps1 -Bundle nsis');
 assert.equal(packageJson.scripts['tauri:release'], 'powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-tauri-release.ps1');
 assert.equal(packageJson.scripts['test:phase6'], 'node scripts/test-phase6-contracts.cjs');
 

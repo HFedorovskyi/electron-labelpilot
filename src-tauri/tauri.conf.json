@@ -41,8 +41,7 @@
     "publisher": "LabelPilot",
     "copyright": "Copyright (c) 2026 LabelPilot",
     "resources": {
-      "../resources/fonts/": "fonts/",
-      "../resources/printer/": "printer/"
+      "../resources/fonts/": "fonts/"
     },
     "windows": {
       "webviewInstallMode": {
