@@ -612,8 +612,10 @@ fn apply_warmup_status(ui: &WeighingPrototype, outcome: Result<Value, String>) {
     });
     match status.as_deref() {
         Some("ready") => {
-            ui.set_printer_ready(true);
-            ui.set_printer_status("Принтер: готов".into());
+            // Warmup confirms a connection, not hardware readiness. The health
+            // poll is the only operation that opens the automatic print gate.
+            ui.set_printer_ready(false);
+            ui.set_printer_status("Принтер: проверка состояния".into());
         }
         Some("unreachable") => {
             ui.set_printer_ready(false);
@@ -640,9 +642,12 @@ fn pack_printer_ui_state(device: &NativePrinterDiagnostic) -> (bool, &'static st
         "head-open" => (false, "Принтер: открыта крышка"),
         "paper-out" => (false, "Принтер: нет бумаги"),
         "paper-jam" => (false, "Принтер: замятие"),
+        "ribbon-out" => (false, "Принтер: нет ленты"),
+        "buffer-full" => (false, "Принтер: буфер заполнен"),
+        "busy" => (false, "Принтер: ожидает завершения операции"),
         "offline" | "unreachable" => (false, "Принтер: недоступен"),
         "error" => (false, "Принтер: ошибка"),
-        _ => (true, "Принтер: готов"),
+        _ => (false, "Принтер: состояние неизвестно"),
     }
 }
 
@@ -995,6 +1000,10 @@ fn diagnostic_status_label(status: &str) -> &'static str {
         "head-open" => "КРЫШКА ОТКРЫТА",
         "paper-out" => "НЕТ БУМАГИ",
         "paper-jam" => "ЗАМЯТИЕ",
+        "ribbon-out" => "НЕТ ЛЕНТЫ",
+        "buffer-full" => "БУФЕР ЗАПОЛНЕН",
+        "busy" => "ОЖИДАНИЕ",
+        "unknown" => "СТАТУС НЕИЗВЕСТЕН",
         "unconfigured" => "НЕ НАСТРОЕН",
         "error" | "unreachable" => "НЕДОСТУПЕН",
         _ => "ОТВЕТ ПОЛУЧЕН",
@@ -2356,8 +2365,8 @@ fn apply_core_event(ui: &WeighingPrototype, event: CoreEvent) {
             let status = payload.get("status").and_then(Value::as_str);
             match status {
                 Some("connected" | "accepted") => {
-                    ui.set_printer_ready(true);
-                    ui.set_printer_status("Принтер: готов".into());
+                    // A transport event must not overwrite a fault/unknown
+                    // state observed by the hardware-status poll.
                 }
                 Some("error" | "failed" | "unreachable") => {
                     ui.set_printer_ready(false);
@@ -2510,7 +2519,7 @@ pub fn run() -> Result<(), String> {
                 }
 
                 let configured = printer_is_configured(&active_printer_config);
-                ui.set_printer_ready(configured);
+                ui.set_printer_ready(false);
                 ui.set_printer_status(
                     if configured {
                         "Принтер: настроен"
@@ -4673,8 +4682,7 @@ pub fn run() -> Result<(), String> {
                                 ui.set_last_print(
                                     format!("#{} · {}", result.number, chrono_like_time()).into(),
                                 );
-                                ui.set_printer_ready(true);
-                                ui.set_printer_status("Принтер: готов".into());
+                                // Preserve the last hardware status after transport acceptance.
                                 let message = match action.as_str() {
                                     "repeat" => "Этикетка повторно принята принтером",
                                     "box" if result.receipt.is_none() => {
@@ -5046,8 +5054,7 @@ pub fn run() -> Result<(), String> {
                                     }
                                     .into(),
                                 );
-                                ui.set_printer_ready(true);
-                                ui.set_printer_status("Принтер: готов".into());
+                                // Preserve the last hardware status after transport acceptance.
                                 if ui.get_auto_print_enabled() {
                                     ui.set_auto_print_status("СНИМИТЕ ТОВАР".into());
                                 }
@@ -5187,7 +5194,7 @@ pub fn run() -> Result<(), String> {
                                     )
                                     .into(),
                                 );
-                                ui.set_printer_ready(true);
+                                // Preserve hardware readiness after this job receipt.
                                 show_toast(
                                     &ui,
                                     &result.print.success_message(if result.status == "completed" {
@@ -5779,6 +5786,29 @@ mod refresh_coordinator_tests {
             pack_printer_ui_state(&printer_diagnostic(false, "unconfigured")),
             (false, "Принтер: не настроен")
         );
+    }
+
+    #[test]
+    fn p1_unknown_and_hardware_faults_keep_autoprint_closed() {
+        for status in [
+            "unknown",
+            "unrecognized-firmware-status",
+            "ribbon-out",
+            "buffer-full",
+            "busy",
+            "error",
+            "paused",
+            "head-open",
+            "paper-out",
+            "paper-jam",
+        ] {
+            assert!(
+                !pack_printer_ui_state(&printer_diagnostic(true, status)).0,
+                "{status}"
+            );
+        }
+        assert_eq!(diagnostic_status_label("unknown"), "СТАТУС НЕИЗВЕСТЕН");
+        assert_eq!(diagnostic_status_label("buffer-full"), "БУФЕР ЗАПОЛНЕН");
     }
 
     #[test]

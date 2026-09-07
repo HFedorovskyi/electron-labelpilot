@@ -386,3 +386,193 @@ fn benchmark_one_pass_generation_vs_plan_then_generate() {
         legacy_micros as f64 / one_pass_micros.max(1) as f64
     );
 }
+
+fn p1_field_request(kind: &str, value: &str, barcode: &str, width: u32) -> GenerationPayload {
+    payload(
+        serde_json::json!({"protocol":"zpl","compatibilityMode":"advanced","dpi":203}),
+        serde_json::json!({"widthMm":58,"heightMm":40,"canvas":{"width":400,"height":300},
+            "elements":[{"id":"field","type":kind,"x":0,"y":0,"w":width,"h":40,
+                "text":"{{field}}","value":"{{field}}","barcodeType":barcode}]}),
+        serde_json::json!({"field":value}),
+    )
+}
+
+#[test]
+fn p1_zpl_field_escapes_command_and_hex_prefixes_after_interpolation() {
+    for kind in ["text", "barcode"] {
+        let request = p1_field_request(kind, "LOT^A~B_5E", "qrcode", 200);
+        let bytes = GeneratorState::default().generate(request).unwrap().bytes;
+        let text = String::from_utf8(bytes).unwrap();
+        assert!(text.contains("^FH_^FD"), "{text}");
+        assert!(text.contains("LOT_5EA_7EB_5F5E"), "{text}");
+        assert!(!text.contains("LOT^A~B"));
+    }
+}
+
+#[test]
+fn p1_zpl_ambiguous_barcode_controls_require_raster() {
+    for (barcode, value) in [
+        ("code128", "LOT>8A"),
+        ("code128", "LOT^A~B"),
+        ("code128", "LOT\u{1d}A"),
+        ("datamatrix", "LOT_1A"),
+        ("datamatrix", "LOT~1A"),
+        ("gs1-128", "(01)04870254930134(10)LOT"),
+    ] {
+        let request = p1_field_request("barcode", value, barcode, 200);
+        assert!(
+            !GeneratorState::default()
+                .plan(&request)
+                .unwrap()
+                .native_eligible,
+            "{barcode} must preserve literal data via raster: {value:?}"
+        );
+        assert!(GeneratorState::default()
+            .generate_if_native(&request)
+            .unwrap()
+            .is_none());
+    }
+}
+
+#[test]
+fn p1_zpl_literal_field_block_controls_require_raster() {
+    for value in ["LOT\\&A", "LOT\\xA", "LOT\tA", "LOT\0A"] {
+        let request = p1_field_request("text", value, "", 200);
+        assert!(
+            !GeneratorState::default()
+                .plan(&request)
+                .unwrap()
+                .native_eligible,
+            "{value:?}"
+        );
+    }
+}
+
+#[test]
+fn p1_zpl_unicode_and_line_breaks_preserve_field_content() {
+    let request = p1_field_request("text", "Партия^А_7E\r\nСтрока~Б", "", 200);
+    let stream =
+        String::from_utf8(GeneratorState::default().generate(request).unwrap().bytes).unwrap();
+    assert!(stream.contains("^CI28\n"));
+    assert!(stream.contains("Партия_5EА_5F7E\\&Строка_7EБ"), "{stream}");
+    assert!(!stream.contains('\r'));
+}
+
+#[test]
+fn p1_zpl_printable_ascii_and_utf8_fields_round_trip() {
+    fn decode_field(stream: &str) -> Vec<u8> {
+        let field = stream
+            .split_once("^FD")
+            .unwrap()
+            .1
+            .split_once("^FS")
+            .unwrap()
+            .0;
+        let mut decoded = Vec::new();
+        let mut input = field.as_bytes().iter().copied();
+        while let Some(byte) = input.next() {
+            if byte == b'_' && stream.contains("^FH_^FD") {
+                let high = char::from(input.next().unwrap()).to_digit(16).unwrap();
+                let low = char::from(input.next().unwrap()).to_digit(16).unwrap();
+                decoded.push((high * 16 + low) as u8);
+            } else {
+                decoded.push(byte);
+            }
+        }
+        decoded
+    }
+    let printable = (0x20_u8..=0x7e).map(char::from).collect::<String>();
+    for value in [printable.as_str(), "_5E^FS~JA_7E", "Партия_5F^~ € 漢字"] {
+        for kind in ["text", "barcode"] {
+            let request = p1_field_request(kind, value, "qrcode", 0);
+            let stream =
+                String::from_utf8(GeneratorState::default().generate(request).unwrap().bytes)
+                    .unwrap();
+            let expected = if kind == "barcode" {
+                format!("QA,{value}")
+            } else {
+                value.to_owned()
+            };
+            assert_eq!(decode_field(&stream), expected.as_bytes());
+            assert_eq!(stream.matches("^FD").count(), 1);
+            assert_eq!(stream.matches("^FS").count(), 1);
+            assert_eq!(stream.matches("^XA").count(), 1);
+            assert_eq!(stream.matches("^XZ").count(), 1);
+        }
+    }
+}
+
+#[test]
+fn p1_zpl_text_layout_boundaries_and_barcode_text_fallback() {
+    for (value, width, native) in [
+        ("FIRST\nSECOND".to_owned(), 0, false),
+        ("FIRST\rSECOND".to_owned(), 200, true),
+        ("LITERAL\\&TEXT".to_owned(), 0, true),
+        ("A".repeat(3072), 200, true),
+        ("A".repeat(3073), 200, false),
+    ] {
+        let request = p1_field_request("text", &value, "", width);
+        assert_eq!(
+            GeneratorState::default()
+                .plan(&request)
+                .unwrap()
+                .native_eligible,
+            native
+        );
+    }
+    let mut request = p1_field_request("barcode", "LOT_5E", "code128", 200);
+    request.doc["elements"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("value");
+    let stream =
+        String::from_utf8(GeneratorState::default().generate(request).unwrap().bytes).unwrap();
+    assert!(stream.contains("^FH_^FDLOT_5F5E^FS"), "{stream}");
+    let mut generic = p1_field_request("text", "Партия", "", 200);
+    generic.config["compatibilityMode"] = serde_json::json!("generic");
+    assert!(
+        !GeneratorState::default()
+            .plan(&generic)
+            .unwrap()
+            .native_eligible
+    );
+}
+
+#[test]
+fn p1_zpl_barcode_literal_policy_preserves_supported_streams() {
+    for (kind, value) in [
+        ("code128", "LOT_1"),
+        ("code39", "LOT-1"),
+        ("datamatrix", "LOT^1"),
+        ("qrcode", "LOT^~_>1"),
+        ("ean13", "4870254930134"),
+        ("ean8", "96385074"),
+        ("upca", "036000291452"),
+        ("upce", "04252614"),
+        ("interleaved2of5", "12345678901234"),
+    ] {
+        let request = p1_field_request("barcode", value, kind, 200);
+        assert!(
+            GeneratorState::default()
+                .generate_if_native(&request)
+                .unwrap()
+                .is_some(),
+            "{kind}"
+        );
+    }
+    for (kind, value) in [
+        ("code39", "lowercase"),
+        ("ean13", "1234A"),
+        ("code128", ""),
+        ("qrcode", "A\tB"),
+    ] {
+        let request = p1_field_request("barcode", value, kind, 200);
+        assert!(
+            !GeneratorState::default()
+                .plan(&request)
+                .unwrap()
+                .native_eligible,
+            "{kind}"
+        );
+    }
+}

@@ -369,6 +369,14 @@ impl ParsedInput {
                         if !self.profile.native_utf8_text && !is_printable_ascii(&value) {
                             reasons.push(format!("{}:unicode-text", element.id));
                         }
+                        if value
+                            .chars()
+                            .any(|ch| ch.is_control() && !matches!(ch, '\r' | '\n'))
+                            || (element.w != 0.0 && (value.contains('\\') || value.len() > 3072))
+                            || (element.w == 0.0 && value.contains(['\r', '\n']))
+                        {
+                            reasons.push(format!("{}:zpl-text-layout", element.id));
+                        }
                     }
                 }
                 "barcode" => {
@@ -390,6 +398,7 @@ impl ParsedInput {
                     let barcode = normalize_barcode(element.barcode_type.as_ref());
                     if !self.profile.native_barcodes.contains(&barcode.as_str())
                         || needs_gs1_parse(&barcode, &value)
+                        || super::zpl::barcode_requires_bitmap(&barcode, &value)
                     {
                         reasons.push(format!("{}:barcode-{barcode}", element.id));
                     }

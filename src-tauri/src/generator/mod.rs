@@ -2,6 +2,9 @@ mod tspl;
 mod types;
 mod zpl;
 
+#[cfg(feature = "slint-ui")]
+pub(crate) use zpl::barcode_requires_bitmap as zpl_barcode_requires_bitmap;
+
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
 use serde::Serialize;

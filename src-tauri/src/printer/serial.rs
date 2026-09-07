@@ -83,9 +83,20 @@ impl SerialConnection {
     ) -> Result<super::status::PrinterStatusReport, TransportFailure> {
         self.ensure_connected(config)?;
         let port = self.port.as_mut().expect("connected serial port");
-        let _ = port.set_timeout(super::status::STATUS_IO_TIMEOUT);
-        let result = super::status::query_stream_report(config, port);
-        let _ = port.set_timeout(WRITE_TIMEOUT);
+        let result = port
+            .set_timeout(super::status::STATUS_IO_TIMEOUT)
+            .map_err(|error| TransportFailure {
+                message: format!("serial printer status timeout: {error}"),
+                timed_out: false,
+            })
+            .and_then(|_| super::status::query_stream_report(config, port));
+        if let Err(error) = port.set_timeout(WRITE_TIMEOUT) {
+            self.close();
+            return Err(TransportFailure {
+                message: format!("serial printer write timeout restore: {error}"),
+                timed_out: false,
+            });
+        }
         result
     }
 

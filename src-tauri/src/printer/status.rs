@@ -3,12 +3,30 @@ use serde::{Deserialize, Serialize};
 use serialport::{DataBits, FlowControl, Parity, StopBits};
 use std::io::{self, Read, Write};
 use std::net::TcpStream;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const STATUS_CONNECT_TIMEOUT: Duration = Duration::from_millis(1_500);
 pub(super) const STATUS_IO_TIMEOUT: Duration = Duration::from_millis(700);
 const MAX_STATUS_RESPONSE_BYTES: usize = 4 * 1024;
 const MAX_STATUS_PREVIEW_BYTES: usize = 256;
+
+/// Each read gets the remaining deadline, rather than another full I/O timeout.
+/// This also applies to the worker's already-open serial port.
+pub(super) trait StatusStream: Read + Write {
+    fn set_status_read_timeout(&mut self, timeout: Duration) -> io::Result<()>;
+}
+
+impl StatusStream for TcpStream {
+    fn set_status_read_timeout(&mut self, timeout: Duration) -> io::Result<()> {
+        self.set_read_timeout(Some(timeout))
+    }
+}
+
+impl StatusStream for Box<dyn serialport::SerialPort> {
+    fn set_status_read_timeout(&mut self, timeout: Duration) -> io::Result<()> {
+        self.set_timeout(timeout).map_err(io::Error::other)
+    }
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -87,7 +105,7 @@ fn query_serial(config: &PrinterDeviceConfig) -> Result<StatusObservation, Trans
     query_stream(config, &mut port)
 }
 
-fn query_stream<T: Read + Write>(
+fn query_stream<T: StatusStream>(
     config: &PrinterDeviceConfig,
     stream: &mut T,
 ) -> Result<StatusObservation, TransportFailure> {
@@ -113,7 +131,7 @@ fn query_stream<T: Read + Write>(
 
 /// Runs the protocol status handshake on an already-open stream (the print
 /// worker's held serial port) and builds the full report.
-pub(super) fn query_stream_report<T: Read + Write>(
+pub(super) fn query_stream_report<T: StatusStream>(
     config: &PrinterDeviceConfig,
     stream: &mut T,
 ) -> Result<PrinterStatusReport, TransportFailure> {
@@ -129,17 +147,29 @@ fn status_command(protocol: &str) -> Option<&'static [u8]> {
     }
 }
 
-fn read_bounded_response<T: Read>(
+fn read_bounded_response<T: StatusStream>(
     stream: &mut T,
     protocol: &str,
+) -> Result<Vec<u8>, TransportFailure> {
+    read_bounded_response_until(stream, protocol, Instant::now() + STATUS_IO_TIMEOUT)
+}
+
+fn read_bounded_response_until<T: StatusStream>(
+    stream: &mut T,
+    protocol: &str,
+    deadline: Instant,
 ) -> Result<Vec<u8>, TransportFailure> {
     let mut response = Vec::with_capacity(512);
     let mut buffer = [0_u8; 512];
     loop {
         let remaining = MAX_STATUS_RESPONSE_BYTES.saturating_sub(response.len());
-        if remaining == 0 {
+        let remaining_time = deadline.saturating_duration_since(Instant::now());
+        if remaining == 0 || remaining_time.is_zero() {
             break;
         }
+        stream
+            .set_status_read_timeout(remaining_time)
+            .map_err(|error| transport_error("printer status remaining read timeout", error))?;
         let read_limit = buffer.len().min(remaining);
         match stream.read(&mut buffer[..read_limit]) {
             Ok(0) => break,
@@ -149,13 +179,14 @@ fn read_bounded_response<T: Read>(
                     break;
                 }
             }
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
             Err(error)
                 if matches!(
                     error.kind(),
                     io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
                 ) =>
             {
-                break;
+                break
             }
             Err(error) => return Err(transport_error("printer status response read", error)),
         }
@@ -166,23 +197,48 @@ fn read_bounded_response<T: Read>(
 fn response_complete(protocol: &str, response: &[u8]) -> bool {
     match protocol {
         "tspl" => !response.is_empty(),
-        "zpl" | "image" => {
-            response.contains(&0x03)
-                || response.iter().filter(|value| **value == b'\n').count() >= 3
-        }
+        "zpl" | "image" => zpl_frames(response).is_some(),
         _ => true,
+    }
+}
+
+/// A host-status reply is three STX/ETX records. A newline or a single ETX
+/// cannot finish it. Only whitespace may separate or follow the records.
+fn zpl_frames(response: &[u8]) -> Option<[&str; 3]> {
+    let mut remaining = std::str::from_utf8(response).ok()?;
+    let mut frames = [""; 3];
+    for frame in &mut frames {
+        remaining = remaining.trim_start_matches(|ch: char| ch.is_ascii_whitespace());
+        remaining = remaining.strip_prefix('\u{2}')?;
+        let (body, tail) = remaining.split_once('\u{3}')?;
+        if body.is_empty() || body.contains('\u{2}') {
+            return None;
+        }
+        *frame = body;
+        remaining = tail;
+    }
+    remaining
+        .trim_matches(|ch: char| ch.is_ascii_whitespace())
+        .is_empty()
+        .then_some(frames)
+}
+
+fn unknown_status(response: Vec<u8>, reason: &str) -> StatusObservation {
+    StatusObservation {
+        reachable: true,
+        status: "unknown",
+        details: vec![reason.to_owned()],
+        supports_bidirectional_status: false,
+        response,
     }
 }
 
 fn parse_protocol_response(protocol: &str, response: Vec<u8>) -> StatusObservation {
     if response.is_empty() {
-        return StatusObservation {
-            reachable: true,
-            status: "reachable",
-            details: vec!["status command sent; no response arrived before timeout".to_owned()],
-            supports_bidirectional_status: false,
+        return unknown_status(
             response,
-        };
+            "status command sent; readiness is unknown because no response arrived",
+        );
     }
     match protocol {
         "tspl" => parse_tspl_response(response),
@@ -192,32 +248,49 @@ fn parse_protocol_response(protocol: &str, response: Vec<u8>) -> StatusObservati
 }
 
 fn parse_zpl_response(response: Vec<u8>) -> StatusObservation {
-    let text = String::from_utf8_lossy(&response);
-    let frames = text
-        .split('\u{2}')
-        .filter_map(|part| part.split('\u{3}').next())
-        .map(str::trim)
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>();
-    if frames.len() < 2 {
+    let Some(frames) = zpl_frames(&response) else {
+        if response.iter().any(|byte| matches!(byte, 0x02 | 0x03)) {
+            return unknown_status(response, "incomplete or malformed ZPL host-status frames");
+        }
         return parse_text_response(response);
-    }
+    };
     let first = frames[0].split(',').map(str::trim).collect::<Vec<_>>();
     let second = frames[1].split(',').map(str::trim).collect::<Vec<_>>();
-    if first.len() < 12 || second.len() < 4 {
-        return parse_text_response(response);
+    let third = frames[2].split(',').map(str::trim).collect::<Vec<_>>();
+    let number = |value: &&str| {
+        !value.is_empty() && value.len() <= 10 && value.bytes().all(|byte| byte.is_ascii_digit())
+    };
+    let flag = |value: &str| matches!(value, "0" | "1");
+    if first.len() != 12
+        || second.len() != 11
+        || third.len() != 2
+        || !first.iter().all(number)
+        || !second.iter().enumerate().all(|(index, value)| {
+            number(value)
+                || (index == 5 && value.len() == 1 && value.as_bytes()[0].is_ascii_uppercase())
+        })
+        || !third.iter().all(number)
+        || ![1, 2, 5, 6, 7, 9, 10, 11]
+            .iter()
+            .all(|index| flag(first[*index]))
+        || ![2, 3, 4, 7, 9].iter().all(|index| flag(second[*index]))
+        || !flag(third[1])
+    {
+        return unknown_status(response, "invalid ZPL host-status fields");
     }
-
     let mut details = Vec::new();
     let flags = [
         (first[1] == "1", "paper out"),
         (first[2] == "1", "paused"),
         (first[5] == "1", "receive buffer full"),
+        (first[6] == "1", "communications diagnostic mode"),
+        (first[7] == "1", "partial format in progress"),
         (first[9] == "1", "corrupt RAM"),
         (first[10] == "1", "under temperature"),
         (first[11] == "1", "over temperature"),
         (second[2] == "1", "head open"),
         (second[3] == "1", "ribbon out"),
+        (second[7] == "1", "label waiting to be removed"),
     ];
     for (active, detail) in flags {
         if active {
@@ -232,11 +305,24 @@ fn parse_zpl_response(response: Vec<u8>) -> StatusObservation {
         "ribbon-out"
     } else if first[2] == "1" {
         "paused"
-    } else if first[9] == "1" || first[10] == "1" || first[11] == "1" {
+    } else if first[6] == "1" || first[9] == "1" || first[10] == "1" || first[11] == "1" {
         "error"
+    } else if first[5] == "1" {
+        "buffer-full"
+    } else if first[7] == "1" || second[7] == "1" {
+        "busy"
+    } else if first[4].bytes().any(|byte| byte != b'0')
+        || second[8].bytes().any(|byte| byte != b'0')
+    {
+        "printing"
     } else {
         "ready"
     };
+    if details.is_empty() {
+        details.push(format!(
+            "complete ZPL host-status response reports {status}"
+        ));
+    }
     StatusObservation {
         reachable: true,
         status,
@@ -287,15 +373,14 @@ fn parse_text_response(response: Vec<u8>) -> StatusObservation {
         ("PAPER OUT", "paper-out"),
         ("RIBBON OUT", "ribbon-out"),
         ("PAUSED", "paused"),
-        ("PRINTING", "printing"),
         ("ERROR", "error"),
     ];
     let status = candidates
         .iter()
         .find_map(|(token, status)| text.contains(token).then_some(*status))
-        .unwrap_or("ready");
-    let details = if status == "ready" {
-        vec!["printer returned a bounded status response".to_owned()]
+        .unwrap_or("unknown");
+    let details = if status == "unknown" {
+        vec!["unrecognized status response; readiness is unknown".to_owned()]
     } else {
         vec![format!(
             "printer response contains {}",
@@ -306,7 +391,7 @@ fn parse_text_response(response: Vec<u8>) -> StatusObservation {
         reachable: true,
         status,
         details,
-        supports_bidirectional_status: true,
+        supports_bidirectional_status: status != "unknown",
         response,
     }
 }
@@ -517,3 +602,7 @@ mod tests {
         assert_eq!(details, vec!["paper out", "printing"]);
     }
 }
+
+#[cfg(test)]
+#[path = "status_tests.rs"]
+mod regression_tests;

@@ -1052,7 +1052,11 @@ fn native_zpl_barcode_eligible(
         return Ok(false);
     };
     let kind = normalize_barcode(string(element.get("barcodeType")).unwrap_or("code128"));
-    if has_gs1_ai(&value) || kind.starts_with("gs1") || kind.starts_with("databar") {
+    if has_gs1_ai(&value)
+        || kind.starts_with("gs1")
+        || kind.starts_with("databar")
+        || crate::generator::zpl_barcode_requires_bitmap(&kind, &value)
+    {
         return Ok(false);
     }
     if value
@@ -2088,6 +2092,30 @@ mod tests {
             }),
             data: json!({"barcode": value}),
         }
+    }
+
+    #[test]
+    fn p1_hybrid_raster_does_not_reintroduce_barcode_invocations() {
+        for (kind, value) in [
+            ("code128", "LOT>8A"),
+            ("code128", "LOT^A~B"),
+            ("datamatrix", "LOT_1A"),
+            ("datamatrix", "LOT~1A"),
+        ] {
+            let mut payload = barcode_payload(203, kind, value);
+            payload.config["connection"] = json!("tcp");
+            let bitmap = render(&payload).unwrap();
+            assert!(bitmap.native_zpl_commands.is_empty(), "{kind}: {value}");
+            assert!(bitmap.mono.iter().any(|byte| *byte != 0));
+            let stream =
+                String::from_utf8(encode("image", &bitmap, &payload.config).unwrap()).unwrap();
+            assert!(!stream.contains("^FD"));
+        }
+        let mut payload = barcode_payload(203, "code128", "LOT_1A");
+        payload.config["connection"] = json!("tcp");
+        let bitmap = render(&payload).unwrap();
+        assert_eq!(bitmap.native_zpl_commands.len(), 1);
+        assert!(bitmap.native_zpl_commands[0].contains("LOT_1A"));
     }
 
     #[test]

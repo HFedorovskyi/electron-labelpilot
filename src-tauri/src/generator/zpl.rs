@@ -57,12 +57,19 @@ fn append_element(
                     Some("right") => "R",
                     _ => "L",
                 };
-                let value = value.replace('\n', "\\&");
+                // Only real line breaks become FB instructions. Literal backslashes
+                // are routed to raster by the planner because FB gives them semantics.
+                let value = value
+                    .replace("\r\n", "\n")
+                    .replace('\r', "\n")
+                    .replace('\n', "\\&");
                 output.push_str(&format!(
-                    "^FB{width},20,0,{justification},0^A0{orientation},{size},{size}^FD{value}^FS\n"
+                    "^FB{width},20,0,{justification},0^A0{orientation},{size},{size}"
                 ));
+                append_field_data(output, &value)?;
             } else {
-                output.push_str(&format!("^A0{orientation},{size},{size}^FD{value}^FS\n"));
+                output.push_str(&format!("^A0{orientation},{size},{size}"));
+                append_field_data(output, &value)?;
             }
         }
         "rect" => {
@@ -89,48 +96,54 @@ fn append_element(
             output.push_str(&format!("^GB{width},{height},{thickness},B,{radius}^FS\n"));
         }
         "barcode" => {
-            let value = interpolate(element.value.as_deref().unwrap_or(""), data);
+            let value = interpolate(
+                element
+                    .value
+                    .as_deref()
+                    .or(element.text.as_deref())
+                    .unwrap_or(""),
+                data,
+            );
             let height = js_round(element.h * geometry.scale_y);
             let module = js_round(2.0 * (geometry.scale_x / 2.1)).max(2);
             let human = if element.show_text { "Y" } else { "N" };
             let barcode = normalize_barcode(element.barcode_type.as_ref());
             match barcode.as_str() {
                 "code128" | "gs1-128" => output.push_str(&format!(
-                    "^BY{module},3.0,{height}^BC{orientation},{height},{human},N,N^FD{value}^FS\n"
+                    "^BY{module},3.0,{height}^BC{orientation},{height},{human},N,N"
                 )),
                 "ean13" => output.push_str(&format!(
-                    "^BY{module},3.0,{height}^BE{orientation},{height},{human},N^FD{value}^FS\n"
+                    "^BY{module},3.0,{height}^BE{orientation},{height},{human},N"
                 )),
                 "ean8" => output.push_str(&format!(
-                    "^BY{module},3.0,{height}^B8{orientation},{height},{human},N^FD{value}^FS\n"
+                    "^BY{module},3.0,{height}^B8{orientation},{height},{human},N"
                 )),
                 "upca" => output.push_str(&format!(
-                    "^BY{module},3.0,{height}^BU{orientation},{height},{human},N,Y^FD{value}^FS\n"
+                    "^BY{module},3.0,{height}^BU{orientation},{height},{human},N,Y"
                 )),
                 "upce" => output.push_str(&format!(
-                    "^BY{module},3.0,{height}^B9{orientation},{height},{human},N,Y^FD{value}^FS\n"
+                    "^BY{module},3.0,{height}^B9{orientation},{height},{human},N,Y"
                 )),
                 "qrcode" | "gs1qrcode" => {
                     let magnification = js_round(geometry.scale_x * 2.0).max(3);
-                    output.push_str(&format!(
-                        "^BQ{orientation},2,{magnification}^FDQA,{value}^FS\n"
-                    ));
+                    output.push_str(&format!("^BQ{orientation},2,{magnification}"));
                 }
                 "datamatrix" | "gs1datamatrix" => {
                     let magnification = js_round(geometry.scale_x * 2.0).max(3);
-                    output.push_str(&format!(
-                        "^BX{orientation},{magnification},200^FD{value}^FS\n"
-                    ));
+                    output.push_str(&format!("^BX{orientation},{magnification},200"));
                 }
                 "code39" => output.push_str(&format!(
-                    "^BY{module},3.0,{height}^B3{orientation},N,{height},{human},N^FD{value}^FS\n"
+                    "^BY{module},3.0,{height}^B3{orientation},N,{height},{human},N"
                 )),
                 "interleaved2of5" => output.push_str(&format!(
-                    "^BY{module},3.0,{height}^B2{orientation},{height},{human},N,N^FD{value}^FS\n"
+                    "^BY{module},3.0,{height}^B2{orientation},{height},{human},N,N"
                 )),
-                other => {
-                    return Err(format!("native ZPL barcode is unsupported: {other}"));
-                }
+                other => return Err(format!("native ZPL barcode is unsupported: {other}")),
+            }
+            if matches!(barcode.as_str(), "qrcode" | "gs1qrcode") {
+                append_field_data(output, &format!("QA,{value}"))?;
+            } else {
+                append_field_data(output, &value)?;
             }
         }
         other => {
@@ -155,4 +168,60 @@ fn js_number(value: f64) -> String {
     } else {
         value.to_string()
     }
+}
+
+/// Hex-escape only field data, never format commands. Keeping ordinary fields
+/// unchanged preserves the existing golden streams and avoids unnecessary bytes.
+fn append_field_data(output: &mut String, value: &str) -> Result<(), String> {
+    fn escape(character: char) -> bool {
+        matches!(character, '^' | '~' | '_') || character.is_ascii_control()
+    }
+    let escaped = value.chars().any(escape);
+    let length: usize = value
+        .chars()
+        .map(|ch| if escape(ch) { 3 } else { ch.len_utf8() })
+        .sum();
+    let overhead = if escaped { 11 } else { 7 }; // FH_ (optional), FD, FS, newline.
+    if output.len().saturating_add(length).saturating_add(overhead) > super::MAX_GENERATED_BYTES {
+        return Err(format!(
+            "generated ZPL exceeds {} bytes",
+            super::MAX_GENERATED_BYTES
+        ));
+    }
+    if escaped {
+        output.push_str("^FH_");
+    }
+    output.push_str("^FD");
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    for character in value.chars() {
+        if escape(character) {
+            let byte = character as u8;
+            output.push('_');
+            output.push(HEX[usize::from(byte >> 4)] as char);
+            output.push(HEX[usize::from(byte & 15)] as char);
+        } else {
+            output.push(character);
+        }
+    }
+    output.push_str("^FS\n");
+    Ok(())
+}
+
+/// FH prevents ZPL commands in data but does not remove symbology-specific
+/// invocation syntax. Render these values literally with the existing encoder.
+pub(crate) fn barcode_requires_bitmap(barcode: &str, value: &str) -> bool {
+    value.is_empty()
+        || value.chars().any(char::is_control)
+        || match barcode {
+            "code128" => !value.is_ascii() || value.contains(['>', '^', '~']),
+            // Modern BX uses underscore; legacy firmware uses tilde.
+            "datamatrix" => value.contains(['_', '~']),
+            "code39" => !value.bytes().all(|byte| {
+                byte.is_ascii_uppercase() || byte.is_ascii_digit() || b" -. $/+%".contains(&byte)
+            }),
+            "ean13" | "ean8" | "upca" | "upce" | "interleaved2of5" => {
+                !value.bytes().all(|byte| byte.is_ascii_digit())
+            }
+            _ => false,
+        }
 }
