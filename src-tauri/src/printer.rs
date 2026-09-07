@@ -382,14 +382,28 @@ impl PreparedPrinterJob {
         Ok(self)
     }
 
+    pub(crate) fn byte_len(&self) -> usize {
+        match &self.action {
+            JobAction::Print(bytes) => bytes.len(),
+            JobAction::DriverBitmap { mono, .. } | JobAction::DriverPage { mono, .. } => mono.len(),
+            _ => 0,
+        }
+    }
+
     pub(crate) fn persist(self, transaction: &rusqlite::Transaction<'_>) -> Result<String, String> {
         let physical_key = self.config.physical_key();
         let fingerprint = action_fingerprint(&self.action);
         match durable::DurablePrintStore::prepare_on_connection(
-            transaction, &self.config, &physical_key, fingerprint, &self.action,
+            transaction,
+            &self.config,
+            &physical_key,
+            fingerprint,
+            &self.action,
         )? {
             durable::PrepareOutcome::New(job_id) => Ok(job_id),
-            durable::PrepareOutcome::Cached(_) => Err("business print job already accepted".to_owned()),
+            durable::PrepareOutcome::Cached(_) => {
+                Err("business print job already accepted".to_owned())
+            }
         }
     }
 }
@@ -477,6 +491,73 @@ pub struct PrintReceipt {
     pub durable_state: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status_report: Option<Box<PrinterStatusReport>>,
+}
+
+/// A bounded wait for one already-queued transport result.
+#[must_use = "wait for the result; dropping the handle leaves delivery running"]
+pub(crate) struct PendingPrintReceipt {
+    result: Receiver<Result<PrintReceipt, String>>,
+    deadline: Instant,
+    app: RuntimeEventSink,
+    printer_id: String,
+    physical_key: String,
+}
+
+impl PendingPrintReceipt {
+    pub(crate) fn wait(self) -> Result<PrintReceipt, String> {
+        let outcome = self
+            .result
+            .recv_timeout(self.deadline.saturating_duration_since(Instant::now()))
+            .unwrap_or_else(|error| {
+                Err(match error {
+                    mpsc::RecvTimeoutError::Timeout => {
+                        "printer job completion timed out".to_owned()
+                    }
+                    mpsc::RecvTimeoutError::Disconnected => {
+                        "printer completion channel disconnected".to_owned()
+                    }
+                })
+            });
+        log_completion(&self.app, &self.printer_id, &self.physical_key, &outcome);
+        outcome
+    }
+}
+
+fn log_completion(
+    app: &RuntimeEventSink,
+    printer_id: &str,
+    physical_key: &str,
+    outcome: &Result<PrintReceipt, String>,
+) {
+    match outcome {
+        Ok(receipt) => {
+            emit_delivery_status(app, &printer_id, "connected", Some(receipt));
+            log_printer(
+                    app,
+                    "INFO",
+                    &format!(
+                        "Rust raw printer sent: id={} key={} bytes={} attempts={} reused={} delivery={}",
+                        printer_id,
+                        physical_key,
+                        receipt.bytes,
+                        receipt.attempts,
+                        receipt.reused_connection,
+                        receipt.delivery_state
+                    ),
+                );
+        }
+        Err(error) => {
+            emit_delivery_status(app, &printer_id, "error", None);
+            log_printer(
+                app,
+                "WARN",
+                &format!(
+                    "Rust raw printer failed: id={} key={} error={}",
+                    printer_id, physical_key, error
+                ),
+            );
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -672,9 +753,14 @@ impl PrinterTransportState {
     ) -> Result<PreparedPrinterJob, String> {
         let config = PrinterDeviceConfig::from_value(config)?;
         if data.is_empty() || data.len() > MAX_RAW_JOB_BYTES {
-            return Err(format!("raw print job must contain 1..{MAX_RAW_JOB_BYTES} bytes"));
+            return Err(format!(
+                "raw print job must contain 1..{MAX_RAW_JOB_BYTES} bytes"
+            ));
         }
-        Ok(PreparedPrinterJob { config, action: JobAction::Print(data) })
+        Ok(PreparedPrinterJob {
+            config,
+            action: JobAction::Print(data),
+        })
     }
 
     #[cfg(feature = "slint-ui")]
@@ -692,10 +778,23 @@ impl PrinterTransportState {
         app: RuntimeEventSink,
         job_id: &str,
     ) -> Result<PrintReceipt, String> {
+        self.enqueue_committed_with_sink(app, job_id)?.wait()
+    }
+
+    /// Enqueue only committed material; preparation of the next label may run
+    /// while the existing per-device worker sends this one. Dropping the handle
+    /// does not cancel or replay a committed job.
+    #[cfg(feature = "slint-ui")]
+    pub(crate) fn enqueue_committed_with_sink(
+        &self,
+        app: RuntimeEventSink,
+        job_id: &str,
+    ) -> Result<PendingPrintReceipt, String> {
         // Reload through a different connection: uncommitted jobs are never dispatchable.
         let job = self.inner.durable.committed_job(job_id)?;
         emit_durable_status(&app, Some(job_id), "queued", None);
-        self.submit_stored(app, job)
+        let key = job.config.physical_key();
+        self.enqueue_once(app, job.config, job.action, &key, Some(job.job_id))
     }
 
     #[cfg(feature = "slint-ui")]
@@ -1145,6 +1244,18 @@ impl PrinterTransportState {
         physical_key: &str,
         durable_job_id: Option<String>,
     ) -> Result<PrintReceipt, String> {
+        self.enqueue_once(app, config, action, physical_key, durable_job_id)?
+            .wait()
+    }
+
+    fn enqueue_once(
+        &self,
+        app: RuntimeEventSink,
+        config: PrinterDeviceConfig,
+        action: JobAction,
+        physical_key: &str,
+        durable_job_id: Option<String>,
+    ) -> Result<PendingPrintReceipt, String> {
         let printer_id = config.id.clone();
         let queue = match self.queue_for(physical_key) {
             Ok(queue) => queue,
@@ -1207,42 +1318,17 @@ impl PrinterTransportState {
                 Err(error)
             }
         };
-        let outcome = match enqueue {
-            Ok(()) => result
-                .recv_timeout(COMPLETION_TIMEOUT)
-                .map_err(|_| "printer job completion timed out".to_owned())?,
-            Err(error) => Err(error),
-        };
-        match &outcome {
-            Ok(receipt) => {
-                emit_delivery_status(&app, &printer_id, "connected", Some(receipt));
-                log_printer(
-                    &app,
-                    "INFO",
-                    &format!(
-                        "Rust raw printer sent: id={} key={} bytes={} attempts={} reused={} delivery={}",
-                        printer_id,
-                        physical_key,
-                        receipt.bytes,
-                        receipt.attempts,
-                        receipt.reused_connection,
-                        receipt.delivery_state
-                    ),
-                );
-            }
-            Err(error) => {
-                emit_delivery_status(&app, &printer_id, "error", None);
-                log_printer(
-                    &app,
-                    "WARN",
-                    &format!(
-                        "Rust raw printer failed: id={} key={} error={}",
-                        printer_id, physical_key, error
-                    ),
-                );
-            }
+        if let Err(error) = enqueue {
+            log_completion(&app, &printer_id, physical_key, &Err(error.clone()));
+            return Err(error);
         }
-        outcome
+        Ok(PendingPrintReceipt {
+            result,
+            deadline: Instant::now() + COMPLETION_TIMEOUT,
+            app,
+            printer_id,
+            physical_key: physical_key.to_owned(),
+        })
     }
     fn queue_for(&self, key: &str) -> Result<Arc<DeviceQueue>, String> {
         let mut workers = self

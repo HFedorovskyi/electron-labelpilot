@@ -398,17 +398,36 @@ impl OperationalState {
         operator: Option<OperatorAttribution>,
         prepare_outbox: impl FnOnce(&Transaction<'_>, &RecordPackResult) -> Result<T, String>,
     ) -> Result<(RecordPackResult, T), String> {
+        self.record_pack_with_outbox_checked(None, payload, operator, prepare_outbox)?
+            .ok_or_else(|| "record-pack precondition unexpectedly changed".to_owned())
+    }
+
+    /// Recheck the render's counter snapshot under the same IMMEDIATE
+    /// transaction that records the pack and its exact delivery material.
+    /// None means no mutation occurred: discard stale preparation and retry.
+    pub(crate) fn record_pack_with_outbox_checked<T>(
+        &self,
+        expected_counters: Option<&Value>,
+        payload: RecordPackPayload,
+        operator: Option<OperatorAttribution>,
+        prepare_outbox: impl FnOnce(&Transaction<'_>, &RecordPackResult) -> Result<T, String>,
+    ) -> Result<Option<(RecordPackResult, T)>, String> {
         payload.validate()?;
         self.with_connection(|connection| {
             let transaction = connection
                 .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
                 .map_err(|error| format!("failed to begin record-pack transaction: {error}"))?;
+            if let Some(expected) = expected_counters {
+                if latest_counters(&transaction, Some(payload.nomenclature_id))? != *expected {
+                    return Ok(None);
+                }
+            }
             let result = record_pack_transaction(&transaction, payload, operator)?;
             let outbox = prepare_outbox(&transaction, &result)?;
             transaction
                 .commit()
                 .map_err(|error| format!("failed to commit record-pack transaction: {error}"))?;
-            Ok((result, outbox))
+            Ok(Some((result, outbox)))
         })
     }
 

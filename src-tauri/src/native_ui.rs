@@ -16,10 +16,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
+use std::sync::{Arc, Mutex};
 use std::time::UNIX_EPOCH;
 
 pub use crate::runtime_events::NativeRuntimeEvent as Event;
@@ -207,14 +204,7 @@ pub struct NativePrintJobsSnapshot {
     pub counters: NativeUiCounters,
 }
 
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NativeFixedBatchOutcome {
-    pub requested: i64,
-    pub completed: i64,
-    pub cancelled: bool,
-    pub last_print: Option<NativePrintOutcome>,
-}
+pub use crate::native_print::NativeFixedBatchOutcome;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -412,8 +402,41 @@ pub struct NativeUiRuntime {
     network_client: Option<reqwest::blocking::Client>,
     #[cfg(feature = "slint-ui")]
     production_printer: Option<NativePrintService>,
-    fixed_batch_active: Arc<AtomicBool>,
-    fixed_batch_cancel: Arc<AtomicBool>,
+    fixed_batch: Arc<Mutex<FixedBatchState>>,
+}
+
+#[derive(Default)]
+struct FixedBatchState {
+    active: bool,
+    cancelled: bool,
+}
+
+#[cfg(feature = "slint-ui")]
+struct FixedBatchLease(Arc<Mutex<FixedBatchState>>);
+
+#[cfg(feature = "slint-ui")]
+impl FixedBatchLease {
+    fn acquire(state: Arc<Mutex<FixedBatchState>>) -> Result<Self, String> {
+        {
+            let mut state = state.lock().map_err(|_| "состояние тиража повреждено")?;
+            if state.active {
+                return Err("пакетная печать уже выполняется".to_owned());
+            }
+            state.active = true;
+            state.cancelled = false;
+        }
+        Ok(Self(state))
+    }
+}
+
+#[cfg(feature = "slint-ui")]
+impl Drop for FixedBatchLease {
+    fn drop(&mut self) {
+        self.0
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .active = false;
+    }
 }
 
 impl NativeUiRuntime {
@@ -432,8 +455,7 @@ impl NativeUiRuntime {
             network_client: None,
             #[cfg(feature = "slint-ui")]
             production_printer: None,
-            fixed_batch_active: Arc::new(AtomicBool::new(false)),
-            fixed_batch_cancel: Arc::new(AtomicBool::new(false)),
+            fixed_batch: Arc::new(Mutex::new(FixedBatchState::default())),
         }
     }
 
@@ -486,8 +508,7 @@ impl NativeUiRuntime {
             network_client: Some(network_client),
             #[cfg(feature = "slint-ui")]
             production_printer: Some(production_printer),
-            fixed_batch_active: Arc::new(AtomicBool::new(false)),
-            fixed_batch_cancel: Arc::new(AtomicBool::new(false)),
+            fixed_batch: Arc::new(Mutex::new(FixedBatchState::default())),
         })
     }
 
@@ -714,8 +735,18 @@ impl NativeUiRuntime {
     }
 
     pub fn printer_summary(&self) -> Result<Value, String> {
-        serde_json::to_value(self.printer.summary())
-            .map_err(|error| format!("serialize printer summary: {error}"))
+        let summary = serde_json::to_value(self.printer.summary())
+            .map_err(|error| format!("serialize printer summary: {error}"))?;
+        #[cfg(feature = "slint-ui")]
+        let summary = {
+            let mut summary = summary;
+            if let Some(service) = &self.production_printer {
+                summary["nativePrint"] = serde_json::to_value(service.performance_summary())
+                    .map_err(|error| format!("serialize native print summary: {error}"))?;
+            }
+            summary
+        };
+        Ok(summary)
     }
 
     pub fn printer_queue_snapshot(
@@ -1395,73 +1426,57 @@ impl NativeUiRuntime {
         batch_number: String,
         production_date: String,
     ) -> Result<NativeFixedBatchOutcome, String> {
-        if !(1..=5_000).contains(&copies) {
-            return Err("количество этикеток должно быть от 1 до 5000".to_owned());
-        }
-        if self.fixed_batch_active.swap(true, Ordering::AcqRel) {
-            return Err("пакетная печать уже выполняется".to_owned());
-        }
-        self.fixed_batch_cancel.store(false, Ordering::Release);
+        // Start and cancel share one lock: cancellation is never erased by startup.
+        let lease = FixedBatchLease::acquire(Arc::clone(&self.fixed_batch))?;
         let outcome = (|| {
-            let product = self.production_product(product_id)?;
-            validate_fixed_weight_product(&product)?;
-            let nominal_weight_kg = product.fixed_weight_grams / 1_000.0;
-            let mut completed = 0_i64;
-            let mut last_print = None;
-            for index in 0..copies {
-                if self.fixed_batch_cancel.load(Ordering::Acquire) {
-                    break;
-                }
-                let printed = self.print_production_pack(
-                    product_id,
-                    nominal_weight_kg,
-                    batch_number.clone(),
-                    production_date.clone(),
-                )?;
-                completed += 1;
-                last_print = Some(printed);
-                self.events.emit(
-                    "fixed-batch-progress",
-                    json!({
-                        "productId": product_id,
-                        "completed": completed,
-                        "requested": copies,
-                        "remaining": copies - completed,
-                        "index": index,
-                    }),
-                );
-            }
-            let cancelled = completed < copies;
-            self.events.emit(
-                "fixed-batch-finished",
-                json!({
-                    "productId": product_id,
-                    "completed": completed,
-                    "requested": copies,
-                    "cancelled": cancelled,
-                }),
-            );
-            Ok(NativeFixedBatchOutcome {
-                requested: copies,
-                completed,
-                cancelled,
-                last_print,
-            })
+            self.production_printer()?.print_fixed_weight_batch(
+                self.persisted()?,
+                self.operational()?,
+                self.session()?,
+                &self.printer,
+                &self.events,
+                product_id,
+                copies,
+                batch_number,
+                production_date,
+                &|| {
+                    self.fixed_batch
+                        .lock()
+                        .unwrap_or_else(|error| error.into_inner())
+                        .cancelled
+                },
+            )
         })();
-        self.fixed_batch_active.store(false, Ordering::Release);
+        let terminal = match &outcome {
+            Ok(result) => json!({"productId":product_id,"completed":result.completed,
+                "committed":result.committed,"requested":result.requested,"cancelled":result.cancelled,
+                "failure":result.failure,"stats":result.stats}),
+            Err(error) => json!({"productId":product_id,"completed":0,"committed":0,
+                "requested":copies,"cancelled":false,"failure":{"stage":"preflight","message":error,"jobId":null}}),
+        };
+        // Emit once for the acquired batch, including preflight errors. A rejected
+        // concurrent start never emits a finish event for the active batch.
+        self.events.emit("fixed-batch-finished", terminal);
+        drop(lease);
         outcome
     }
 
     pub fn cancel_fixed_weight_batch(&self) -> bool {
-        let active = self.fixed_batch_active.load(Ordering::Acquire);
-        if active {
-            self.fixed_batch_cancel.store(true, Ordering::Release);
+        let mut state = self
+            .fixed_batch
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if state.active {
+            state.cancelled = true;
         }
-        active
+        state.active
     }
 
     pub fn fixed_weight_batch_active(&self) -> bool {
-        self.fixed_batch_active.load(Ordering::Acquire)
+        self.fixed_batch
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .active
     }
 
     #[cfg(feature = "slint-ui")]

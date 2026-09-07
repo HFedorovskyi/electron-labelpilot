@@ -5104,34 +5104,18 @@ pub fn run() -> Result<(), String> {
                             Ok(result) => {
                                 ui.set_fixed_progress(clamp_i32(result.completed));
                                 ui.set_fixed_progress_total(clamp_i32(result.requested));
-                                ui.set_fixed_status(
-                                    if result.cancelled {
-                                        format!(
-                                            "Партия остановлена · напечатано {} из {}",
-                                            result.completed, result.requested
-                                        )
-                                    } else {
-                                        format!(
-                                            "Партия завершена · напечатано {} этикеток",
-                                            result.completed
-                                        )
-                                    }
-                                    .into(),
-                                );
-                                let message = if result.cancelled {
-                                    "Пакетная печать остановлена"
-                                } else {
-                                    "Пакетная печать завершена"
-                                };
-                                let message = result.last_print.as_ref()
-                                    .map(|last| last.success_message(message))
-                                    .unwrap_or_else(|| message.to_owned());
+                                let message = result.status_message();
+                                ui.set_fixed_status(message.clone().into());
+                                if result.failure.as_ref().is_some_and(|failure| failure.stage == "transport") {
+                                    ui.set_printer_ready(false);
+                                }
+                                if result.failure.is_some() { show_alert(&ui, &message); }
                                 if let Some(last) = result.last_print {
                                     ui.set_last_print(
                                         format!("#{} · {}", last.number, chrono_like_time()).into(),
                                     );
                                 }
-                                show_toast(&ui, &message);
+                                if result.failure.is_none() { show_toast(&ui, &message); }
                             }
                             Err(error) => {
                                 ui.set_fixed_status("Ошибка пакетной печати".into());

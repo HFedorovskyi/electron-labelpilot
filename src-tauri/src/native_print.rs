@@ -14,6 +14,19 @@ use std::sync::{Arc, Mutex, OnceLock};
 use time::{Date, Duration, Month, OffsetDateTime};
 use uuid::Uuid;
 
+mod batch;
+mod metrics;
+mod pack;
+#[cfg(test)]
+mod pipeline_tests;
+
+pub use batch::{NativeBatchFailure, NativeBatchStats, NativeFixedBatchOutcome};
+use metrics::{elapsed_us, PrintMetrics};
+pub use metrics::{PrintPerformanceSummary, PrintStageTimings};
+use pack::PackSnapshot;
+use std::sync::{MutexGuard, TryLockError};
+use std::time::Instant;
+
 const LAST_PRINT_FILE: &str = "native-last-print.json";
 
 #[derive(Clone, Debug)]
@@ -63,6 +76,8 @@ pub struct NativePrintService {
     last_print: Arc<Mutex<Option<StoredPrint>>>,
     last_print_path: PathBuf,
     station_number_cache: Arc<OnceLock<String>>,
+    operation_gate: Arc<Mutex<()>>,
+    metrics: Arc<PrintMetrics>,
 }
 
 impl NativePrintService {
@@ -76,6 +91,8 @@ impl NativePrintService {
             last_print: Arc::new(Mutex::new(last_print)),
             last_print_path,
             station_number_cache: Arc::new(OnceLock::new()),
+            operation_gate: Arc::new(Mutex::new(())),
+            metrics: Arc::new(PrintMetrics::default()),
         }
     }
 
@@ -149,6 +166,21 @@ impl NativePrintService {
         )
     }
 
+    fn lock_production(&self) -> Result<MutexGuard<'_, ()>, String> {
+        self.operation_gate.try_lock().map_err(|error| match error {
+            TryLockError::WouldBlock => {
+                "другая операция печати или учёта уже выполняется".to_owned()
+            }
+            TryLockError::Poisoned(_) => {
+                "состояние операции печати повреждено; перезапустите приложение".to_owned()
+            }
+        })
+    }
+
+    pub fn performance_summary(&self) -> PrintPerformanceSummary {
+        self.metrics.summary()
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn record_and_print_pack(
         &self,
@@ -159,204 +191,28 @@ impl NativePrintService {
         events: &RuntimeEventSink,
         request: PackPrintRequest,
     ) -> Result<NativePrintOutcome, String> {
-        if request.product_id <= 0 {
-            return Err("выберите товар перед печатью".to_owned());
-        }
-        if !request.gross_weight_kg.is_finite() || request.gross_weight_kg <= 0.0 {
-            return Err("вес брутто должен быть больше нуля".to_owned());
-        }
-        let product = self.product(operational, request.product_id)?;
-        let label_id = integer(product.get("templates_pack_label"))
-            .filter(|id| *id > 0)
-            .ok_or_else(|| "для товара не назначен шаблон упаковки".to_owned())?;
-        let doc = self.label_document(operational, label_id)?;
-        let config = role_config(persisted, "packPrinter")?;
-        ensure_active_printer(&config, "упаковки")?;
-        let counters = operational.latest_counters(Some(request.product_id))?;
-        let station_number = self.cached_station_number(persisted, operational)?;
-        let numbering = persisted.load_numbering_config();
-        let pack_number = formatted_counter(
-            integer(counters.get("totalUnits")).unwrap_or(0) + 1,
-            &station_number,
-            &doc,
-            "pack_number",
-            &numbering,
-            "unit",
-        );
-        let predicted_box = string(counters.get("currentBoxNumber"))
-            .map(str::to_owned)
-            .unwrap_or_else(|| {
-                formatted_counter(
-                    integer(counters.get("totalBoxes")).unwrap_or(0) + 1,
-                    &station_number,
-                    &doc,
-                    "box_number",
-                    &numbering,
-                    "box",
-                )
-            });
-        let production = parse_date(&request.production_date)?;
-        let expiration = production + Duration::days(integer(product.get("exp_date")).unwrap_or(0));
-        let portion_tare = number(product.get("portion_weight")).unwrap_or(0.0) / 1_000.0;
-        let pack_net = (request.gross_weight_kg - portion_tare).max(0.0);
-        let current_box_net = number(counters.get("boxNetWeight")).unwrap_or(0.0);
-        let box_tare = self.product_box_tare_kg(operational, &product)?;
-        let predicted_units_in_box = integer(counters.get("unitsInBox")).unwrap_or(0) + 1;
-        let predicted_boxes_in_pallet = next_boxes_in_pallet(&counters);
-        let current_operator = session.current();
-        let mut data = build_label_data(LabelDataContext {
-            product: &product,
-            station_number: &station_number,
-            operator_name: current_operator
-                .as_ref()
-                .map(|operator| operator.full_name.as_str())
-                .unwrap_or_default(),
-            operator_code: current_operator
-                .as_ref()
-                .map(|operator| operator.short_code.as_str())
-                .unwrap_or_default(),
-            production,
-            expiration,
-            batch_number: request.batch_number.trim(),
-            pack_number: &pack_number,
-            box_number: &predicted_box,
-            pack_net,
-            pack_gross: request.gross_weight_kg,
-            box_net: current_box_net + pack_net,
-            box_gross: current_box_net + pack_net + box_tare,
-            units_in_box: predicted_units_in_box,
-            boxes_in_pallet: predicted_boxes_in_pallet,
-        })?;
-        let barcode_fields = barcode_fields_for_doc(operational, &doc)?;
-        let preliminary_barcode = resolve_barcode(&barcode_fields, &data, &product);
-        data.insert(
-            "barcode".to_owned(),
-            Value::String(preliminary_barcode.clone()),
-        );
-
-        // Render before the DB mutation. Invalid templates and unsupported routes never create a pack row.
-        let rendered = self.prepare(config.clone(), doc.clone(), Value::Object(data.clone()))?;
-        let mut prepared = self.prepare_delivery(printer, rendered, "")?;
-        let (result, (stored, job_id)) = operational.record_pack_with_outbox(
-            RecordPackPayload {
-                number: pack_number.clone(),
-                box_number: predicted_box.clone(),
-                nomenclature_id: request.product_id,
-                weight_netto: pack_net,
-                weight_brutto: request.gross_weight_kg,
-                barcode_value: preliminary_barcode,
-                station_number: Some(station_number),
-                production_date: Some(iso_date(production)),
-                expiration_date: Some(iso_date(expiration)),
-                batch: Some(request.batch_number.trim().to_owned()),
-                barcode_spec: (!barcode_fields.is_empty()).then_some(BarcodeSpec {
-                    fields: barcode_fields.clone(),
-                    data: data.clone(),
-                }),
-            },
-            session.attribution(),
-            |transaction, result| {
-                let actual_barcode = if result.barcode_value.is_empty() {
-                    resolve_barcode(&barcode_fields, &data, &product)
-                } else {
-                    result.barcode_value.clone()
-                };
-                if result.box_number != predicted_box
-                    || actual_barcode != data.get("barcode").map(value_string).unwrap_or_default()
-                {
-                    data.insert(
-                        "box_number".to_owned(),
-                        Value::String(result.box_number.clone()),
-                    );
-                    data.insert("barcode".to_owned(), Value::String(actual_barcode));
-                    let rendered = self.prepare(config.clone(), doc.clone(), Value::Object(data.clone()))?;
-                    prepared = self.prepare_delivery(printer, rendered, "")?;
-                }
-                let job_id = prepared
-                    .with_idempotency_key(&format!("native-pack:{}", result.pack_id))?
-                    .persist(transaction)?;
-                let stored = StoredPrint {
-                    config,
-                    doc,
-                    data: Value::Object(data),
-                    number: pack_number.clone(),
-                    kind: "pack".to_owned(),
-                    pack_id: Some(result.pack_id),
-                };
-                Ok((stored, job_id))
-            },
-        )?;
-        let send_result = printer
-            .submit_committed_with_sink(events.clone(), &job_id)
-            .map_err(|error| {
-                operational.record_print_error(
-                    &format!("pack {} transport: {error}", result.pack_id),
-                    "ERROR",
-                );
-                error
-            });
-        let receipt = match send_result {
-            Ok(receipt) => receipt,
-            Err(error) => {
-                // The pack row is committed regardless of delivery, so the box
-                // limit accounting must not stall until the printer returns.
-                let after_pack = operational.latest_counters(Some(request.product_id))?;
-                let limit = integer(product.get("close_box_counter")).unwrap_or(0);
-                if limit > 0 && integer(after_pack.get("unitsInBox")).unwrap_or(0) >= limit {
-                    if let Err(close_error) = self.close_box_internal(
-                        persisted,
-                        operational,
-                        session,
-                        printer,
-                        events,
-                        &product,
-                        &request.batch_number,
-                        production,
-                    ) {
-                        operational.record_print_error(
-                            &format!("pack {} box auto-close: {close_error}", result.pack_id),
-                            "ERROR",
-                        );
-                    }
-                }
-                return Err(error);
-            }
-        };
-        let mut warnings = Vec::new();
-        self.remember_accepted(stored, operational, events, &mut warnings);
-
-        // Follow-up bookkeeping must not turn an accepted package into a failed print.
-        let auto_close = (|| -> Result<bool, String> {
-            let after_pack = operational.latest_counters(Some(request.product_id))?;
-            let limit = integer(product.get("close_box_counter")).unwrap_or(0);
-            if limit > 0 && integer(after_pack.get("unitsInBox")).unwrap_or(0) >= limit {
-                let closed = self.close_box_internal(
-                    persisted, operational, session, printer, events,
-                    &product, &request.batch_number, production,
-                )?;
-                warnings.extend(closed.warnings);
-                Ok(true)
-            } else {
-                Ok(false)
-            }
-        })();
-        let auto_closed_box = match auto_close {
-            Ok(closed) => closed,
-            Err(error) => {
-                Self::record_warning(operational, events, &mut warnings,
-                    format!("Упаковка {} принята принтером; проверьте закрытие короба: {error}", result.pack_id));
-                false
-            }
-        };
-        Ok(NativePrintOutcome {
-            kind: "pack".to_owned(),
-            number: pack_number,
-            box_number: Some(result.box_number),
-            pack_id: Some(result.pack_id),
-            auto_closed_box,
-            receipt: Some(receipt),
-            warnings,
-        })
+        let _operation = self.lock_production()?;
+        let started = Instant::now();
+        let snapshot = self.capture_pack_snapshot(persisted, operational, session, request)?;
+        let counters = operational.latest_counters(Some(snapshot.request.product_id))?;
+        let mut prepared = self.prepare_pack(&snapshot, printer, counters)?;
+        prepared.started = started;
+        prepared.timings.snapshot_us = snapshot.snapshot_us;
+        let mut committed = self
+            .commit_pack(&snapshot, operational, printer, prepared, &|| false)?
+            .ok_or("операция печати отменена")?;
+        let pending = self.dispatch_pack(printer, events, &mut committed);
+        self.finish_pack(
+            persisted,
+            operational,
+            session,
+            printer,
+            events,
+            &snapshot,
+            committed,
+            pending,
+        )
+        .map(|finished| finished.outcome)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -371,6 +227,7 @@ impl NativePrintService {
         batch_number: &str,
         production_date: &str,
     ) -> Result<NativePrintOutcome, String> {
+        let _operation = self.lock_production()?;
         let product = self.product(operational, product_id)?;
         let production = parse_date(production_date)?;
         self.close_box_internal(
@@ -382,6 +239,7 @@ impl NativePrintService {
             &product,
             batch_number,
             production,
+            None,
         )
     }
 
@@ -396,6 +254,7 @@ impl NativePrintService {
         product: &Value,
         batch_number: &str,
         production: Date,
+        snapshot: Option<&PackSnapshot>,
     ) -> Result<NativePrintOutcome, String> {
         let product_id = integer(product.get("id")).ok_or("product row has no id")?;
         let counters = operational.latest_counters(Some(product_id))?;
@@ -409,17 +268,29 @@ impl NativePrintService {
             .unwrap_or("0")
             .to_owned();
         let box_net = number(counters.get("boxNetWeight")).unwrap_or(0.0);
-        let box_tare = self.product_box_tare_kg(operational, product)?;
+        let box_tare = match snapshot {
+            Some(snapshot) => snapshot.box_tare,
+            None => self.product_box_tare_kg(operational, product)?,
+        };
         let box_gross = box_net + box_tare;
         let expiration = production + Duration::days(integer(product.get("exp_date")).unwrap_or(0));
 
-        let print_input = match integer(product.get("templates_box_label")).filter(|id| *id > 0) {
-            Some(label_id) => {
-                let doc = self.label_document(operational, label_id)?;
-                let config = role_config(persisted, "boxPrinter")?;
-                ensure_active_printer(&config, "короба")?;
-                let station = self.cached_station_number(persisted, operational)?;
-                let current_operator = session.current();
+        let assets = match snapshot {
+            Some(snapshot) => snapshot.box_assets.clone()?,
+            None => self.capture_box_assets(persisted, operational, product)?,
+        };
+        let print_input = match assets {
+            Some(assets) => {
+                let doc = assets.doc;
+                let config = assets.config;
+                let station = match snapshot {
+                    Some(snapshot) => snapshot.station_number.clone(),
+                    None => self.cached_station_number(persisted, operational)?,
+                };
+                let current_operator = match snapshot {
+                    Some(snapshot) => snapshot.operator.clone(),
+                    None => session.current(),
+                };
                 let mut data = build_label_data(LabelDataContext {
                     product,
                     station_number: &station,
@@ -443,7 +314,7 @@ impl NativePrintService {
                     units_in_box: units,
                     boxes_in_pallet: integer(counters.get("boxesInPallet")).unwrap_or(0),
                 })?;
-                let fields = barcode_fields_for_doc(operational, &doc)?;
+                let fields = assets.barcode_fields;
                 let barcode = resolve_barcode(&fields, &data, product);
                 data.insert("barcode".to_owned(), Value::String(barcode));
                 data.insert("is_box".to_owned(), Value::Bool(true));
@@ -453,24 +324,40 @@ impl NativePrintService {
                 );
                 let data = Value::Object(data);
                 let rendered = self.prepare(config.clone(), doc.clone(), data.clone())?;
-                let prepared = self.prepare_delivery(printer, rendered, &format!("native-box:{box_id}"))?;
+                let prepared =
+                    self.prepare_delivery(printer, rendered, &format!("native-box:{box_id}"))?;
                 Some((config, doc, data, prepared))
             }
             None => None,
         };
 
-        let committed = operational.close_box_with_outbox(
-            CloseBoxPayload { box_id, weight_netto: box_net, weight_brutto: box_gross },
-            |transaction| {
-                print_input.map(|(config, doc, data, prepared)| {
-                    let job_id = prepared.persist(transaction)?;
-                    Ok((StoredPrint {
-                        config, doc, data, number: box_number.clone(),
-                        kind: "box".to_owned(), pack_id: None,
-                    }, job_id))
-                }).transpose()
-            },
-        )?.ok_or_else(|| format!("короб {box_number} уже закрыт или удалён"))?;
+        let committed = operational
+            .close_box_with_outbox(
+                CloseBoxPayload {
+                    box_id,
+                    weight_netto: box_net,
+                    weight_brutto: box_gross,
+                },
+                |transaction| {
+                    print_input
+                        .map(|(config, doc, data, prepared)| {
+                            let job_id = prepared.persist(transaction)?;
+                            Ok((
+                                StoredPrint {
+                                    config,
+                                    doc,
+                                    data,
+                                    number: box_number.clone(),
+                                    kind: "box".to_owned(),
+                                    pack_id: None,
+                                },
+                                job_id,
+                            ))
+                        })
+                        .transpose()
+                },
+            )?
+            .ok_or_else(|| format!("короб {box_number} уже закрыт или удалён"))?;
         let mut warnings = Vec::new();
         let receipt = if let Some((stored, job_id)) = committed {
             let receipt = printer.submit_committed_with_sink(events.clone(), &job_id)?;
@@ -500,6 +387,7 @@ impl NativePrintService {
         events: &RuntimeEventSink,
         selected_product_id: Option<i64>,
     ) -> Result<NativePrintOutcome, String> {
+        let _operation = self.lock_production()?;
         let operator_name = session
             .current()
             .map(|operator| operator.full_name)
@@ -552,14 +440,19 @@ impl NativePrintService {
             ),
         }
         let mut warnings = Vec::new();
-        self.remember_accepted(StoredPrint {
-            config,
-            doc,
-            data,
-            number: pallet_number.clone(),
-            kind: "pallet".to_owned(),
-            pack_id: None,
-        }, operational, events, &mut warnings);
+        self.remember_accepted(
+            StoredPrint {
+                config,
+                doc,
+                data,
+                number: pallet_number.clone(),
+                kind: "pallet".to_owned(),
+                pack_id: None,
+            },
+            operational,
+            events,
+            &mut warnings,
+        );
         Ok(NativePrintOutcome {
             kind: "pallet".to_owned(),
             number: pallet_number,
@@ -575,6 +468,7 @@ impl NativePrintService {
         printer: &PrinterTransportState,
         events: &RuntimeEventSink,
     ) -> Result<NativePrintOutcome, String> {
+        let _operation = self.lock_production()?;
         let stored = self
             .last_print
             .lock()
@@ -608,6 +502,7 @@ impl NativePrintService {
         operational: &OperationalState,
         product_id: i64,
     ) -> Result<i64, String> {
+        let _operation = self.lock_production()?;
         let pack_id = operational
             .latest_active_pack_id(product_id)?
             .ok_or_else(|| "в текущем коробе нет упаковок для удаления".to_owned())?;
@@ -773,9 +668,7 @@ impl NativePrintService {
             .unwrap_or_default()
             .to_ascii_lowercase();
         match prepared.material {
-            PreparedMaterial::Raw(bytes) => {
-                printer.prepare_generated(prepared.config, bytes)
-            }
+            PreparedMaterial::Raw(bytes) => printer.prepare_generated(prepared.config, bytes),
             PreparedMaterial::Raster(bitmap)
                 if connection == "windows_driver" && prepared.page_sheet =>
             {
@@ -837,22 +730,28 @@ impl NativePrintService {
         warnings: &mut Vec<String>,
     ) {
         if let Err(error) = self.remember(stored) {
-            Self::record_warning(operational, events, warnings, format!(
-                "Этикетка принята принтером; сохранение для повтора после перезапуска: {error}"
-            ));
+            Self::record_warning(
+                operational,
+                events,
+                warnings,
+                format!(
+                    "Этикетка принята принтером; сохранение для повтора после перезапуска: {error}"
+                ),
+            );
         }
     }
 
     fn remember(&self, stored: StoredPrint) -> Result<(), String> {
         // Serialize writers, and preserve the accepted label for repeat even when disk IO fails.
-        let mut last_print = self.last_print.lock()
+        let mut last_print = self
+            .last_print
+            .lock()
             .map_err(|_| "last print lock is poisoned".to_owned())?;
         *last_print = Some(stored);
         let bytes = serde_json::to_vec(last_print.as_ref().unwrap())
             .map_err(|error| format!("encode last print: {error}"))?;
         crate::persisted::atomic_write_bytes(&self.last_print_path, &bytes)
     }
-
 }
 
 enum PreparedMaterial {
@@ -1702,3 +1601,6 @@ mod tests {
         assert_eq!(accepted, 5);
     }
 }
+
+#[cfg(test)]
+mod performance_tests;

@@ -23,10 +23,7 @@ assert.match(prepareBody, /if raster_only_protocol\(&protocol\)/);
 assert.match(nativePrint, /fn raster_only_protocol\([\s\S]*?"image" \| "browser" \| "epl" \| "cpcl" \| "dpl" \| "sbpl"/);
 assert.match(prepareBody, /record_renderer_fallback\(bitmap\.mono\.len\(\)\)/);
 
-const packBody = nativePrint.slice(
-  nativePrint.indexOf('    pub fn record_and_print_pack('),
-  nativePrint.indexOf('    pub fn close_box(', nativePrint.indexOf('    pub fn record_and_print_pack(')),
-);
+const packBody = read('src-tauri/src/native_print/pack.rs');
 assert.match(packBody, /let numbering = persisted\.load_numbering_config\(\);/);
 assert.equal((packBody.match(/load_numbering_config\(\)/g) || []).length, 1);
 assert.match(packBody, /product_box_tare_kg\(operational, &product\)/);
@@ -100,7 +97,8 @@ console.log('Print performance/functionality: single-pass generation, cached set
 const durable = read('src-tauri/src/printer/durable.rs');
 assert.match(packBody, /record_pack_with_outbox/);
 assert.match(packBody, /with_idempotency_key[\s\S]*?persist\(transaction\)/);
-assert.match(packBody, /submit_committed_with_sink/);
+assert.match(packBody, /enqueue_committed_with_sink/);
+assert.match(packBody, /pending\.and_then\(PendingPrintReceipt::wait\)/);
 assert.doesNotMatch(packBody, /self\.remember\(stored\)\?/);
 assert.match(nativePrint, /close_box_with_outbox/);
 assert.match(nativePrint, /fn remember_accepted/);
