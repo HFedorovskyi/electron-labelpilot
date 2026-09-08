@@ -1,12 +1,11 @@
 use crate::generator::GenerationPayload;
-use ab_glyph::{point, Font, FontArc, Glyph, PxScale, ScaleFont};
+use ab_glyph::{point, Font, Glyph, GlyphId, PxScale, ScaleFont};
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
 use image::{DynamicImage, GenericImageView, ImageReader, Limits, Rgba};
 use rxing::{BarcodeFormat, EncodeHints, MultiFormatWriter, Writer};
 use serde_json::{Map, Value};
 use std::io::Cursor;
-use std::sync::OnceLock;
 use std::time::Instant;
 
 const MAX_BITMAP_PIXELS: usize = 9_000_000;
@@ -28,69 +27,9 @@ pub struct RasterizedLabel {
     pub render_micros: u64,
 }
 
-struct FontCatalog {
-    inter_regular: FontArc,
-    inter_bold: FontArc,
-    montserrat: FontArc,
-    roboto: FontArc,
-    ubuntu_regular: FontArc,
-    ubuntu_bold: FontArc,
-}
-
-fn fonts() -> &'static FontCatalog {
-    static FONTS: OnceLock<FontCatalog> = OnceLock::new();
-    FONTS.get_or_init(|| FontCatalog {
-        inter_regular: FontArc::try_from_slice(include_bytes!(
-            "../../resources/fonts/Inter-Regular.ttf"
-        ))
-        .expect("embedded Inter Regular"),
-        inter_bold: FontArc::try_from_slice(include_bytes!("../../resources/fonts/Inter-Bold.ttf"))
-            .expect("embedded Inter Bold"),
-        montserrat: FontArc::try_from_slice(include_bytes!(
-            "../../resources/fonts/Montserrat-Variable.ttf"
-        ))
-        .expect("embedded Montserrat"),
-        roboto: FontArc::try_from_slice(include_bytes!(
-            "../../resources/fonts/Roboto-Variable.ttf"
-        ))
-        .expect("embedded Roboto"),
-        ubuntu_regular: FontArc::try_from_slice(include_bytes!(
-            "../../resources/fonts/Ubuntu-Regular.ttf"
-        ))
-        .expect("embedded Ubuntu Regular"),
-        ubuntu_bold: FontArc::try_from_slice(include_bytes!(
-            "../../resources/fonts/Ubuntu-Bold.ttf"
-        ))
-        .expect("embedded Ubuntu Bold"),
-    })
-}
-
-pub(crate) fn warmup_static_assets() -> usize {
-    let catalog = fonts();
-    // Touch every embedded family once so the first Unicode label avoids
-    // parsing several font tables on the production print path.
-    [
-        &catalog.inter_regular,
-        &catalog.inter_bold,
-        &catalog.montserrat,
-        &catalog.roboto,
-        &catalog.ubuntu_regular,
-        &catalog.ubuntu_bold,
-    ]
-    .len()
-}
-
-fn font_for(family: &str, bold: bool) -> &'static FontArc {
-    let catalog = fonts();
-    match family.trim().to_ascii_lowercase().as_str() {
-        "montserrat" => &catalog.montserrat,
-        "roboto" => &catalog.roboto,
-        "ubuntu" if bold => &catalog.ubuntu_bold,
-        "ubuntu" => &catalog.ubuntu_regular,
-        _ if bold => &catalog.inter_bold,
-        _ => &catalog.inter_regular,
-    }
-}
+mod font;
+pub(crate) use font::warmup_static_assets;
+use font::{css_px_scale, font_for, RasterFont};
 
 #[derive(Clone, Copy)]
 struct Geometry {
@@ -233,6 +172,97 @@ fn geometry(config: &Map<String, Value>, doc: &Map<String, Value>) -> Result<Geo
     })
 }
 
+struct TextLayout {
+    font: &'static RasterFont,
+    font_size: f32,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    line_height: f32,
+    start_y: f32,
+    lines: Vec<String>,
+}
+
+/// Wrap in authored CSS pixels, before applying printer DPI. Rounding a box
+/// in output dots must not change the line breaks at 203/300/600 DPI.
+fn text_layout(element: &Map<String, Value>, data: &Map<String, Value>) -> TextLayout {
+    let x = finite(element.get("x")).unwrap_or(0.0) as f32;
+    let y = finite(element.get("y")).unwrap_or(0.0) as f32;
+    let width = (finite(element.get("w")).unwrap_or(1.0) as f32).max(1.0);
+    let height = (finite(element.get("h")).unwrap_or(1.0) as f32).max(1.0);
+    let font_size = (finite(element.get("fontSize")).unwrap_or(12.0) as f32).max(1.0);
+    let weight = finite(element.get("fontWeight")).unwrap_or_else(|| {
+        if string(element.get("fontWeight")).is_some_and(|value| value.eq_ignore_ascii_case("bold"))
+        {
+            700.0
+        } else {
+            400.0
+        }
+    });
+    let font = font_for(
+        string(element.get("fontFamily")).unwrap_or("Inter"),
+        weight >= 600.0,
+    );
+    let text = interpolate(string(element.get("text")).unwrap_or_default(), data);
+    let lines = wrap_text(font, css_px_scale(font, font_size), &text, width);
+    let line_height = font_size * 1.2;
+    let block_height = lines.len() as f32 * line_height;
+    let start_y = match string(element.get("verticalAlign")).unwrap_or("middle") {
+        "top" => y,
+        "bottom" => y + height - block_height,
+        _ => y + (height - block_height) / 2.0,
+    };
+    TextLayout {
+        font,
+        font_size,
+        x,
+        y,
+        width,
+        height,
+        line_height,
+        start_y,
+        lines,
+    }
+}
+
+#[derive(Clone, Copy)]
+struct TextTransform {
+    turns: u8,
+    source_center: (f32, f32),
+    target_center: (f32, f32),
+}
+
+impl TextTransform {
+    const IDENTITY: Self = Self {
+        turns: 0,
+        source_center: (0.0, 0.0),
+        target_center: (0.0, 0.0),
+    };
+
+    fn point(self, x: f32, y: f32) -> (f32, f32) {
+        if self.turns == 0 {
+            return (x, y);
+        }
+        let dx = x - self.source_center.0;
+        let dy = y - self.source_center.1;
+        let (dx, dy) = match self.turns {
+            1 => (-dy, dx),
+            2 => (-dx, -dy),
+            _ => (dy, -dx),
+        };
+        (self.target_center.0 + dx, self.target_center.1 + dy)
+    }
+
+    fn pixel(self, x: i32, y: i32) -> (i32, i32) {
+        if self.turns == 0 {
+            return (x, y);
+        }
+        let (x, y) = self.point(x as f32 + 0.5, y as f32 + 0.5);
+        ((x - 0.5).round() as i32, (y - 0.5).round() as i32)
+    }
+}
+
 fn draw_text(
     mono: &mut [u8],
     stride: usize,
@@ -240,139 +270,87 @@ fn draw_text(
     element: &Map<String, Value>,
     data: &Map<String, Value>,
 ) -> Result<(), String> {
-    let x = scaled(element, "x", geometry.scale_x).round() as i32;
-    let y = scaled(element, "y", geometry.scale_y).round() as i32;
-    let width = scaled(element, "w", geometry.scale_x).round().max(1.0) as i32;
-    let height = scaled(element, "h", geometry.scale_y).round().max(1.0) as i32;
-    // The label contract rotates elements around their center; quarter turns
-    // are rasterized, other angles keep the unrotated layout.
-    if let Ok(turns) = quarter_turns(finite(element.get("rotation")).unwrap_or(0.0)) {
-        if turns != 0 {
-            return draw_text_rotated(
-                mono, stride, geometry, element, data, turns, x, y, width, height,
-            );
-        }
-    }
-    let font_size =
-        (finite(element.get("fontSize")).unwrap_or(12.0) as f32 * geometry.scale_y).max(1.0);
-    let weight = finite(element.get("fontWeight")).unwrap_or_else(|| {
-        string(element.get("fontWeight")).map_or(400.0, |value| {
-            if value.eq_ignore_ascii_case("bold") {
-                700.0
-            } else {
-                400.0
-            }
-        })
-    });
-    let font = font_for(
-        string(element.get("fontFamily")).unwrap_or("Inter"),
-        weight >= 600.0,
-    );
-    let scale = PxScale::from(font_size);
-    let text = interpolate(string(element.get("text")).unwrap_or_default(), data);
-    let lines = wrap_text(font, scale, &text, width as f32);
-    let line_height = font_size * 1.2;
-    let block_height = lines.len() as f32 * line_height;
-    let start_y = match string(element.get("verticalAlign")).unwrap_or("middle") {
-        "top" => y as f32,
-        "bottom" => y as f32 + height as f32 - block_height,
-        _ => y as f32 + (height as f32 - block_height) / 2.0,
+    let layout = text_layout(element, data);
+    // Preserve the established quarter-turn contract. Other angles retain the
+    // unrotated layout. Transform pixels after rasterizing; no box-sized
+    // temporary bitmap is needed, and overflowing text stays visible.
+    let turns = quarter_turns(finite(element.get("rotation")).unwrap_or(0.0)).unwrap_or(0);
+    let (scale_x, scale_y) = if matches!(turns, 1 | 3) {
+        (geometry.scale_y, geometry.scale_x)
+    } else {
+        (geometry.scale_x, geometry.scale_y)
     };
-    let align = string(element.get("textAlign")).unwrap_or("left");
-    let clip = (
-        x.max(0),
-        y.max(0),
-        (x + width).min(geometry.width_dots as i32),
-        (y + height).min(geometry.height_dots as i32),
+    let center = (
+        layout.x + layout.width / 2.0,
+        layout.y + layout.height / 2.0,
     );
-    for (line_index, line) in lines.iter().enumerate() {
-        let measured = measure_text(font, scale, line);
-        let line_x = match align {
-            "center" => x as f32 + (width as f32 - measured) / 2.0,
-            "right" => x as f32 + width as f32 - measured,
-            _ => x as f32,
-        };
-        let line_y = start_y + line_index as f32 * line_height;
-        draw_glyph_line(
-            mono, stride, geometry, clip, font, scale, line, line_x, line_y,
+    let transform = TextTransform {
+        turns,
+        source_center: (center.0 * scale_x, center.1 * scale_y),
+        target_center: (center.0 * geometry.scale_x, center.1 * geometry.scale_y),
+    };
+    let source_scale = css_px_scale(layout.font, layout.font_size);
+    let scale = PxScale {
+        x: source_scale.x * scale_x,
+        y: source_scale.y * scale_y,
+    };
+    // CSS line boxes distribute leading equally above ascent and below
+    // descent, even when the authored line-height is smaller than the font.
+    let leading = (layout.line_height - source_scale.y) / 2.0;
+    let align = string(element.get("textAlign")).unwrap_or("left");
+    // The designer uses overflow:visible on text; only the label clips ink.
+    let clip = (
+        0,
+        0,
+        geometry.width_dots as i32,
+        geometry.height_dots as i32,
+    );
+    for (index, line) in layout.lines.iter().enumerate() {
+        let measured = measure_text(layout.font, source_scale, line);
+        let line_x = layout.x
+            + match align {
+                "center" => (layout.width - measured) / 2.0,
+                "right" => layout.width - measured,
+                _ => 0.0,
+            };
+        let line_y = layout.start_y + index as f32 * layout.line_height;
+        draw_glyph_line_transformed(
+            mono,
+            stride,
+            geometry,
+            clip,
+            layout.font,
+            scale,
+            line,
+            line_x * scale_x,
+            (line_y + leading) * scale_y,
+            transform,
         );
         if string(element.get("textDecoration"))
             .unwrap_or_default()
             .contains("underline")
         {
+            let x = line_x * scale_x;
+            let y = (line_y + layout.font_size + 1.0) * scale_y;
+            let (left, top) = transform.point(x, y);
+            let (right, bottom) = transform.point(x + measured * scale_x, y + scale_y.max(1.0));
             fill_rect(
                 mono,
                 stride,
                 geometry,
-                line_x.round() as i32,
-                (line_y + font_size + geometry.scale_y).round() as i32,
-                measured.round() as i32,
-                geometry.scale_y.round().max(1.0) as i32,
+                left.min(right).round() as i32,
+                top.min(bottom).round() as i32,
+                (right - left).abs().round().max(1.0) as i32,
+                (bottom - top).abs().round().max(1.0) as i32,
             );
         }
     }
     Ok(())
 }
 
-/// Renders the unrotated text block into a local bitmap, then rotates it
-/// around the element center (label contract semantics, same quarter-turn
-/// placement as barcodes and images).
-#[allow(clippy::too_many_arguments)]
-fn draw_text_rotated(
-    mono: &mut [u8],
-    stride: usize,
-    geometry: Geometry,
-    element: &Map<String, Value>,
-    data: &Map<String, Value>,
-    turns: u8,
-    x: i32,
-    y: i32,
-    width: i32,
-    height: i32,
-) -> Result<(), String> {
-    let local_width = width.max(1) as usize;
-    let local_height = height.max(1) as usize;
-    let local_stride = local_width.div_ceil(8);
-    let mut local_mono = vec![0_u8; local_stride * local_height];
-    let mut local_element = element.clone();
-    local_element.insert("x".to_owned(), Value::from(0.0));
-    local_element.insert("y".to_owned(), Value::from(0.0));
-    local_element.remove("rotation");
-    let local_space = local_geometry(local_width, local_height, geometry.dpi);
-    draw_text(
-        &mut local_mono,
-        local_stride,
-        local_space,
-        &local_element,
-        data,
-    )?;
-    // Quarter turns swap the footprint for 90/270; anchor it so the rotated
-    // footprint shares its center with the element box.
-    let (destination_x, destination_y) = if matches!(turns, 1 | 3) {
-        (
-            x + ((width - height) as f32 / 2.0).round() as i32,
-            y + ((height - width) as f32 / 2.0).round() as i32,
-        )
-    } else {
-        (x, y)
-    };
-    blit_local_bitmap(
-        mono,
-        stride,
-        geometry,
-        destination_x,
-        destination_y,
-        &local_mono,
-        local_width,
-        local_height,
-        turns,
-    );
-    Ok(())
-}
-
 /// Canonical word wrap: breaks on spaces and hard-splits words wider than the
 /// line (mirrors wrapText from the server's table renderer).
-fn wrap_text(font: &FontArc, scale: PxScale, text: &str, width: f32) -> Vec<String> {
+fn wrap_text(font: &RasterFont, scale: PxScale, text: &str, width: f32) -> Vec<String> {
     if text.is_empty() {
         return Vec::new();
     }
@@ -410,19 +388,14 @@ fn wrap_text(font: &FontArc, scale: PxScale, text: &str, width: f32) -> Vec<Stri
     lines
 }
 
-fn measure_text(font: &FontArc, scale: PxScale, text: &str) -> f32 {
-    let scaled = font.as_scaled(scale);
-    let mut width = 0.0;
-    let mut previous = None;
-    for character in text.chars() {
-        let id = scaled.glyph_id(character);
-        if let Some(previous) = previous {
-            width += scaled.kern(previous, id);
-        }
-        width += scaled.h_advance(id);
-        previous = Some(id);
-    }
-    width
+fn measure_text(font: &RasterFont, scale: PxScale, text: &str) -> f32 {
+    let shaped = font.shape(text);
+    let advance: i64 = shaped
+        .glyph_positions()
+        .iter()
+        .map(|position| i64::from(position.x_advance))
+        .sum();
+    advance as f32 * scale.x / font.height_unscaled()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -431,25 +404,53 @@ fn draw_glyph_line(
     stride: usize,
     geometry: Geometry,
     clip: (i32, i32, i32, i32),
-    font: &FontArc,
+    font: &RasterFont,
     scale: PxScale,
     text: &str,
     x: f32,
     top: f32,
 ) {
-    let scaled = font.as_scaled(scale);
-    let mut cursor = x;
-    let baseline = top + scaled.ascent();
-    let mut previous = None;
-    for character in text.chars() {
-        let id = scaled.glyph_id(character);
-        if let Some(previous) = previous {
-            cursor += scaled.kern(previous, id);
-        }
+    draw_glyph_line_transformed(
+        mono,
+        stride,
+        geometry,
+        clip,
+        font,
+        scale,
+        text,
+        x,
+        top,
+        TextTransform::IDENTITY,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_glyph_line_transformed(
+    mono: &mut [u8],
+    stride: usize,
+    geometry: Geometry,
+    clip: (i32, i32, i32, i32),
+    font: &RasterFont,
+    scale: PxScale,
+    text: &str,
+    x: f32,
+    top: f32,
+    transform: TextTransform,
+) {
+    let baseline = top + font.as_scaled(scale).ascent();
+    let factor_x = scale.x / font.height_unscaled();
+    let factor_y = scale.y / font.height_unscaled();
+    let shaped = font.shape(text);
+    let mut cursor_x = 0_i64;
+    let mut cursor_y = 0_i64;
+    for (info, position) in shaped.glyph_infos().iter().zip(shaped.glyph_positions()) {
         let glyph = Glyph {
-            id,
+            id: GlyphId(info.glyph_id as u16),
             scale,
-            position: point(cursor, baseline),
+            position: point(
+                x + (cursor_x + i64::from(position.x_offset)) as f32 * factor_x,
+                baseline - (cursor_y + i64::from(position.y_offset)) as f32 * factor_y,
+            ),
         };
         if let Some(outline) = font.outline_glyph(glyph) {
             let bounds = outline.px_bounds();
@@ -457,15 +458,17 @@ fn draw_glyph_line(
                 if coverage < 0.32 {
                     return;
                 }
-                let px = bounds.min.x as i32 + gx as i32;
-                let py = bounds.min.y as i32 + gy as i32;
+                let (px, py) = transform.pixel(
+                    bounds.min.x as i32 + gx as i32,
+                    bounds.min.y as i32 + gy as i32,
+                );
                 if px >= clip.0 && py >= clip.1 && px < clip.2 && py < clip.3 {
                     set_pixel(mono, stride, geometry, px, py);
                 }
             });
         }
-        cursor += scaled.h_advance(id);
-        previous = Some(id);
+        cursor_x += i64::from(position.x_advance);
+        cursor_y += i64::from(position.y_advance);
     }
 }
 
@@ -513,7 +516,8 @@ fn draw_table(
         .to_owned();
     let body_font = font_for(&family, false);
     let bold_font = font_for(&family, true);
-    let body_scale = PxScale::from(font_size);
+    let body_scale = css_px_scale(body_font, font_size);
+    let bold_scale = css_px_scale(bold_font, font_size);
     let clip = (
         x.max(0),
         y.max(0),
@@ -572,7 +576,7 @@ fn draw_table(
         let mut current_x = x;
         for column in &table_columns {
             let inner = (column.width - padding * 2).max(1) as f32;
-            let lines = wrap_text(bold_font, body_scale, &column.title, inner);
+            let lines = wrap_text(bold_font, bold_scale, &column.title, inner);
             max_lines = max_lines.max(lines.len());
             header_cells.push((current_x, lines));
             current_x += column.width;
@@ -588,7 +592,7 @@ fn draw_table(
                     geometry,
                     clip,
                     bold_font,
-                    body_scale,
+                    bold_scale,
                     line,
                     (cell_x + padding) as f32,
                     top,
@@ -651,7 +655,7 @@ fn draw_table(
                 geometry,
                 clip,
                 bold_font,
-                body_scale,
+                bold_scale,
                 &label,
                 x,
                 current_y,
@@ -725,7 +729,7 @@ fn draw_table(
         let footer_text = table_footer_text(total_count, drawn_count);
         let footer_size =
             ((raw_font_size * 1.8).round().max(13.0) as f32 * geometry.scale_y).max(1.0);
-        let footer_scale = PxScale::from(footer_size);
+        let footer_scale = css_px_scale(bold_font, footer_size);
         let scaled_font = bold_font.as_scaled(footer_scale);
         let em_height = scaled_font.ascent() - scaled_font.descent();
         let middle = body_limit as f32 + footer_height as f32 / 2.0;
@@ -848,7 +852,7 @@ fn draw_table_group_header(
     stride: usize,
     geometry: Geometry,
     clip: (i32, i32, i32, i32),
-    font: &FontArc,
+    font: &RasterFont,
     scale: PxScale,
     label: &str,
     x: i32,
@@ -890,7 +894,7 @@ fn draw_table_row(
     geometry: Geometry,
     clip: (i32, i32, i32, i32),
     columns: &[TableColumn],
-    font: &FontArc,
+    font: &RasterFont,
     scale: PxScale,
     line_height: f32,
     padding: i32,
@@ -2447,7 +2451,7 @@ mod tests {
         assert!(wrap_text(font, scale, "", 100.0).is_empty());
     }
 
-    fn text_pixel_bbox(bitmap: &RasterizedLabel) -> Option<(i32, i32, i32, i32)> {
+    pub(super) fn text_pixel_bbox(bitmap: &RasterizedLabel) -> Option<(i32, i32, i32, i32)> {
         let mut bbox: Option<(i32, i32, i32, i32)> = None;
         for y in 0..bitmap.height_dots {
             for x in 0..bitmap.width_dots {
@@ -2474,7 +2478,7 @@ mod tests {
             config: json!({"connection":"windows_driver","protocol":"image","dpi":203}),
             doc: json!({"canvas":{"width":406,"height":406,"widthCm":5.08,"heightCm":5.08,"dpi":254},"elements":[
                 {"id":"t","type":"text","x":10,"y":183,"w":386,"h":40,"rotation":rotation,
-                 "text":"ВЕРТИКАЛЬНЫЙ ТЕКСТ ПАЛЛЕТЫ","fontFamily":"Inter","fontSize":24,
+                 "text":"ВЕРТИКАЛЬНЫЙ ТЕКСТ ПАЛЛЕТЫ","fontFamily":"Inter","fontSize":20,
                  "textAlign":"center","verticalAlign":"middle"}
             ]}),
             data: json!({}),
@@ -2508,3 +2512,6 @@ mod tests {
         assert!(max_y - min_y <= 45);
     }
 }
+
+#[cfg(test)]
+mod text_layout_tests;

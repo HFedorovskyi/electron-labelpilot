@@ -3712,6 +3712,7 @@ dependencies = [
  "reqwest",
  "rusqlite",
  "rustls",
+ "rustybuzz",
  "rxing",
  "semver",
  "serde",
