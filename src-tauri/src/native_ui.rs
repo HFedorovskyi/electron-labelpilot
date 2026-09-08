@@ -1285,6 +1285,38 @@ impl NativeUiRuntime {
         })
     }
 
+    /// Selecting a product is a production transition, not merely a catalog query.
+    /// Re-read the persisted box: the UI counters may lag a completed print.
+    pub fn select_weighing_product(
+        &self,
+        current_product_id: Option<i64>,
+        next_product_id: i64,
+    ) -> Result<NativeWeighingSnapshot, String> {
+        let operational = self.operational()?;
+        if next_product_id <= 0 || operational.product(next_product_id)?.is_none() {
+            return Err("Товар больше не существует; обновите список номенклатуры".to_owned());
+        }
+        let current_product_id = current_product_id.or(operational.active_box_product_id()?);
+        if let Some(current_id) = current_product_id.filter(|id| *id > 0 && *id != next_product_id)
+        {
+            let counters =
+                NativeUiCounters::try_from(&operational.latest_counters(Some(current_id))?)?;
+            if counters.units_in_box > 0 {
+                return Err(format!(
+                    "Перед сменой товара закройте короб {} (упаковок: {})",
+                    counters.current_box_number.as_deref().unwrap_or("—"),
+                    counters.units_in_box,
+                ));
+            }
+        }
+        // Do not pass the old search filter: it may no longer contain the selected row.
+        let snapshot = self.weighing_snapshot(Some(next_product_id), None)?;
+        if snapshot.selected_product_id != Some(next_product_id) {
+            return Err("Номенклатура обновилась; выберите товар повторно".to_owned());
+        }
+        Ok(snapshot)
+    }
+
     pub fn weighing_snapshot(
         &self,
         selected_product_id: Option<i64>,
@@ -1294,6 +1326,13 @@ impl NativeUiRuntime {
         let session = self.session()?;
 
         let station = self.station_snapshot()?;
+        let selected_product_id = match selected_product_id {
+            Some(id) => Some(id),
+            None if search.is_none_or(|value| value.trim().is_empty()) => {
+                operational.active_box_product_id()?
+            }
+            None => None,
+        };
 
         let mut products = self.products(search)?;
         if search.is_none_or(|value| value.trim().is_empty()) {
@@ -3548,3 +3587,7 @@ mod tests {
         assert_eq!(delta.counters.total_units, 0);
     }
 }
+
+#[cfg(test)]
+#[path = "native_ui/product_selection_tests.rs"]
+mod product_selection_tests;

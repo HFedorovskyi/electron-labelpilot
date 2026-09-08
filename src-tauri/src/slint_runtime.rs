@@ -35,7 +35,10 @@ const CATALOG_PAGE_SIZE: usize = 50;
 
 enum UiMessage {
     Core(CoreEvent),
-    Hydrated(Result<NativeWeighingSnapshot, String>),
+    ProductSelected {
+        previous_product_id: Option<i64>,
+        outcome: Result<NativeWeighingSnapshot, String>,
+    },
     ProductSearchLoaded {
         generation: u64,
         outcome: Result<Vec<NativeUiProduct>, String>,
@@ -2232,6 +2235,41 @@ fn apply_print_counters(ui: &WeighingPrototype, counters: &NativeUiCounters, upd
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum ProductChangeBlock {
+    OpenBox,
+    Busy,
+}
+
+fn product_change_block(
+    current_id: Option<i64>,
+    next_id: i64,
+    units_in_box: i32,
+    operation_busy: bool,
+) -> Option<ProductChangeBlock> {
+    if current_id == Some(next_id) {
+        None
+    } else if operation_busy {
+        Some(ProductChangeBlock::Busy)
+    } else if units_in_box > 0 {
+        Some(ProductChangeBlock::OpenBox)
+    } else {
+        None
+    }
+}
+
+fn snapshot_product_selection(
+    current_id: Option<i64>,
+    snapshot_id: Option<i64>,
+    explicit_selection: bool,
+) -> Option<i64> {
+    if explicit_selection {
+        snapshot_id
+    } else {
+        current_id.or(snapshot_id)
+    }
+}
+
 fn apply_snapshot(
     ui: &WeighingPrototype,
     snapshot: NativeWeighingSnapshot,
@@ -2239,14 +2277,27 @@ fn apply_snapshot(
     operator_store: &Rc<RefCell<Vec<NativeUiOperator>>>,
     selected_product: &Rc<Cell<Option<i64>>>,
     selected_product_details: &Rc<RefCell<Option<NativeUiProduct>>>,
+    explicit_selection: bool,
 ) {
-    let selected_id = snapshot.selected_product_id;
+    // A refresh started before a selection must not silently restore the old product.
+    let selected_id = snapshot_product_selection(
+        selected_product.get(),
+        snapshot.selected_product_id,
+        explicit_selection,
+    );
     let selected = selected_id.and_then(|id| {
         snapshot
             .products
             .iter()
             .find(|product| product.id == id)
             .cloned()
+            .or_else(|| {
+                selected_product_details
+                    .borrow()
+                    .as_ref()
+                    .filter(|product| product.id == id)
+                    .cloned()
+            })
     });
 
     ui.set_station_number(
@@ -2296,7 +2347,7 @@ fn apply_snapshot(
     apply_products(ui, snapshot.products, product_store);
 
     let counters = snapshot.counters;
-    apply_print_counters(ui, &counters, true);
+    apply_print_counters(ui, &counters, snapshot.selected_product_id == selected_id);
     ui.set_last_print(
         if counters.total_units > 0 && counters.last_pack_number != "0" {
             format!("#{} · из базы", counters.last_pack_number).into()
@@ -2512,6 +2563,7 @@ pub fn run() -> Result<(), String> {
                     &operator_store,
                     &selected_product,
                     &selected_product_details,
+                    false,
                 );
                 if env::var_os("LABELPILOT_SLINT_SKIP_OPERATOR_PROMPT").is_some() {
                     ui.set_operator_bypass_active(true);
@@ -2779,6 +2831,8 @@ pub fn run() -> Result<(), String> {
         let weak = ui.as_weak();
         let runtime = runtime.clone();
         let product_store = Rc::clone(&product_store);
+        let selected_product = Rc::clone(&selected_product);
+        let auto_print_gate = Rc::clone(&auto_print_gate);
         let message_tx = message_tx.clone();
         move |index| {
             let Some(ui) = weak.upgrade() else { return };
@@ -2791,13 +2845,33 @@ pub fn run() -> Result<(), String> {
             else {
                 return;
             };
-            let search = ui.get_product_search().trim().to_owned();
+            let previous_product_id = selected_product.get();
+            let busy = ui.get_product_selection_busy()
+                || auto_print_gate.borrow().printing
+                || ui.get_fixed_busy()
+                || ui.get_production_jobs_busy();
+            if let Some(reason) =
+                product_change_block(previous_product_id, product_id, ui.get_units_in_box(), busy)
+            {
+                let message = match reason {
+                    ProductChangeBlock::OpenBox => ui.get_product_change_blocked_label(),
+                    ProductChangeBlock::Busy => ui.get_product_change_busy_label(),
+                };
+                show_alert(&ui, message.as_str());
+                return;
+            }
+            if previous_product_id == Some(product_id) {
+                ui.set_product_modal_visible(false);
+                ui.set_touch_keyboard_visible(false);
+                return;
+            }
+            ui.set_product_selection_busy(true);
             let message_tx = message_tx.clone();
             thread::spawn(move || {
-                let search = (!search.is_empty()).then_some(search.as_str());
-                let _ = message_tx.send(UiMessage::Hydrated(
-                    runtime.weighing_snapshot(Some(product_id), search),
-                ));
+                let _ = message_tx.send(UiMessage::ProductSelected {
+                    previous_product_id,
+                    outcome: runtime.select_weighing_product(previous_product_id, product_id),
+                });
             });
         }
     });
@@ -2926,6 +3000,10 @@ pub fn run() -> Result<(), String> {
         let message_tx = message_tx.clone();
         move || {
             let Some(ui) = weak.upgrade() else { return };
+            if ui.get_product_selection_busy() {
+                show_toast(&ui, ui.get_product_change_busy_label().as_str());
+                return;
+            }
             if let Some(runtime) = runtime.clone() {
                 let Some(product_id) = selected_product.get() else {
                     show_alert(&ui, "Выберите товар перед печатью");
@@ -4156,6 +4234,11 @@ pub fn run() -> Result<(), String> {
         let initial_total = ui.get_total_units();
         let initial_boxes = ui.get_boxes_on_pallet();
         ui.set_selected_product_id(1);
+        ui.set_product_selection_busy(true);
+        ui.invoke_print_label();
+        assert_eq!(ui.get_units_in_box(), initial_units);
+        assert_eq!(ui.get_total_units(), initial_total);
+        ui.set_product_selection_busy(false);
         ui.invoke_print_label();
         assert_eq!(ui.get_units_in_box(), initial_units + 1);
         assert_eq!(ui.get_total_units(), initial_total + 1);
@@ -4394,8 +4477,8 @@ pub fn run() -> Result<(), String> {
                             if let Some((weight, stable)) = reading {
                                 let active_page = ui.get_active_page();
                                 let production_selected_id = selected_product.get();
-                                let production_has_template =
-                                    production_selected_id.is_some_and(|id| {
+                                let production_has_template = !ui.get_product_selection_busy()
+                                    && production_selected_id.is_some_and(|id| {
                                         event_selected_product_details
                                             .borrow()
                                             .as_ref()
@@ -4586,6 +4669,7 @@ pub fn run() -> Result<(), String> {
                                     &operator_store,
                                     &selected_product,
                                     &selected_product_details,
+                                    false,
                                 ),
                                 Some(Err(error)) => {
                                     show_alert(&ui, &format!("Обновление данных: {error}"))
@@ -4624,18 +4708,40 @@ pub fn run() -> Result<(), String> {
                             );
                         }
                     }
-                    Ok(UiMessage::Hydrated(outcome)) => {
+                    Ok(UiMessage::ProductSelected {
+                        previous_product_id,
+                        outcome,
+                    }) => {
                         let Some(ui) = weak.upgrade() else { return };
+                        ui.set_product_selection_busy(false);
+                        if previous_product_id != selected_product.get() {
+                            show_toast(&ui, "Выбор товара изменился; повторите действие");
+                            continue;
+                        }
                         match outcome {
-                            Ok(snapshot) => apply_snapshot(
-                                &ui,
-                                snapshot,
-                                &product_store,
-                                &operator_store,
-                                &selected_product,
-                                &selected_product_details,
-                            ),
-                            Err(error) => show_alert(&ui, &format!("Данные: {error}")),
+                            Ok(snapshot) => {
+                                let blocked = snapshot.selected_product_id.and_then(|id| {
+                                    product_change_block(
+                                        selected_product.get(), id, ui.get_units_in_box(),
+                                        auto_print_gate.borrow().printing,
+                                    )
+                                });
+                                if let Some(reason) = blocked {
+                                    let message = match reason {
+                                        ProductChangeBlock::OpenBox => ui.get_product_change_blocked_label(),
+                                        ProductChangeBlock::Busy => ui.get_product_change_busy_label(),
+                                    };
+                                    show_alert(&ui, message.as_str());
+                                    continue;
+                                }
+                                apply_snapshot(
+                                    &ui, snapshot, &product_store, &operator_store,
+                                    &selected_product, &selected_product_details, true,
+                                );
+                                ui.set_product_modal_visible(false);
+                                ui.set_touch_keyboard_visible(false);
+                            }
+                            Err(error) => show_alert(&ui, &error),
                         }
                     }
                     Ok(UiMessage::ProductSearchLoaded {
@@ -4733,6 +4839,7 @@ pub fn run() -> Result<(), String> {
                                 &operator_store,
                                 &selected_product,
                                 &selected_product_details,
+                                false,
                             );
                         }
                         match outcome {
@@ -5367,6 +5474,7 @@ pub fn run() -> Result<(), String> {
                                 &operator_store,
                                 &selected_product,
                                 &selected_product_details,
+                                false,
                             );
                         }
                         match outcome {
@@ -6130,5 +6238,33 @@ mod update_error_presentation_tests {
             message,
             "unexpected response from [адрес сервера скрыт]; retry"
         );
+    }
+}
+
+#[cfg(test)]
+mod product_selection_tests {
+    use super::{product_change_block, snapshot_product_selection, ProductChangeBlock};
+
+    #[test]
+    fn product_change_waits_for_box_and_inflight_operations() {
+        assert_eq!(
+            product_change_block(Some(1), 2, 2, false),
+            Some(ProductChangeBlock::OpenBox)
+        );
+        assert_eq!(
+            product_change_block(Some(1), 2, 0, true),
+            Some(ProductChangeBlock::Busy)
+        );
+        assert_eq!(product_change_block(Some(1), 2, 0, false), None);
+        assert_eq!(product_change_block(Some(1), 1, 2, true), None);
+        assert_eq!(product_change_block(None, 2, 0, false), None);
+    }
+
+    #[test]
+    fn background_snapshot_never_reverts_an_explicit_product_selection() {
+        assert_eq!(snapshot_product_selection(Some(2), Some(1), false), Some(2));
+        assert_eq!(snapshot_product_selection(Some(2), None, false), Some(2));
+        assert_eq!(snapshot_product_selection(None, Some(1), false), Some(1));
+        assert_eq!(snapshot_product_selection(Some(1), Some(2), true), Some(2));
     }
 }

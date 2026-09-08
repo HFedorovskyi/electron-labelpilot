@@ -30,6 +30,10 @@ required-features = ["slint-ui"]
 name = "labelpilot-maintenance"
 path = "src/maintenance_main.rs"
 required-features = ["native-update"]
+[[example]]
+name = "weighing_ui_probe"
+required-features = ["slint-ui"]
+
 [build-dependencies]
 tauri-build = { version = "2.6.3", features = [], optional = true }
 slint-build = { version = "1.17.1", optional = true }

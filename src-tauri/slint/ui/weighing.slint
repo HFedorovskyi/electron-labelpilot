@@ -1124,6 +1124,9 @@ export component WeighingPrototype inherits Window {
     in-out property <int> box-limit: 0;
     in-out property <string> product-search: "";
     in-out property <bool> product-search-busy: false;
+    in-out property <bool> product-selection-busy: false;
+    out property <string> product-change-blocked-label: root.ui-language == "en" ? "Close the current box before changing the product." : root.ui-language == "de" ? "Schließen Sie vor dem Produktwechsel den aktuellen Karton." : root.ui-language == "uk" ? "Перед зміною товару закрийте поточний короб." : "Перед сменой товара закройте текущий короб.";
+    out property <string> product-change-busy-label: root.ui-language == "en" ? "Wait for the current operation to finish." : root.ui-language == "de" ? "Warten Sie, bis der aktuelle Vorgang abgeschlossen ist." : root.ui-language == "uk" ? "Дочекайтеся завершення поточної операції." : "Дождитесь завершения текущей операции.";
     in-out property <length> product-scroll-y: 0px;
     property <string> product-picker-title: root.ui-language == "en" ? "Select product" : root.ui-language == "de" ? "Produkt auswählen" : root.ui-language == "uk" ? "Вибір товару" : "Выбор товара";
     property <string> product-picker-hint: root.ui-language == "en" ? "Tap a row to select" : root.ui-language == "de" ? "Zeile zum Auswählen antippen" : root.ui-language == "uk" ? "Торкніться рядка для вибору" : "Коснитесь строки для выбора";
@@ -1524,6 +1527,25 @@ export component WeighingPrototype inherits Window {
     callback quit-app;
     callback open-date-calendar;
     callback shift-calendar-month(int);
+    callback open-product-picker;
+    open-product-picker => {
+            if root.units-in-box > 0 {
+                root.alert-text = root.product-change-blocked-label;
+                root.alert-visible = true;
+            } else if root.product-selection-busy {
+                root.alert-text = root.product-change-busy-label;
+                root.alert-visible = true;
+            } else {
+                root.product-modal-visible = true;
+                root.product-search = "";
+                root.product-scroll-y = 0px;
+                root.touch-keyboard-visible = true;
+                root.touch-keyboard-layout = root.ui-language == "en" || root.ui-language == "de" ? 1 : 0;
+                root.touch-keyboard-uppercase = false;
+                root.search-products("");
+            }
+            }
+
     callback select-product(int);
     callback search-products(string);
     callback edit-touch-text(string, string, bool) -> string;
@@ -1785,13 +1807,14 @@ export component WeighingPrototype inherits Window {
                             clip: true;
 
                             VerticalLayout {
-                                alignment: center;
-                                padding-top: 2px;
-                                padding-bottom: 2px;
+                                padding: 1px;
                                 spacing: 0px;
 
                                 Rectangle {
-                                    height: root.short ? 27px : 31px;
+                                    // Fill the card up to its inset border, including the top corners.
+                                    height: root.short ? 31px : 37px;
+                                    border-top-left-radius: 11px;
+                                    border-top-right-radius: 11px;
                                     horizontal-stretch: 1;
                                     background: root.server-online ? Palette.e50 : Palette.r50;
                                     HorizontalLayout {
@@ -1936,229 +1959,243 @@ export component WeighingPrototype inherits Window {
                     drop-shadow-blur: 8px;
                     drop-shadow-offset-y: 2px;
 
-                    VerticalLayout {
-                        padding: root.narrow ? 16px : 20px;
-                        spacing: root.short ? 10px : 16px;
+                    weighing-scroll := ScrollView {
+                        viewport-width: self.visible-width;
+                        viewport-height: max(self.visible-height, weighing-content.min-height);
+                        horizontal-scrollbar-policy: always-off;
+                        mouse-drag-pan-enabled: true;
 
-                        VerticalLayout {
-                            height: root.short ? 76px : 82px;
-                            spacing: 6px;
-                            HorizontalLayout {
-                                height: root.short ? 32px : 36px;
-                                Text {
-                                    text: "Весовая станция";
-                                    color: Palette.n900;
-                                    font-size: root.compact ? 22px : 24px;
-                                    font-weight: 600;
-                                    vertical-alignment: center;
-                                }
-                                Rectangle { horizontal-stretch: 1; }
-                            }
-                            main-device-status-row := HorizontalLayout {
-                                height: root.compact ? 34px : 38px;
-                                spacing: root.short ? 6px : 8px;
-
-                                StatusPill {
-                                    horizontal-stretch: 1;
-                                    height: parent.height;
-                                    compact: root.compact;
-                                    text: root.scale-status;
-                                    good: root.scale-online;
-                                    icon: @image-url("../assets/icons/scale.png");
-                                    show-icon: true;
-                                }
-                                StatusPill {
-                                    horizontal-stretch: 1;
-                                    height: parent.height;
-                                    compact: root.compact;
-                                    text: root.printer-status;
-                                    good: root.printer-ready;
-                                    icon: @image-url("../assets/icons/printer.png");
-                                    show-icon: true;
-                                }
-                                StatusPill {
-                                    horizontal-stretch: 1;
-                                    height: parent.height;
-                                    compact: root.compact;
-                                    text: root.auto-print-enabled && root.auto-print-status != "" ? root.auto-print-status : root.auto-print-enabled ? root.jobs-auto-print-on-label : root.jobs-auto-print-off-label;
-                                    good: root.auto-print-enabled;
-                                    neutral: !root.auto-print-enabled;
-                                    icon: @image-url("../assets/icons/refresh-cw.png");
-                                    show-icon: true;
-                                }
-                            }
-                        }
-
-                        VerticalLayout {
-                            height: 84px;
-                            spacing: 8px;
-                            Text {
-                                text: "Поиск товара";
-                                color: Palette.n400;
-                                font-size: 14px;
-                                font-weight: 500;
-                            }
-                            product-picker := Rectangle {
-                                height: 58px;
-                                border-radius: 16px;
-                                border-width: 1px;
-                                border-color: Palette.n300;
-                                background: product-touch.pressed ? Palette.n200 : product-touch.has-hover ? Palette.n100 : Palette.n50;
-
-                                HorizontalLayout {
-                                    padding-left: 20px;
-                                    padding-right: 20px;
-                                    Text {
-                                        text: root.product-name;
-                                        color: Palette.n900;
-                                        font-size: root.narrow ? 15px : 18px;
-                                        vertical-alignment: center;
-                                        overflow: elide;
-                                    }
-                                    HorizontalIcon {
-                                        icon-size: 24px;
-                                        icon: @image-url("../assets/icons/search.png");
-                                        icon-color: Palette.n400;
-                                    }
-                                }
-                                product-touch := TouchArea {
-                                    clicked => { root.product-modal-visible = true; root.product-search = ""; root.product-scroll-y = 0px; root.touch-keyboard-visible = true; root.touch-keyboard-layout = root.ui-language == "en" || root.ui-language == "de" ? 1 : 0; root.touch-keyboard-uppercase = false; root.search-products(""); }
-                                }
-                            }
-                        }
-
-                        Rectangle {
-                            height: root.narrow ? 130px : 140px;
-                            border-radius: 16px;
-                            border-width: 1px;
-                            border-color: Palette.e200;
-                            background: Palette.e50;
+                        weighing-content := VerticalLayout {
+                            padding: root.narrow ? 16px : 20px;
+                            spacing: root.short ? 10px : 16px;
 
                             VerticalLayout {
-                                padding: 16px;
+                                height: root.short ? 76px : 82px;
                                 spacing: 6px;
-                                Text {
-                                    text: "НАИМЕНОВАНИЕ";
-                                    color: Palette.e600;
-                                    font-size: 14px;
-                                    font-weight: 700;
-                                    letter-spacing: 0.8px;
+                                HorizontalLayout {
+                                    height: root.short ? 32px : 36px;
+                                    Text {
+                                        text: "Весовая станция";
+                                        color: Palette.n900;
+                                        font-size: root.compact ? 22px : 24px;
+                                        font-weight: 600;
+                                        vertical-alignment: center;
+                                    }
+                                    Rectangle { horizontal-stretch: 1; }
                                 }
-                                Text {
-                                    text: root.product-name;
-                                    color: Palette.e700;
-                                    font-size: root.narrow ? 22px : 28px;
-                                    font-weight: 700;
-                                    wrap: word-wrap;
-                                }
-                                Text {
-                                    text: "АРТИКУЛ: " + (root.product-article == "" ? "—" : root.product-article) + "     СРОК ГОДНОСТИ: " + root.expiration-days;
-                                    color: #34d39999;
-                                    font-family: "Consolas";
-                                    font-size: 14px;
+                                main-device-status-row := HorizontalLayout {
+                                    height: root.compact ? 34px : 38px;
+                                    spacing: root.short ? 6px : 8px;
+
+                                    StatusPill {
+                                        horizontal-stretch: 1;
+                                        height: parent.height;
+                                        compact: root.compact;
+                                        text: root.scale-status;
+                                        good: root.scale-online;
+                                        icon: @image-url("../assets/icons/scale.png");
+                                        show-icon: true;
+                                    }
+                                    StatusPill {
+                                        horizontal-stretch: 1;
+                                        height: parent.height;
+                                        compact: root.compact;
+                                        text: root.printer-status;
+                                        good: root.printer-ready;
+                                        icon: @image-url("../assets/icons/printer.png");
+                                        show-icon: true;
+                                    }
+                                    StatusPill {
+                                        horizontal-stretch: 1;
+                                        height: parent.height;
+                                        compact: root.compact;
+                                        text: root.auto-print-enabled && root.auto-print-status != "" ? root.auto-print-status : root.auto-print-enabled ? root.jobs-auto-print-on-label : root.jobs-auto-print-off-label;
+                                        good: root.auto-print-enabled;
+                                        neutral: !root.auto-print-enabled;
+                                        icon: @image-url("../assets/icons/refresh-cw.png");
+                                        show-icon: true;
+                                    }
                                 }
                             }
-                        }
 
-                        HorizontalLayout {
-                            height: root.short ? 140px : 158px;
-                            spacing: 16px;
+                            VerticalLayout {
+                                height: 84px;
+                                spacing: 8px;
+                                Text {
+                                    text: "Поиск товара";
+                                    color: Palette.n400;
+                                    font-size: 14px;
+                                    font-weight: 500;
+                                }
+                                product-picker := Rectangle {
+                                    height: 58px;
+                                    border-radius: 16px;
+                                    border-width: 1px;
+                                    border-color: Palette.n300;
+                                    background: product-touch.pressed ? Palette.n200 : product-touch.has-hover ? Palette.n100 : Palette.n50;
+
+                                    HorizontalLayout {
+                                        padding-left: 20px;
+                                        padding-right: 20px;
+                                        Text {
+                                            text: root.product-name;
+                                            color: Palette.n900;
+                                            font-size: root.narrow ? 15px : 18px;
+                                            vertical-alignment: center;
+                                            overflow: elide;
+                                        }
+                                        HorizontalIcon {
+                                            icon-size: 24px;
+                                            icon: @image-url("../assets/icons/search.png");
+                                            icon-color: Palette.n400;
+                                        }
+                                    }
+                                    product-touch := TouchArea {
+                                        clicked => { root.open-product-picker(); }
+                                    }
+                                }
+                            }
 
                             Rectangle {
-                                horizontal-stretch: 1;
+                                // Keep all wrapped lines and metadata inside the card. The surrounding
+                                // scroll view handles names taller than the smallest supported window.
+                                preferred-height: max(root.narrow ? 130px : 140px, product-info-content.preferred-height);
+                                vertical-stretch: 0;
                                 border-radius: 16px;
                                 border-width: 1px;
-                                border-color: Palette.n200;
-                                background: Palette.n50;
+                                border-color: Palette.e200;
+                                background: Palette.e50;
 
-                                VerticalLayout {
-                                    alignment: center;
-                                    spacing: 8px;
+                                product-info-content := VerticalLayout {
+                                    padding: 16px;
+                                    spacing: 6px;
+                                    alignment: start;
                                     Text {
-                                        text: "ВЕС БРУТТО";
-                                        color: Palette.n500;
-                                        font-size: 12px;
+                                        text: "НАИМЕНОВАНИЕ";
+                                        color: Palette.e600;
+                                        font-size: 14px;
                                         font-weight: 700;
-                                        letter-spacing: 1.5px;
-                                        horizontal-alignment: center;
+                                        letter-spacing: 0.8px;
                                     }
-                                    HorizontalLayout {
-                                        alignment: center;
-                                        spacing: 5px;
-                                        Text {
-                                            text: root.gross-weight;
-                                            color: Palette.e600;
-                                            font-family: "Consolas";
-                                            font-size: root.narrow ? 44px : 58px;
-                                            font-weight: 300;
-                                            vertical-alignment: center;
-                                        }
-                                        Text {
-                                            text: "кг";
-                                            color: #10b98180;
-                                            font-size: 24px;
-                                            vertical-alignment: center;
-                                        }
+                                    Text {
+                                        text: root.product-name;
+                                        color: Palette.e700;
+                                        font-size: root.narrow ? 22px : 28px;
+                                        font-weight: 700;
+                                        min-width: 0px;
+                                        wrap: word-wrap;
                                     }
-                                    if root.stable: HorizontalLayout {
+                                    Text {
+                                        text: "АРТИКУЛ: " + (root.product-article == "" ? "—" : root.product-article) + "     СРОК ГОДНОСТИ: " + root.expiration-days;
+                                        color: #34d39999;
+                                        font-family: "Consolas";
+                                        font-size: 14px;
+                                        min-width: 0px;
+                                        wrap: word-wrap;
+                                    }
+                                }
+                            }
+
+                            HorizontalLayout {
+                                height: root.short ? 140px : 158px;
+                                spacing: 16px;
+
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    border-radius: 16px;
+                                    border-width: 1px;
+                                    border-color: Palette.n200;
+                                    background: Palette.n50;
+
+                                    VerticalLayout {
                                         alignment: center;
                                         spacing: 8px;
-                                        StatusDot {
-                                            dot-size: 4px;
-                                            dot-color: Palette.e500;
-                                        }
                                         Text {
-                                            text: root.auto-print-enabled && root.auto-print-status != "" ? root.auto-print-status : "СТАБИЛЬНО";
-                                            color: Palette.e600;
+                                            text: "ВЕС БРУТТО";
+                                            color: Palette.n500;
                                             font-size: 12px;
                                             font-weight: 700;
-                                            letter-spacing: 1.4px;
+                                            letter-spacing: 1.5px;
+                                            horizontal-alignment: center;
+                                        }
+                                        HorizontalLayout {
+                                            alignment: center;
+                                            spacing: 5px;
+                                            Text {
+                                                text: root.gross-weight;
+                                                color: Palette.e600;
+                                                font-family: "Consolas";
+                                                font-size: root.narrow ? 44px : 58px;
+                                                font-weight: 300;
+                                                vertical-alignment: center;
+                                            }
+                                            Text {
+                                                text: "кг";
+                                                color: #10b98180;
+                                                font-size: 24px;
+                                                vertical-alignment: center;
+                                            }
+                                        }
+                                        if root.stable: HorizontalLayout {
+                                            alignment: center;
+                                            spacing: 8px;
+                                            StatusDot {
+                                                dot-size: 4px;
+                                                dot-color: Palette.e500;
+                                            }
+                                            Text {
+                                                text: root.auto-print-enabled && root.auto-print-status != "" ? root.auto-print-status : "СТАБИЛЬНО";
+                                                color: Palette.e600;
+                                                font-size: 12px;
+                                                font-weight: 700;
+                                                letter-spacing: 1.4px;
+                                            }
                                         }
                                     }
                                 }
-                            }
 
-                            Rectangle {
-                                horizontal-stretch: 1;
-                                border-radius: 16px;
-                                border-width: 1px;
-                                border-color: Palette.n200;
-                                background: Palette.n50;
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    border-radius: 16px;
+                                    border-width: 1px;
+                                    border-color: Palette.n200;
+                                    background: Palette.n50;
 
-                                VerticalLayout {
-                                    alignment: center;
-                                    spacing: 8px;
-                                    Text {
-                                        text: "ВЕС НЕТТО";
-                                        color: Palette.n500;
-                                        font-size: 12px;
-                                        font-weight: 700;
-                                        letter-spacing: 1.5px;
-                                        horizontal-alignment: center;
-                                    }
-                                    HorizontalLayout {
+                                    VerticalLayout {
                                         alignment: center;
-                                        spacing: 5px;
+                                        spacing: 8px;
                                         Text {
-                                            text: root.net-weight;
-                                            color: Palette.n700;
-                                            font-family: "Consolas";
-                                            font-size: root.narrow ? 44px : 58px;
-                                            font-weight: 300;
-                                            vertical-alignment: center;
-                                        }
-                                        Text {
-                                            text: "кг";
+                                            text: "ВЕС НЕТТО";
                                             color: Palette.n500;
-                                            font-size: 24px;
-                                            vertical-alignment: center;
+                                            font-size: 12px;
+                                            font-weight: 700;
+                                            letter-spacing: 1.5px;
+                                            horizontal-alignment: center;
+                                        }
+                                        HorizontalLayout {
+                                            alignment: center;
+                                            spacing: 5px;
+                                            Text {
+                                                text: root.net-weight;
+                                                color: Palette.n700;
+                                                font-family: "Consolas";
+                                                font-size: root.narrow ? 44px : 58px;
+                                                font-weight: 300;
+                                                vertical-alignment: center;
+                                            }
+                                            Text {
+                                                text: "кг";
+                                                color: Palette.n500;
+                                                font-size: 24px;
+                                                vertical-alignment: center;
+                                            }
                                         }
                                     }
                                 }
                             }
-                        }
 
-                        Rectangle { vertical-stretch: 1; }
+                            Rectangle { vertical-stretch: 1; }
+                        }
                     }
                 }
 
@@ -6225,11 +6262,8 @@ export component WeighingPrototype inherits Window {
                                     }
                                 }
                                 product-row-touch := TouchArea {
-                                    clicked => {
-                                        root.select-product(index);
-                                        root.product-modal-visible = false;
-                                        root.touch-keyboard-visible = false;
-                                    }
+                                    enabled: !root.product-selection-busy;
+                                    clicked => { root.select-product(index); }
                                 }
                             }
                         }

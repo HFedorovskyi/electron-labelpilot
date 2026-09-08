@@ -466,6 +466,24 @@ impl OperationalState {
         self.with_connection(|connection| latest_counters(connection, nomenclature_id))
     }
 
+    /// Resume the most recent non-empty box instead of losing the active product
+    /// when the client restarts. Empty/deleted boxes do not lock product selection.
+    pub fn active_box_product_id(&self) -> Result<Option<i64>, String> {
+        self.with_connection(|connection| {
+            connection
+                .query_row(
+                    "SELECT b.nomenclature_id FROM boxes b
+                 WHERE b.status = 'Open' AND EXISTS (
+                    SELECT 1 FROM pack p WHERE p.box_id = b.id AND p.status != 'Deleted'
+                 ) ORDER BY b.id DESC LIMIT 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(db_error("read active box product"))
+        })
+    }
+
     pub fn open_pallet_content(&self, nomenclature_id: Option<i64>) -> Result<Value, String> {
         self.with_connection(|connection| open_pallet_content(connection, nomenclature_id))
     }
@@ -2036,69 +2054,133 @@ mod tests {
         assert_eq!(counters["unitsInBox"], 2);
     }
     #[cfg(feature = "slint-ui")]
-    fn outbox_job(printer: &crate::printer::PrinterTransportState, key: &str, port: u16)
-        -> crate::printer::PreparedPrinterJob
-    {
-        printer.prepare_generated(json!({
-            "id":"outbox-test", "connection":"tcp", "protocol":"zpl",
-            "ip":"127.0.0.1", "port":port, "jobIdempotencyKey":key,
-            "persistentConnection":false
-        }), b"^XA^FDOUTBOX^FS^XZ".to_vec()).unwrap()
+    fn outbox_job(
+        printer: &crate::printer::PrinterTransportState,
+        key: &str,
+        port: u16,
+    ) -> crate::printer::PreparedPrinterJob {
+        printer
+            .prepare_generated(
+                json!({
+                    "id":"outbox-test", "connection":"tcp", "protocol":"zpl",
+                    "ip":"127.0.0.1", "port":port, "jobIdempotencyKey":key,
+                    "persistentConnection":false
+                }),
+                b"^XA^FDOUTBOX^FS^XZ".to_vec(),
+            )
+            .unwrap()
     }
 
     #[test]
     #[cfg(feature = "slint-ui")]
     fn outbox_insert_failure_rolls_back_pack_box_pallet_and_totals() {
         let (_directory, persisted, state) = fixture("outbox-rollback");
-        let printer = crate::printer::PrinterTransportState::with_database(&persisted.database_path()).unwrap();
+        let printer =
+            crate::printer::PrinterTransportState::with_database(&persisted.database_path())
+                .unwrap();
         let observer = Connection::open(persisted.database_path()).unwrap();
-        observer.execute_batch("CREATE TRIGGER reject_outbox BEFORE INSERT ON printer_delivery_jobs
-            BEGIN SELECT RAISE(ABORT, 'injected outbox failure'); END;").unwrap();
-        let error = state.record_pack_with_outbox(pack("1", "B1"), None, |tx, _| {
-            outbox_job(&printer, "pack-1", 1).persist(tx)
-        }).unwrap_err();
+        observer
+            .execute_batch(
+                "CREATE TRIGGER reject_outbox BEFORE INSERT ON printer_delivery_jobs
+            BEGIN SELECT RAISE(ABORT, 'injected outbox failure'); END;",
+            )
+            .unwrap();
+        let error = state
+            .record_pack_with_outbox(pack("1", "B1"), None, |tx, _| {
+                outbox_job(&printer, "pack-1", 1).persist(tx)
+            })
+            .unwrap_err();
         assert!(error.contains("injected outbox failure"), "{error}");
         for table in ["pack", "boxes", "pallet", "printer_delivery_jobs"] {
-            let count: i64 = observer.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0)).unwrap();
+            let count: i64 = observer
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+                .unwrap();
             assert_eq!(count, 0, "{table}");
         }
         assert_materialized_totals(&state, 0, 0);
-        observer.execute_batch("DROP TRIGGER reject_outbox").unwrap();
-        let error = state.record_pack_with_outbox(pack("1", "B1"), None, |tx, _| -> Result<(), String> {
-            outbox_job(&printer, "pack-1", 1).persist(tx)?;
-            Err("injected failure after outbox INSERT, before commit".to_owned())
-        }).unwrap_err();
+        observer
+            .execute_batch("DROP TRIGGER reject_outbox")
+            .unwrap();
+        let error = state
+            .record_pack_with_outbox(pack("1", "B1"), None, |tx, _| -> Result<(), String> {
+                outbox_job(&printer, "pack-1", 1).persist(tx)?;
+                Err("injected failure after outbox INSERT, before commit".to_owned())
+            })
+            .unwrap_err();
         assert!(error.contains("before commit"));
         assert_materialized_totals(&state, 0, 0);
-        assert_eq!(observer.query_row("SELECT COUNT(*) FROM printer_delivery_jobs", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+        assert_eq!(
+            observer
+                .query_row("SELECT COUNT(*) FROM printer_delivery_jobs", [], |r| r
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
     }
 
     #[test]
     #[cfg(feature = "slint-ui")]
     fn outbox_close_failure_preserves_open_box_and_already_closed_skips_callback() {
         let (_directory, persisted, state) = fixture("outbox-box-rollback");
-        let printer = crate::printer::PrinterTransportState::with_database(&persisted.database_path()).unwrap();
+        let printer =
+            crate::printer::PrinterTransportState::with_database(&persisted.database_path())
+                .unwrap();
         let pack = state.record_pack(pack("1", "B1"), None).unwrap();
         let observer = Connection::open(persisted.database_path()).unwrap();
-        let before: (String, Option<f64>, Option<f64>) = observer.query_row(
-            "SELECT status, weight_netto, weight_brutto FROM boxes WHERE id=?1", [pack.box_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
-        observer.execute_batch("CREATE TRIGGER reject_outbox BEFORE INSERT ON printer_delivery_jobs
-            BEGIN SELECT RAISE(ABORT, 'injected box outbox failure'); END;").unwrap();
-        let payload = || CloseBoxPayload { box_id:pack.box_id, weight_netto:5.0, weight_brutto:6.0 };
-        let error = state.close_box_with_outbox(payload(), |tx| outbox_job(&printer, "box-1", 1).persist(tx)).unwrap_err();
+        let before: (String, Option<f64>, Option<f64>) = observer
+            .query_row(
+                "SELECT status, weight_netto, weight_brutto FROM boxes WHERE id=?1",
+                [pack.box_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        observer
+            .execute_batch(
+                "CREATE TRIGGER reject_outbox BEFORE INSERT ON printer_delivery_jobs
+            BEGIN SELECT RAISE(ABORT, 'injected box outbox failure'); END;",
+            )
+            .unwrap();
+        let payload = || CloseBoxPayload {
+            box_id: pack.box_id,
+            weight_netto: 5.0,
+            weight_brutto: 6.0,
+        };
+        let error = state
+            .close_box_with_outbox(payload(), |tx| outbox_job(&printer, "box-1", 1).persist(tx))
+            .unwrap_err();
         assert!(error.contains("injected box outbox failure"));
-        let after: (String, Option<f64>, Option<f64>) = observer.query_row(
-            "SELECT status, weight_netto, weight_brutto FROM boxes WHERE id=?1", [pack.box_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
+        let after: (String, Option<f64>, Option<f64>) = observer
+            .query_row(
+                "SELECT status, weight_netto, weight_brutto FROM boxes WHERE id=?1",
+                [pack.box_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
         assert_eq!(before, after);
         assert_materialized_totals(&state, 1, 1);
-        observer.execute_batch("DROP TRIGGER reject_outbox").unwrap();
-        let job_id = state.close_box_with_outbox(payload(), |tx| outbox_job(&printer, "box-1", 1).persist(tx)).unwrap().unwrap();
-        assert_eq!(observer.query_row("SELECT state FROM printer_delivery_jobs WHERE job_id=?1", [job_id], |r| r.get::<_, String>(0)).unwrap(), "queued");
-        assert!(state.close_box_with_outbox(payload(), |_| -> Result<(), String> {
-            panic!("closed box must not enqueue another label")
-        }).unwrap().is_none());
+        observer
+            .execute_batch("DROP TRIGGER reject_outbox")
+            .unwrap();
+        let job_id = state
+            .close_box_with_outbox(payload(), |tx| outbox_job(&printer, "box-1", 1).persist(tx))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            observer
+                .query_row(
+                    "SELECT state FROM printer_delivery_jobs WHERE job_id=?1",
+                    [job_id],
+                    |r| r.get::<_, String>(0)
+                )
+                .unwrap(),
+            "queued"
+        );
+        assert!(state
+            .close_box_with_outbox(payload(), |_| -> Result<(), String> {
+                panic!("closed box must not enqueue another label")
+            })
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -2115,47 +2197,117 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
         let printer = PrinterTransportState::with_database(&persisted.database_path()).unwrap();
         let observer = Connection::open(persisted.database_path()).unwrap();
-        let (pack, job_id) = state.record_pack_with_outbox(pack("1", "B1"), None, |tx, pack| {
-            let id = outbox_job(&printer, &format!("native-pack:{}", pack.pack_id), port).persist(tx)?;
-            assert_eq!(observer.query_row("SELECT COUNT(*) FROM pack", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
-            assert_eq!(observer.query_row("SELECT COUNT(*) FROM printer_delivery_jobs", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
-            assert!(printer.submit_committed_with_sink(RuntimeEventSink::detached(), &id).is_err());
-            Ok(id)
-        }).unwrap();
-        assert_eq!(observer.query_row("SELECT COUNT(*) FROM pack WHERE id=?1", [pack.pack_id], |r| r.get::<_, i64>(0)).unwrap(), 1);
-        assert_eq!(observer.query_row("SELECT state FROM printer_delivery_jobs WHERE job_id=?1", [&job_id], |r| r.get::<_, String>(0)).unwrap(), "queued");
-        assert_eq!(listener.accept().unwrap_err().kind(), std::io::ErrorKind::WouldBlock);
+        let (pack, job_id) = state
+            .record_pack_with_outbox(pack("1", "B1"), None, |tx, pack| {
+                let id = outbox_job(&printer, &format!("native-pack:{}", pack.pack_id), port)
+                    .persist(tx)?;
+                assert_eq!(
+                    observer
+                        .query_row("SELECT COUNT(*) FROM pack", [], |r| r.get::<_, i64>(0))
+                        .unwrap(),
+                    0
+                );
+                assert_eq!(
+                    observer
+                        .query_row("SELECT COUNT(*) FROM printer_delivery_jobs", [], |r| r
+                            .get::<_, i64>(0))
+                        .unwrap(),
+                    0
+                );
+                assert!(printer
+                    .submit_committed_with_sink(RuntimeEventSink::detached(), &id)
+                    .is_err());
+                Ok(id)
+            })
+            .unwrap();
+        assert_eq!(
+            observer
+                .query_row(
+                    "SELECT COUNT(*) FROM pack WHERE id=?1",
+                    [pack.pack_id],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            observer
+                .query_row(
+                    "SELECT state FROM printer_delivery_jobs WHERE job_id=?1",
+                    [&job_id],
+                    |r| r.get::<_, String>(0)
+                )
+                .unwrap(),
+            "queued"
+        );
+        assert_eq!(
+            listener.accept().unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock
+        );
         drop(printer);
         drop(state);
         let printer = PrinterTransportState::with_database(&persisted.database_path()).unwrap();
-        assert_eq!(printer.recover_pending_with_sink(RuntimeEventSink::detached()).unwrap(), 1);
+        assert_eq!(
+            printer
+                .recover_pending_with_sink(RuntimeEventSink::detached())
+                .unwrap(),
+            1
+        );
         let deadline = Instant::now() + Duration::from_secs(10);
         let mut stream = loop {
             match listener.accept() {
                 Ok((stream, _)) => break stream,
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock && Instant::now() < deadline => std::thread::sleep(Duration::from_millis(10)),
+                Err(error)
+                    if error.kind() == std::io::ErrorKind::WouldBlock
+                        && Instant::now() < deadline =>
+                {
+                    std::thread::sleep(Duration::from_millis(10))
+                }
                 Err(error) => panic!("recovery did not connect: {error}"),
             }
         };
-        stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
         let mut received = vec![0; b"^XA^FDOUTBOX^FS^XZ".len()];
         stream.read_exact(&mut received).unwrap();
         assert_eq!(received, b"^XA^FDOUTBOX^FS^XZ");
         loop {
-            let state: String = observer.query_row("SELECT state FROM printer_delivery_jobs WHERE job_id=?1", [&job_id], |r| r.get(0)).unwrap();
-            if state == "accepted" { break; }
+            let state: String = observer
+                .query_row(
+                    "SELECT state FROM printer_delivery_jobs WHERE job_id=?1",
+                    [&job_id],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            if state == "accepted" {
+                break;
+            }
             assert!(Instant::now() < deadline, "recovery state: {state}");
             std::thread::sleep(Duration::from_millis(10));
         }
-        assert_eq!(printer.recover_pending_with_sink(RuntimeEventSink::detached()).unwrap(), 0);
-        let receipt = printer.submit_generated_with_sink(RuntimeEventSink::detached(), json!({
-            "id":"outbox-test", "connection":"tcp", "protocol":"zpl", "ip":"127.0.0.1",
-            "port":port, "jobIdempotencyKey":format!("native-pack:{}", pack.pack_id)
-        }), received).unwrap();
+        assert_eq!(
+            printer
+                .recover_pending_with_sink(RuntimeEventSink::detached())
+                .unwrap(),
+            0
+        );
+        let receipt = printer
+            .submit_generated_with_sink(
+                RuntimeEventSink::detached(),
+                json!({
+                    "id":"outbox-test", "connection":"tcp", "protocol":"zpl", "ip":"127.0.0.1",
+                    "port":port, "jobIdempotencyKey":format!("native-pack:{}", pack.pack_id)
+                }),
+                received,
+            )
+            .unwrap();
         assert!(receipt.deduplicated);
         assert_eq!(receipt.durable_job_id.as_deref(), Some(job_id.as_str()));
-        assert_eq!(listener.accept().unwrap_err().kind(), std::io::ErrorKind::WouldBlock);
+        assert_eq!(
+            listener.accept().unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock
+        );
         printer.disconnect_all();
     }
-
 }
