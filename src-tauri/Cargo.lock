@@ -3694,7 +3694,7 @@ version = "0.1.0"
 
 [[package]]
 name = "labelpilot-tauri"
-version = "2.0.3"
+version = "2.0.4"
 dependencies = [
  "ab_glyph",
  "aes",

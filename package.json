@@ -1,7 +1,7 @@
 {
   "name": "labelpilot-client",
   "private": true,
-  "version": "2.0.3",
+  "version": "2.0.4",
   "repository": {
     "type": "git",
     "url": "https://github.com/HFedorovskyi/electron-labelpilot.git"
