@@ -14,7 +14,7 @@ use crate::{
     runtime_selector::append_runtime_log,
 };
 use serde_json::{json, Value};
-use slint::{ModelRc, VecModel};
+use slint::{Model, ModelRc, VecModel};
 use std::{
     cell::{Cell, RefCell},
     env,
@@ -30,6 +30,70 @@ use std::{
 };
 
 slint::include_modules!();
+
+
+/// Pure settings models are shared by the live UI and its off-screen probe.
+pub fn initialize_settings_models(ui: &WeighingPrototype) {
+    ui.on_filter_settings_devices(|model, query| {
+        let rows = model
+            .iter()
+            .filter(|row| {
+                settings_search_matches(
+                    &format!("{} {} {}", row.value, row.label, row.details),
+                    &query,
+                )
+            })
+            .collect::<Vec<_>>();
+        ModelRc::new(VecModel::from(rows))
+    });
+    ui.on_filter_settings_protocols(|model, query| {
+        let rows = model
+            .iter()
+            .filter(|row| {
+                row.id != "simulator"
+                    && settings_search_matches(
+                        &format!(
+                            "{} {} {} {} {}",
+                            row.id,
+                            row.name,
+                            row.description,
+                            row.default_baud_rate,
+                            row.serial_format
+                        ),
+                        &query,
+                    )
+            })
+            .collect::<Vec<_>>();
+        ModelRc::new(VecModel::from(rows))
+    });
+    ui.on_filter_settings_jobs(|model, filter| {
+        let rows = model
+            .iter()
+            .filter(|row| settings_job_matches(&row.state, &filter))
+            .collect::<Vec<_>>();
+        ModelRc::new(VecModel::from(rows))
+    });
+}
+
+fn settings_draft_open(dirty: bool, keyboard_open: bool) -> bool {
+    dirty || keyboard_open
+}
+
+fn settings_search_matches(text: &str, query: &str) -> bool {
+    let text = text.to_lowercase();
+    query
+        .split_whitespace()
+        .all(|term| text.contains(&term.to_lowercase()))
+}
+
+fn settings_job_matches(state: &str, filter: &str) -> bool {
+    match filter {
+        "problems" => matches!(state, "failed" | "uncertain"),
+        "active" => matches!(state, "queued" | "rendering" | "sending"),
+        "accepted" => state == "accepted",
+        _ => true,
+    }
+}
 
 const CATALOG_PAGE_SIZE: usize = 50;
 
@@ -962,7 +1026,7 @@ fn queue_rows(snapshot: &NativePrinterQueueSnapshot) -> Vec<PrintQueueRow> {
                 error: job
                     .last_error
                     .as_deref()
-                    .map(|value| bounded_text(value, 180))
+                    .map(|value| bounded_text(value, 4096))
                     .unwrap_or_default()
                     .into(),
                 can_retry: matches!(state, "failed" | "uncertain" | "cancelled"),
@@ -1020,7 +1084,7 @@ fn diagnostic_rows(devices: &[NativePrinterDiagnostic]) -> Vec<PrinterDiagnostic
             role: device.role.clone().into(),
             role_label: device.role_label.clone().into(),
             printer_name: device.printer_name.clone().into(),
-            endpoint: bounded_text(&device.endpoint, 120).into(),
+            endpoint: bounded_text(&device.endpoint, 1024).into(),
             transport: format!(
                 "{} / {}",
                 device.protocol.to_uppercase(),
@@ -1029,7 +1093,7 @@ fn diagnostic_rows(devices: &[NativePrinterDiagnostic]) -> Vec<PrinterDiagnostic
             .into(),
             status: device.status.clone().into(),
             status_label: diagnostic_status_label(&device.status).into(),
-            details: bounded_text(&device.details, 220).into(),
+            details: bounded_text(&device.details, 4096).into(),
             reachable: device.reachable,
             configured: device.status != "unconfigured",
             queried: if device.queried_at_ms == 0 {
@@ -2783,6 +2847,7 @@ pub fn run() -> Result<(), String> {
         }
     });
 
+    initialize_settings_models(&ui);
     ui.on_edit_touch_text(|current, key, uppercase| {
         edit_touch_text(current.as_str(), key.as_str(), uppercase).into()
     });
@@ -3316,6 +3381,8 @@ pub fn run() -> Result<(), String> {
                 .cloned();
             if let Some(selected) = selected.as_ref() {
                 apply_printer_role_editor(&ui, selected);
+            } else if matches!(role.as_str(), "packPrinter" | "boxPrinter" | "palletPrinter") {
+                ui.set_settings_selected_role(role.into());
             }
         }
     });
@@ -4445,7 +4512,7 @@ pub fn run() -> Result<(), String> {
                                 );
                             }
                             if diagnostics_changed && ui.get_active_page() == 3 {
-                                if ui.get_settings_dirty() {
+                                if settings_draft_open(ui.get_settings_dirty(), ui.get_settings_input_keyboard_visible()) {
                                     ui.set_settings_status(
                                         "Конфигурация изменилась извне · нажмите ОБНОВИТЬ или СОХРАНИТЬ"
                                             .into(),
@@ -4460,7 +4527,7 @@ pub fn run() -> Result<(), String> {
                                 }
                             }
                             if scale_settings_changed && ui.get_active_page() == 4 {
-                                if ui.get_scale_settings_dirty() {
+                                if settings_draft_open(ui.get_scale_settings_dirty(), ui.get_settings_input_keyboard_visible()) {
                                     ui.set_scale_settings_status(
                                         "Конфигурация изменилась извне · нажмите ОБНОВИТЬ или СОХРАНИТЬ"
                                             .into(),
@@ -6266,5 +6333,56 @@ mod product_selection_tests {
         assert_eq!(snapshot_product_selection(Some(2), None, false), Some(2));
         assert_eq!(snapshot_product_selection(None, Some(1), false), Some(1));
         assert_eq!(snapshot_product_selection(Some(1), Some(2), true), Some(2));
+    }
+}
+
+#[cfg(test)]
+mod settings_ui_tests {
+    use super::{settings_draft_open, settings_job_matches, settings_search_matches};
+
+    #[test]
+    fn settings_search_matches_unicode_terms_and_whitespace() {
+        assert!(settings_search_matches(
+            "COM3 — Принтер Упаковки",
+            "  принТЕР com3 "
+        ));
+        assert!(settings_search_matches("Waage ÜBER USB", "über usb"));
+        assert!(settings_search_matches("Будь-які ваги", " "));
+        assert!(!settings_search_matches("COM3 принтер", "COM4"));
+        assert!(!settings_search_matches("COM3 принтер", "COM3 весы"));
+    }
+
+    #[test]
+    fn settings_queue_groups_match_all_runtime_states() {
+        for state in [
+            "queued",
+            "rendering",
+            "sending",
+            "accepted",
+            "failed",
+            "uncertain",
+            "cancelled",
+        ] {
+            assert!(settings_job_matches(state, "all"));
+            assert_eq!(
+                settings_job_matches(state, "active"),
+                matches!(state, "queued" | "rendering" | "sending")
+            );
+            assert_eq!(
+                settings_job_matches(state, "problems"),
+                matches!(state, "failed" | "uncertain")
+            );
+            assert_eq!(settings_job_matches(state, "accepted"), state == "accepted");
+        }
+        assert!(settings_job_matches("new-state", "all"));
+        assert!(!settings_job_matches("new-state", "active"));
+    }
+
+    #[test]
+    fn settings_touch_draft_also_blocks_background_reloads() {
+        assert!(!settings_draft_open(false, false));
+        assert!(settings_draft_open(true, false));
+        assert!(settings_draft_open(false, true));
+        assert!(settings_draft_open(true, true));
     }
 }

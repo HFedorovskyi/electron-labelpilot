@@ -34,6 +34,10 @@ required-features = ["native-update"]
 name = "weighing_ui_probe"
 required-features = ["slint-ui"]
 
+[[example]]
+name = "settings_ui_probe"
+required-features = ["slint-ui"]
+
 [build-dependencies]
 tauri-build = { version = "2.6.3", features = [], optional = true }
 slint-build = { version = "1.17.1", optional = true }

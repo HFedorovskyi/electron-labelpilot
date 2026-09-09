@@ -1,4 +1,5 @@
 import { LineEdit, ScrollView } from "std-widgets.slint";
+import { SettingsAction, SettingsTab, SettingsCard, SettingsField, SettingsSelect, SettingsToggle, SettingsNotice } from "settings-controls.slint";
 import "../assets/fonts/Inter-Regular.ttf";
 import "../assets/fonts/Inter-Bold.ttf";
 
@@ -501,27 +502,6 @@ component TouchScrollStepButton inherits Rectangle {
     touch := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
 }
 
-component ContextHelpButton inherits Rectangle {
-    in property <bool> selected: false;
-    callback clicked;
-
-    width: 34px;
-    height: 34px;
-    border-radius: 17px;
-    border-width: 1px;
-    border-color: root.selected ? Palette.e500 : Palette.n300;
-    background: touch.pressed ? Palette.e200 : root.selected ? Palette.e100 : touch.has-hover ? Palette.e50 : white;
-    Text {
-        text: "?";
-        color: root.selected ? Palette.e700 : Palette.n600;
-        font-size: 17px;
-        font-weight: 800;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-    }
-    touch := TouchArea { clicked => { root.clicked(); } }
-}
-
 component CompactActionButton inherits Rectangle {
     in property <string> text;
     in property <bool> enabled: true;
@@ -582,83 +562,12 @@ component SettingsSectionNav inherits Rectangle {
     callback open-queue;
     callback open-scales;
     callback open-diagnostics;
-
-    height: root.compact ? 58px : 64px;
-    border-radius: 16px;
-    border-width: 1px;
-    border-color: Palette.n200;
-    background: white;
-
-    HorizontalLayout {
-        padding: 5px;
-        spacing: 6px;
-        SettingsChoiceButton {
-            horizontal-stretch: 1;
-            height: root.compact ? 46px : 52px;
-            text: root.printers-label;
-            subtext: root.print-category;
-            selected: root.active-page == 3;
-            clicked => { root.open-printers(); }
-        }
-        SettingsChoiceButton {
-            horizontal-stretch: 1;
-            height: root.compact ? 46px : 52px;
-            text: root.queue-label;
-            subtext: root.queue-category;
-            selected: root.active-page == 1;
-            clicked => { root.open-queue(); }
-        }
-        SettingsChoiceButton {
-            horizontal-stretch: 1;
-            height: root.compact ? 46px : 52px;
-            text: root.scales-label;
-            subtext: root.equipment-category;
-            selected: root.active-page == 4;
-            clicked => { root.open-scales(); }
-        }
-        SettingsChoiceButton {
-            horizontal-stretch: 1;
-            height: root.compact ? 46px : 52px;
-            text: root.diagnostics-label;
-            subtext: root.system-category;
-            selected: root.active-page == 2;
-            clicked => { root.open-diagnostics(); }
-        }
-    }
-}
-component QueueSummaryCard inherits Rectangle {
-    in property <string> label;
-    in property <int> value;
-    in property <color> accent: Palette.e600;
-    horizontal-stretch: 1;
-    height: 78px;
-    border-radius: 18px;
-    border-width: 1px;
-    border-color: Palette.n200;
-    background: white;
-
-    VerticalLayout {
-        padding-left: 10px;
-        padding-right: 10px;
-        alignment: center;
-        spacing: 2px;
-        Text {
-            horizontal-stretch: 1;
-            text: root.value;
-            color: root.accent;
-            font-size: 24px;
-            font-weight: 800;
-            horizontal-alignment: center;
-        }
-        Text {
-            horizontal-stretch: 1;
-            text: root.label;
-            color: Palette.n500;
-            font-size: 12px;
-            font-weight: 650;
-            horizontal-alignment: center;
-            overflow: elide;
-        }
+    height: 52px; border-radius: 14px; border-width: 1px; border-color: Palette.n200; background: white;
+    HorizontalLayout { padding: 4px; spacing: 4px;
+        SettingsTab { horizontal-stretch: 1; text: root.printers-label; selected: root.active-page == 3; clicked => { root.open-printers(); } }
+        SettingsTab { horizontal-stretch: 1; text: root.scales-label; selected: root.active-page == 4; clicked => { root.open-scales(); } }
+        SettingsTab { horizontal-stretch: 1; text: root.queue-label; selected: root.active-page == 1; clicked => { root.open-queue(); } }
+        SettingsTab { horizontal-stretch: 1; text: root.diagnostics-label; selected: root.active-page == 2; clicked => { root.open-diagnostics(); } }
     }
 }
 
@@ -984,9 +893,9 @@ export component WeighingPrototype inherits Window {
     property <string> sidebar-operator-label: root.ui-language == "en" ? "OPERATOR" : root.ui-language == "de" ? "BEDIENER" : root.ui-language == "uk" ? "ОПЕРАТОР" : "ОПЕРАТОР";
 
     property <string> settings-nav-printers-label: root.ui-language == "en" ? "Printers" : root.ui-language == "de" ? "Drucker" : root.ui-language == "uk" ? "Принтери" : "Принтеры";
-    property <string> settings-nav-queue-label: root.ui-language == "en" ? "Print jobs" : root.ui-language == "de" ? "Druckaufträge" : root.ui-language == "uk" ? "Завдання друку" : "Задания печати";
+    property <string> settings-nav-queue-label: root.ui-language == "en" ? "Print queue" : root.ui-language == "de" ? "Druckwarteschlange" : root.ui-language == "uk" ? "Черга друку" : "Очередь печати";
     property <string> settings-nav-scales-label: root.ui-language == "en" ? "Scales" : root.ui-language == "de" ? "Waagen" : root.ui-language == "uk" ? "Ваги" : "Весы";
-    property <string> settings-nav-diagnostics-label: root.ui-language == "en" ? "System check" : root.ui-language == "de" ? "Systemprüfung" : root.ui-language == "uk" ? "Перевірка системи" : "Проверка системы";
+    property <string> settings-nav-diagnostics-label: root.ui-language == "en" ? "Diagnostics" : root.ui-language == "de" ? "Diagnose" : root.ui-language == "uk" ? "Діагностика" : "Диагностика";
     property <string> settings-nav-print-category: root.ui-language == "en" ? "Labels" : root.ui-language == "de" ? "Etiketten" : root.ui-language == "uk" ? "Етикетки" : "Этикетки";
     property <string> settings-nav-queue-category: root.ui-language == "en" ? "Queue" : root.ui-language == "de" ? "Warteschlange" : root.ui-language == "uk" ? "Черга" : "Очередь";
     property <string> settings-nav-equipment-category: root.ui-language == "en" ? "Connection" : root.ui-language == "de" ? "Verbindung" : root.ui-language == "uk" ? "Підключення" : "Подключение";
@@ -1205,6 +1114,65 @@ export component WeighingPrototype inherits Window {
     in-out property <bool> settings-compatibility-help-visible: false;
     in-out property <length> settings-system-printer-scroll-y: 0px;
     in-out property <length> settings-serial-port-scroll-y: 0px;
+    property <string> form-connection: root.ui-language == "en" ? "Connection" : root.ui-language == "de" ? "Verbindung" : root.ui-language == "uk" ? "Підключення" : "Подключение";
+    property <string> form-label: root.ui-language == "en" ? "Label" : root.ui-language == "de" ? "Etikett" : root.ui-language == "uk" ? "Етикетка" : "Этикетка";
+    property <string> form-compatibility: root.ui-language == "en" ? "Compatibility" : root.ui-language == "de" ? "Kompatibilität" : root.ui-language == "uk" ? "Сумісність" : "Совместимость";
+    property <string> form-stability: root.ui-language == "en" ? "Stability" : root.ui-language == "de" ? "Stabilität" : root.ui-language == "uk" ? "Стабільність" : "Стабильность";
+    property <string> form-device: root.ui-language == "en" ? "Device" : root.ui-language == "de" ? "Gerät" : root.ui-language == "uk" ? "Пристрій" : "Устройство";
+    property <string> form-name: root.ui-language == "en" ? "Printer name" : root.ui-language == "de" ? "Druckername" : root.ui-language == "uk" ? "Назва принтера" : "Название принтера";
+    property <string> form-default-printer: root.ui-language == "en" ? "Default Windows printer" : root.ui-language == "de" ? "Windows-Standarddrucker" : root.ui-language == "uk" ? "Типовий принтер Windows" : "Принтер Windows по умолчанию";
+    property <string> form-choose-port: root.ui-language == "en" ? "Select a COM port" : root.ui-language == "de" ? "COM-Anschluss wählen" : root.ui-language == "uk" ? "Виберіть COM-порт" : "Выберите COM-порт";
+    property <string> form-choose-protocol: root.ui-language == "en" ? "Scale protocol" : root.ui-language == "de" ? "Waagenprotokoll" : root.ui-language == "uk" ? "Протокол ваг" : "Протокол весов";
+    property <string> form-choose-device: root.ui-language == "en" ? "Select device" : root.ui-language == "de" ? "Gerät auswählen" : root.ui-language == "uk" ? "Вибір пристрою" : "Выбор устройства";
+    property <string> form-search: root.ui-language == "en" ? "Search name or port" : root.ui-language == "de" ? "Name oder Anschluss suchen" : root.ui-language == "uk" ? "Пошук за назвою чи портом" : "Поиск по названию или порту";
+    property <string> form-no-results: root.ui-language == "en" ? "No matches. Change the search or refresh the device list." : root.ui-language == "de" ? "Keine Treffer. Suche ändern oder Geräteliste aktualisieren." : root.ui-language == "uk" ? "Збігів немає. Змініть пошук або оновіть список пристроїв." : "Совпадений нет. Измените поиск или обновите список устройств.";
+    property <string> form-paper: root.ui-language == "en" ? "Label size" : root.ui-language == "de" ? "Etikettengröße" : root.ui-language == "uk" ? "Розмір етикетки" : "Размер этикетки";
+    property <string> form-paper-hint: root.ui-language == "en" ? "Leave blank to use the template size; the gap uses the printer setting." : root.ui-language == "de" ? "Leer: Größe aus Vorlage; Abstand aus Druckereinstellung." : root.ui-language == "uk" ? "Порожнє поле — розмір із шаблону; зазор — налаштування принтера." : "Пустое поле — размер из шаблона; зазор — настройка принтера.";
+    property <string> form-width: root.ui-language == "en" ? "Width, mm" : root.ui-language == "de" ? "Breite, mm" : root.ui-language == "uk" ? "Ширина, мм" : "Ширина, мм";
+    property <string> form-height: root.ui-language == "en" ? "Height, mm" : root.ui-language == "de" ? "Höhe, mm" : root.ui-language == "uk" ? "Висота, мм" : "Высота, мм";
+    property <string> form-gap: root.ui-language == "en" ? "Gap, mm" : root.ui-language == "de" ? "Abstand, mm" : root.ui-language == "uk" ? "Зазор, мм" : "Зазор, мм";
+    property <string> form-quality: root.ui-language == "en" ? "Quality and speed" : root.ui-language == "de" ? "Qualität und Geschwindigkeit" : root.ui-language == "uk" ? "Якість і швидкість" : "Качество и скорость";
+    property <string> form-darkness: root.ui-language == "en" ? "Darkness · 0–30" : root.ui-language == "de" ? "Druckdichte · 0–30" : root.ui-language == "uk" ? "Щільність друку · 0–30" : "Плотность печати · 0–30";
+    property <string> form-print-speed: root.ui-language == "en" ? "Speed · 1–14 in/s" : root.ui-language == "de" ? "Tempo · 1–14 Zoll/s" : root.ui-language == "uk" ? "Швидкість · 1–14 дюйм/с" : "Скорость · 1–14 дюйм/с";
+    property <string> form-default: root.ui-language == "en" ? "Default" : root.ui-language == "de" ? "Standard" : root.ui-language == "uk" ? "Типово" : "По умолчанию";
+    property <string> form-polling: root.ui-language == "en" ? "Polling interval, ms" : root.ui-language == "de" ? "Abfrageintervall, ms" : root.ui-language == "uk" ? "Інтервал опитування, мс" : "Интервал опроса, мс";
+    property <string> form-samples: root.ui-language == "en" ? "Stable readings" : root.ui-language == "de" ? "Stabile Messwerte" : root.ui-language == "uk" ? "Відліки стабільності" : "Отсчёты стабильности";
+    property <string> form-stability-hint: root.ui-language == "en" ? "Choose a preset or enter values. Applied after saving." : root.ui-language == "de" ? "Voreinstellung oder eigene Werte. Gilt nach dem Speichern." : root.ui-language == "uk" ? "Готовий режим або власні значення. Діють після збереження." : "Готовый режим или свои значения. Применяются после сохранения.";
+    property <string> form-saved: root.ui-language == "en" ? "No changes" : root.ui-language == "de" ? "Keine Änderungen" : root.ui-language == "uk" ? "Змін немає" : "Изменений нет";
+    property <string> form-unsaved: root.ui-language == "en" ? "Unsaved changes" : root.ui-language == "de" ? "Ungespeicherte Änderungen" : root.ui-language == "uk" ? "Є незбережені зміни" : "Есть несохранённые изменения";
+    property <string> form-discard-title: root.ui-language == "en" ? "Discard changes?" : root.ui-language == "de" ? "Änderungen verwerfen?" : root.ui-language == "uk" ? "Скинути зміни?" : "Сбросить изменения?";
+    property <string> form-discard-text: root.ui-language == "en" ? "This form has unsaved changes. Stay to save them or confirm discard." : root.ui-language == "de" ? "Dieses Formular enthält ungespeicherte Änderungen. Bleiben und speichern oder verwerfen." : root.ui-language == "uk" ? "У цій картці є незбережені зміни. Залишіться й збережіть їх або підтвердьте скидання." : "В этой карточке есть несохранённые правки. Останьтесь и сохраните их или подтвердите сброс.";
+    property <string> form-stay: root.ui-language == "en" ? "Stay" : root.ui-language == "de" ? "Bleiben" : root.ui-language == "uk" ? "Залишитися" : "Остаться";
+    property <string> form-discard: root.ui-language == "en" ? "Discard and continue" : root.ui-language == "de" ? "Verwerfen und weiter" : root.ui-language == "uk" ? "Скинути й продовжити" : "Сбросить и продолжить";
+    property <string> form-all: root.ui-language == "en" ? "All" : root.ui-language == "de" ? "Alle" : root.ui-language == "uk" ? "Усі" : "Все";
+    property <string> form-problems: root.ui-language == "en" ? "Need attention" : root.ui-language == "de" ? "Handlungsbedarf" : root.ui-language == "uk" ? "Потребують уваги" : "Требуют решения";
+    property <string> form-active: root.ui-language == "en" ? "In progress" : root.ui-language == "de" ? "In Arbeit" : root.ui-language == "uk" ? "У роботі" : "В работе";
+    property <string> form-accepted: root.ui-language == "en" ? "Accepted" : root.ui-language == "de" ? "Angenommen" : root.ui-language == "uk" ? "Прийнято" : "Принято";
+    property <string> form-queue: root.ui-language == "en" ? "Print queue" : root.ui-language == "de" ? "Druckwarteschlange" : root.ui-language == "uk" ? "Черга друку" : "Очередь печати";
+    property <string> form-queue-empty: root.ui-language == "en" ? "No jobs in this group" : root.ui-language == "de" ? "Keine Aufträge in dieser Gruppe" : root.ui-language == "uk" ? "У цій групі немає завдань" : "В этой группе нет заданий";
+    property <string> form-queue-empty-hint: root.ui-language == "en" ? "Select another group or refresh the queue." : root.ui-language == "de" ? "Andere Gruppe wählen oder Warteschlange aktualisieren." : root.ui-language == "uk" ? "Виберіть іншу групу або оновіть чергу." : "Выберите другую группу или обновите очередь.";
+    property <string> form-attempt: root.ui-language == "en" ? "Attempt" : root.ui-language == "de" ? "Versuch" : root.ui-language == "uk" ? "Спроба" : "Попытка";
+    property <string> form-retry: root.ui-language == "en" ? "Retry" : root.ui-language == "de" ? "Wiederholen" : root.ui-language == "uk" ? "Повторити" : "Повторить";
+    property <string> form-cancel: root.ui-language == "en" ? "Cancel" : root.ui-language == "de" ? "Abbrechen" : root.ui-language == "uk" ? "Скасувати" : "Отменить";
+    property <string> form-diagnostics: root.ui-language == "en" ? "Printer check" : root.ui-language == "de" ? "Druckerprüfung" : root.ui-language == "uk" ? "Перевірка принтерів" : "Проверка принтеров";
+    property <string> form-diagnostics-hint: root.ui-language == "en" ? "Connection check via TCP, COM or Windows. See device details below." : root.ui-language == "de" ? "Verbindung über TCP, COM oder Windows prüfen. Details in der Gerätekarte." : root.ui-language == "uk" ? "Перевірка з’єднання через TCP, COM або Windows. Деталі — у картці пристрою." : "Проверка подключения по TCP, COM или через Windows. Подробности — в карточке устройства.";
+    property <string> form-check-all: root.ui-language == "en" ? "Check all" : root.ui-language == "de" ? "Alle prüfen" : root.ui-language == "uk" ? "Перевірити всі" : "Проверить все";
+    property <string> form-configure: root.ui-language == "en" ? "Configure" : root.ui-language == "de" ? "Einrichten" : root.ui-language == "uk" ? "Налаштувати" : "Настроить";
+    property <string> form-check-empty: root.ui-language == "en" ? "Run a device check" : root.ui-language == "de" ? "Geräteprüfung starten" : root.ui-language == "uk" ? "Запустіть перевірку пристроїв" : "Запустите проверку устройств";
+    property <string> form-working: root.ui-language == "en" ? "Working…" : root.ui-language == "de" ? "Wird ausgeführt…" : root.ui-language == "uk" ? "Виконується…" : "Выполняется…";
+    property <string> form-graphics: root.ui-language == "en" ? "Memory and compression" : root.ui-language == "de" ? "Speicher und Komprimierung" : root.ui-language == "uk" ? "Пам’ять і стиснення" : "Память и сжатие";
+    property <string> form-compression: root.ui-language == "en" ? "Z64 compression" : root.ui-language == "de" ? "Z64-Komprimierung" : root.ui-language == "uk" ? "Стиснення Z64" : "Сжатие Z64";
+    in-out property <int> settings-printer-section: 0;
+    in-out property <int> settings-scale-section: 0;
+    in-out property <length> settings-printer-scroll-y: 0px;
+    in-out property <string> settings-picker-target: "";
+    in-out property <string> settings-picker-search: "";
+    in-out property <length> settings-picker-scroll-y: 0px;
+    in-out property <bool> settings-discard-visible: false;
+    in-out property <string> settings-discard-action: "";
+    in-out property <string> settings-pending-role: "";
+    in-out property <string> settings-queue-filter: "all";
+    in-out property <length> settings-queue-scroll-y: 0px;
     in-out property <bool> settings-input-keyboard-visible: false;
     in-out property <string> settings-input-target: "";
     in-out property <string> settings-input-caption: "";
@@ -1548,6 +1516,133 @@ export component WeighingPrototype inherits Window {
 
     callback select-product(int);
     callback search-products(string);
+    in-out property <length> settings-diagnostics-scroll-y: 0px;
+    property <[PrinterChoiceRow]> settings-picker-source: root.settings-picker-target == "printer" ? root.settings-system-printers : root.settings-picker-target == "printer-serial" ? root.settings-serial-ports : root.scale-settings-serial-ports;
+    property <[PrinterChoiceRow]> settings-picker-devices: root.filter-settings-devices(root.settings-picker-source, root.settings-picker-search);
+    property <[ScaleProtocolRow]> settings-picker-protocols: root.filter-settings-protocols(root.scale-settings-protocols, root.settings-picker-search);
+    property <[PrintQueueRow]> settings-visible-jobs: root.filter-settings-jobs(root.durable-jobs, root.settings-queue-filter);
+    pure callback filter-settings-devices([PrinterChoiceRow], string) -> [PrinterChoiceRow];
+    pure callback filter-settings-protocols([ScaleProtocolRow], string) -> [ScaleProtocolRow];
+    pure callback filter-settings-jobs([PrintQueueRow], string) -> [PrintQueueRow];
+    callback open-settings-diagnostic-role(string);
+    callback request-settings-page(int);
+    callback request-settings-role(string);
+    callback request-settings-reload(bool);
+    callback confirm-settings-discard;
+    callback cancel-settings-discard;
+    callback open-settings-input(string, string, string, int);
+    callback accept-settings-input;
+    callback select-settings-device(string, string, string, int);
+
+    open-settings-diagnostic-role(role) => {
+        if !root.settings-busy && !root.scale-settings-busy {
+            root.active-page = 3;
+            if root.settings-dirty { root.request-settings-role(role); }
+            else {
+                root.settings-selected-role = role;
+                root.settings-printer-section = 0;
+                root.settings-printer-scroll-y = 0px;
+                root.reload-printer-settings();
+            }
+        }
+    }
+    request-settings-page(page) => {
+        if root.settings-busy || root.scale-settings-busy {
+            root.toast-text = root.form-working; root.toast-visible = true;
+        } else if root.active-page != page {
+            root.active-page = page;
+            if page == 3 && !root.settings-dirty { root.reload-printer-settings(); }
+            if page == 4 && !root.scale-settings-dirty { root.reload-scale-settings(); }
+            if page == 1 { root.refresh-print-queue(); }
+            if page == 2 { root.probe-printers(); }
+        }
+    }
+    request-settings-role(role) => {
+        if !root.settings-busy && role != root.settings-selected-role {
+            if root.settings-dirty {
+                root.settings-pending-role = role;
+                root.settings-discard-action = "role";
+                root.settings-discard-visible = true;
+            } else {
+                root.settings-printer-scroll-y = 0px;
+                root.select-printer-role(role);
+            }
+        }
+    }
+    request-settings-reload(scales) => {
+        if !root.settings-busy && !root.scale-settings-busy {
+            if scales ? root.scale-settings-dirty : root.settings-dirty {
+                root.settings-discard-action = scales ? "scale-reload" : "printer-reload";
+                root.settings-discard-visible = true;
+            } else if scales { root.reload-scale-settings(); }
+            else { root.reload-printer-settings(); }
+        }
+    }
+    cancel-settings-discard => { root.settings-discard-visible = false; root.settings-discard-action = ""; root.settings-pending-role = ""; }
+    confirm-settings-discard => {
+        if root.settings-discard-visible && !root.settings-busy && !root.scale-settings-busy {
+            root.settings-discard-visible = false;
+            if root.settings-discard-action == "role" {
+                root.settings-dirty = false;
+                root.settings-printer-scroll-y = 0px;
+                root.select-printer-role(root.settings-pending-role);
+            } else if root.settings-discard-action == "scale-reload" {
+                root.scale-settings-dirty = false;
+                root.reload-scale-settings();
+            } else if root.settings-discard-action == "printer-reload" {
+                root.settings-dirty = false;
+                root.reload-printer-settings();
+            }
+            root.settings-discard-action = "";
+            root.settings-pending-role = "";
+        }
+    }
+    open-settings-input(target, caption, value, layout) => {
+        if !root.settings-busy && !root.scale-settings-busy {
+            root.settings-input-target = target; root.settings-input-caption = caption;
+            root.settings-input-draft = value; root.touch-keyboard-layout = layout;
+            root.touch-keyboard-uppercase = false; root.settings-input-keyboard-visible = true;
+        }
+    }
+    select-settings-device(value, name, description, baud) => {
+        if !root.settings-busy && !root.scale-settings-busy {
+            if root.settings-picker-target == "printer" {
+                if root.settings-driver-name != value { root.settings-driver-name = value; root.settings-dirty = true; }
+            } else if root.settings-picker-target == "printer-serial" {
+                if root.settings-serial-port != value { root.settings-serial-port = value; root.settings-dirty = true; }
+            } else if root.settings-picker-target == "scale-serial" {
+                if root.scale-settings-serial-path != value { root.scale-settings-serial-path = value; root.scale-settings-dirty = true; }
+            } else if root.settings-picker-target == "scale-protocol" && value != "simulator" {
+                if root.scale-settings-protocol != value {
+                    root.scale-settings-protocol = value; root.scale-settings-protocol-name = name;
+                    root.scale-settings-protocol-description = description;
+                    root.scale-settings-baud-rate = "" + baud; root.scale-settings-dirty = true;
+                }
+            }
+            root.settings-picker-target = "";
+        }
+    }
+    accept-settings-input => {
+        if root.settings-input-keyboard-visible && !root.settings-busy && !root.scale-settings-busy {
+        if root.settings-input-target == "printer-ip" && root.settings-ip != root.settings-input-draft { root.settings-ip = root.settings-input-draft; root.settings-dirty = true; }
+        if root.settings-input-target == "printer-port" && root.settings-port != root.settings-input-draft { root.settings-port = root.settings-input-draft; root.settings-dirty = true; }
+        if root.settings-input-target == "printer-baud" && root.settings-baud-rate != root.settings-input-draft { root.settings-baud-rate = root.settings-input-draft; root.settings-dirty = true; }
+        if root.settings-input-target == "printer-name" && root.settings-name != root.settings-input-draft { root.settings-name = root.settings-input-draft; root.settings-dirty = true; }
+        if root.settings-input-target == "printer-width" && root.settings-width-mm != root.settings-input-draft { root.settings-width-mm = root.settings-input-draft; root.settings-dirty = true; }
+        if root.settings-input-target == "printer-height" && root.settings-height-mm != root.settings-input-draft { root.settings-height-mm = root.settings-input-draft; root.settings-dirty = true; }
+        if root.settings-input-target == "printer-gap" && root.settings-gap-mm != root.settings-input-draft { root.settings-gap-mm = root.settings-input-draft; root.settings-dirty = true; }
+        if root.settings-input-target == "printer-darkness" && root.settings-darkness != root.settings-input-draft { root.settings-darkness = root.settings-input-draft; root.settings-dirty = true; }
+        if root.settings-input-target == "printer-speed" && root.settings-print-speed != root.settings-input-draft { root.settings-print-speed = root.settings-input-draft; root.settings-dirty = true; }
+        if root.settings-input-target == "scale-host" && root.scale-settings-host != root.settings-input-draft { root.scale-settings-host = root.settings-input-draft; root.scale-settings-dirty = true; }
+        if root.settings-input-target == "scale-port" && root.scale-settings-port != root.settings-input-draft { root.scale-settings-port = root.settings-input-draft; root.scale-settings-dirty = true; }
+        if root.settings-input-target == "scale-baud" && root.scale-settings-baud-rate != root.settings-input-draft { root.scale-settings-baud-rate = root.settings-input-draft; root.scale-settings-dirty = true; }
+        if root.settings-input-target == "scale-polling" && root.scale-settings-polling != root.settings-input-draft { root.scale-settings-polling = root.settings-input-draft; root.scale-settings-dirty = true; }
+        if root.settings-input-target == "scale-samples" && root.scale-settings-stability-count != root.settings-input-draft { root.scale-settings-stability-count = root.settings-input-draft; root.scale-settings-dirty = true; }
+        if root.settings-input-target == "device-search" { root.settings-picker-search = root.settings-input-draft; root.settings-picker-scroll-y = 0px; }
+        root.settings-input-keyboard-visible = false;
+        }
+    }
+
     callback edit-touch-text(string, string, bool) -> string;
     callback select-operator(int);
     callback submit-operator-pin(int, string);
@@ -1722,7 +1817,7 @@ export component WeighingPrototype inherits Window {
                             icon: @image-url("../assets/icons/settings.png");
                             active: root.active-page == 1 || root.active-page == 2 || root.active-page == 3 || root.active-page == 4;
                             collapsed: root.effective-collapsed;
-                            clicked => { root.active-page = 3; root.reload-printer-settings(); root.reload-scale-settings(); }
+                            clicked => { root.request-settings-page(3); }
                         }
                     }
                 }
@@ -2367,176 +2462,64 @@ export component WeighingPrototype inherits Window {
 
     if root.active-page == 1: Rectangle {
         x: (parent.width - root.shell-width) / 2 + root.sidebar-width + root.page-offset;
-        width: root.page-width;
-        height: parent.height;
-        background: Palette.n50;
-
+        width: root.page-width; height: parent.height; background: Palette.n50;
         VerticalLayout {
-            padding: root.content-padding;
-            spacing: root.narrow ? 12px : 16px;
+            padding: root.narrow ? 16px : 22px; spacing: 10px;
             SettingsSectionNav {
-                active-page: root.active-page;
-                compact: root.narrow || root.short;
-                printers-label: root.settings-nav-printers-label;
-                queue-label: root.settings-nav-queue-label;
-                scales-label: root.settings-nav-scales-label;
-                diagnostics-label: root.settings-nav-diagnostics-label;
-                print-category: root.settings-nav-print-category;
-                queue-category: root.settings-nav-queue-category;
-                equipment-category: root.settings-nav-equipment-category;
-                system-category: root.settings-nav-system-category;
-                open-printers => { root.active-page = 3; root.reload-printer-settings(); }
-                open-queue => { root.active-page = 1; root.refresh-print-queue(); }
-                open-scales => { root.active-page = 4; root.reload-scale-settings(); }
-                open-diagnostics => { root.active-page = 2; root.probe-printers(); }
-            }
+                active-page: root.active-page; compact: true;
+                printers-label: root.settings-nav-printers-label; queue-label: root.settings-nav-queue-label;
+                scales-label: root.settings-nav-scales-label; diagnostics-label: root.settings-nav-diagnostics-label;
+                open-printers => { root.request-settings-page(3); }
+                open-queue => { root.request-settings-page(1); }
+                open-scales => { root.request-settings-page(4); }
+                open-diagnostics => { root.request-settings-page(2); }
 
-            Rectangle {
-                height: 56px;
-                background: transparent;
-                VerticalLayout {
-                    width: parent.width - 380px;
-                    height: parent.height;
-                    x: (parent.width - self.width) / 2;
-                    alignment: center;
-                    spacing: 2px;
-                    Text { horizontal-stretch: 1; text: "Очередь печати"; color: Palette.n900; font-size: 26px; font-weight: 750; horizontal-alignment: center; overflow: elide; }
-                    Text { horizontal-stretch: 1; text: root.queue-status; color: Palette.n500; font-size: 13px; horizontal-alignment: center; overflow: elide; }
-                }
-                CompactActionButton {
-                    width: root.narrow ? 148px : 180px;
-                    x: parent.width - self.width;
-                    y: (parent.height - self.height) / 2;
-                    text: root.queue-busy ? "ОБНОВЛЕНИЕ…" : "ОБНОВИТЬ";
-                    primary: true;
-                    enabled: !root.queue-busy;
-                    clicked => { root.refresh-print-queue(); }
-                }
             }
-
             HorizontalLayout {
-                height: 78px;
-                spacing: root.narrow ? 8px : 12px;
-                QueueSummaryCard { label: "В РАБОТЕ"; value: root.queue-waiting; accent: Palette.a500; }
-                QueueSummaryCard { label: "ПРИНЯТО"; value: root.queue-accepted; accent: Palette.e500; }
-                QueueSummaryCard { label: "ТРЕБУЕТ РЕШЕНИЯ"; value: root.queue-problems; accent: Palette.r500; }
-                QueueSummaryCard { label: "ВСЕГО"; value: root.queue-total; accent: Palette.n500; }
-            }
-
-            Rectangle {
-                vertical-stretch: 1;
-                border-radius: 20px;
-                border-width: 1px;
-                border-color: Palette.n200;
-                background: white;
-                clip: true;
-
+                spacing: 12px;
                 VerticalLayout {
-                    padding: root.narrow ? 12px : 16px;
-                    spacing: 10px;
-                    Rectangle {
-                        height: 28px;
-                        background: transparent;
-                        Text { width: parent.width; height: parent.height; text: "ПОСЛЕДНИЕ ЗАДАНИЯ"; color: Palette.n500; font-size: 12px; font-weight: 700; letter-spacing: 1px; horizontal-alignment: center; vertical-alignment: center; }
-                        Text { width: 130px; height: parent.height; x: parent.width - self.width; text: root.durable-jobs.length + " записей"; color: Palette.n400; font-size: 12px; horizontal-alignment: right; vertical-alignment: center; }
+                    horizontal-stretch: 1; alignment: center; spacing: 3px;
+                    Text { min-width: 0px; text: root.form-queue; color: Palette.n900; font-size: 24px; font-weight: 750; wrap: word-wrap; }
+                    Text { min-width: 0px; text: root.queue-status; color: Palette.n500; font-size: 12px; wrap: word-wrap; }
+                }
+                SettingsAction { width: 164px; text: root.queue-busy ? root.form-working : root.settings-refresh-label; enabled: !root.queue-busy; clicked => { root.refresh-print-queue(); } }
+            }
+            HorizontalLayout {
+                spacing: 12px;
+                SettingsTab { horizontal-stretch: 1; text: root.form-all + " · " + root.queue-total; selected: root.settings-queue-filter == "all"; enabled: !root.queue-busy; clicked => { root.settings-queue-filter = "all"; root.settings-queue-scroll-y = 0px; } }
+                SettingsTab { horizontal-stretch: 1; text: root.form-problems + " · " + root.queue-problems; selected: root.settings-queue-filter == "problems"; enabled: !root.queue-busy; clicked => { root.settings-queue-filter = "problems"; root.settings-queue-scroll-y = 0px; } }
+                SettingsTab { horizontal-stretch: 1; text: root.form-active + " · " + root.queue-waiting; selected: root.settings-queue-filter == "active"; enabled: !root.queue-busy; clicked => { root.settings-queue-filter = "active"; root.settings-queue-scroll-y = 0px; } }
+                SettingsTab { horizontal-stretch: 1; text: root.form-accepted + " · " + root.queue-accepted; selected: root.settings-queue-filter == "accepted"; enabled: !root.queue-busy; clicked => { root.settings-queue-filter = "accepted"; root.settings-queue-scroll-y = 0px; } }
+            }
+            settings-queue-view := ScrollView {
+                min-height: 0px; vertical-stretch: 1;
+                viewport-width: self.visible-width;
+                viewport-height: max(self.visible-height, settings-queue-view-content.min-height);
+                viewport-y <=> root.settings-queue-scroll-y;
+                horizontal-scrollbar-policy: ScrollBarPolicy.always-off; mouse-drag-pan-enabled: true;
+                settings-queue-view-content := VerticalLayout {
+                    spacing: 12px; alignment: start; padding-right: 8px; padding-bottom: 4px;
+                    if root.settings-visible-jobs.length == 0: SettingsCard {
+                        title: root.form-queue-empty;
+                        SettingsNotice { text: root.form-queue-empty-hint;  }
                     }
-                    if root.durable-jobs.length == 0: Rectangle {
-                        vertical-stretch: 1;
-                        border-radius: 18px;
-                        background: Palette.n50;
-                        VerticalLayout {
-                            alignment: center;
-                            spacing: 12px;
-                            VerticalIcon { icon-size: 46px; icon: @image-url("../assets/icons/list-restart.png"); icon-color: Palette.n400; }
-                            Text { text: root.queue-busy ? "Загрузка очереди…" : "Очередь пуста"; color: Palette.n700; font-size: 19px; font-weight: 650; horizontal-alignment: center; }
-                            Text { text: "Новые задания появятся здесь автоматически"; color: Palette.n500; font-size: 14px; horizontal-alignment: center; }
-                        }
-                    }
-                    if root.durable-jobs.length > 0: ScrollView {
-                        vertical-stretch: 1;
-                        viewport-width: self.width;
-                        vertical-scrollbar-policy: ScrollBarPolicy.always-off;
-                        horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
-                        mouse-drag-pan-enabled: true;
-                        VerticalLayout {
-                            spacing: 9px;
-                            for job in root.durable-jobs: Rectangle {
-                                height: root.narrow ? 118px : 108px;
-                                border-radius: 16px;
-                                border-width: 1px;
-                                border-color: job.warning ? Palette.a300 : job.good ? Palette.e200 : job.state == "failed" ? Palette.r300 : Palette.n200;
-                                background: job.warning ? Palette.a50 : job.good ? Palette.e50 : job.state == "failed" ? Palette.r50 : Palette.n50;
-                                HorizontalLayout {
-                                    padding-left: 16px;
-                                    padding-right: 12px;
-                                    spacing: 14px;
-                                    StatusDot {
-                                        dot-size: 12px;
-                                        dot-color: job.warning ? Palette.a500 : job.good ? Palette.e500 : job.state == "failed" ? Palette.r500 : Palette.n400;
-                                    }
-                                    VerticalLayout {
-                                        alignment: center;
-                                        spacing: 4px;
-                                        HorizontalLayout {
-                                            spacing: 9px;
-                                            Text { text: job.printer-name; color: Palette.n900; font-size: 16px; font-weight: 700; overflow: elide; }
-                                            Rectangle {
-                                                width: 116px;
-                                                height: 28px;
-                                                border-radius: 14px;
-                                                background: job.warning ? #f59e0b22 : job.good ? #10b98122 : job.state == "failed" ? #ef444422 : Palette.n200;
-                                                Text { text: job.state-label; color: job.warning ? Palette.a700 : job.good ? Palette.e700 : job.state == "failed" ? Palette.r700 : Palette.n600; font-size: 11px; font-weight: 750; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
-                                            }
-                                        }
-                                        Text { text: job.action + " · " + job.route + " · " + job.payload; color: Palette.n600; font-size: 13px; overflow: elide; }
-                                        Text { text: "#" + job.short-id + " · попытка " + job.attempts + " · " + job.updated; color: Palette.n400; font-family: "Consolas"; font-size: 11px; overflow: elide; }
-                                        if job.error != "": Text { text: job.error; color: job.warning ? Palette.a700 : Palette.r600; font-size: 11px; overflow: elide; }
-                                    }
-                                    Rectangle { horizontal-stretch: 1; }
-                                    Rectangle {
-                                        width: root.narrow ? 230px : 252px;
-                                        vertical-stretch: 1;
-                                        background: transparent;
-                                        HorizontalLayout {
-                                            width: parent.width;
-                                            height: 48px;
-                                            y: (parent.height - self.height) / 2;
-                                            alignment: center;
-                                            spacing: 8px;
-                                            if job.can-retry: CompactActionButton {
-                                                text: "ПОВТОРИТЬ";
-                                                primary: !job.uncertain;
-                                                clicked => {
-                                                    root.confirm-print-action = "retry";
-                                                    root.confirm-print-job-id = job.job-id;
-                                                    root.confirm-print-job-title = job.short-id;
-                                                    root.confirm-print-uncertain = job.uncertain;
-                                                    root.confirm-print-action-visible = true;
-                                                }
-                                            }
-                                            if job.can-cancel: CompactActionButton {
-                                                text: "ОТМЕНИТЬ";
-                                                danger: true;
-                                                clicked => {
-                                                    root.confirm-print-action = "cancel";
-                                                    root.confirm-print-job-id = job.job-id;
-                                                    root.confirm-print-job-title = job.short-id;
-                                                    root.confirm-print-uncertain = false;
-                                                    root.confirm-print-action-visible = true;
-                                                }
-                                            }
-                                            if !job.can-retry && !job.can-cancel: Text {
-                                                width: 116px;
-                                                text: "ЗАВЕРШЕНО";
-                                                color: Palette.n400;
-                                                font-size: 11px;
-                                                font-weight: 700;
-                                                horizontal-alignment: center;
-                                                vertical-alignment: center;
-                                            }
-                                        }
-                                    }
+                    for job in root.settings-visible-jobs: Rectangle {
+                        min-width: 0px; min-height: job-content.min-height; preferred-height: job-content.preferred-height; vertical-stretch: 0;
+                        border-radius: 14px; border-width: 1px; border-color: job.warning ? Palette.a300 : job.state == "failed" ? Palette.r300 : Palette.n200; background: white;
+                        job-content := VerticalLayout { padding: 16px; spacing: 10px; alignment: start;
+                            HorizontalLayout { spacing: 12px;
+                                Text { min-width: 0px; horizontal-stretch: 1; text: job.printer-name; color: Palette.n900; font-size: 15px; font-weight: 700; wrap: word-wrap; }
+                                Rectangle { width: 156px; height: 32px; border-radius: 8px; background: job.warning ? Palette.a50 : job.good ? Palette.e50 : job.state == "failed" ? Palette.r50 : Palette.n100;
+                                    Text { x: 8px; width: parent.width - 16px; text: job.state-label; color: job.warning ? Palette.a700 : job.good ? Palette.e700 : job.state == "failed" ? Palette.r700 : Palette.n600; font-size: 12px; font-weight: 650; wrap: word-wrap; horizontal-alignment: center; vertical-alignment: center; }
                                 }
+                            }
+                            Text { min-width: 0px; text: job.action + " · " + job.route + " · " + job.payload; color: Palette.n600; font-size: 12px; wrap: word-wrap; }
+                            Text { min-width: 0px; text: "#" + job.short-id + " · " + root.form-attempt + " " + job.attempts + " · " + job.updated; color: Palette.n500; font-size: 12px; wrap: word-wrap; }
+                            if job.error != "": SettingsNotice { text: job.error; warning: true; }
+                            if job.can-retry || job.can-cancel: HorizontalLayout { spacing: 8px;
+                                Rectangle { horizontal-stretch: 1; }
+                                if job.can-retry: SettingsAction { width: 156px; text: root.form-retry; primary: !job.uncertain; enabled: !root.queue-busy; clicked => { root.confirm-print-action = "retry"; root.confirm-print-job-id = job.job-id; root.confirm-print-job-title = job.short-id; root.confirm-print-uncertain = job.uncertain; root.confirm-print-action-visible = true; } }
+                                if job.can-cancel: SettingsAction { width: 156px; text: root.form-cancel; danger: true; enabled: !root.queue-busy; clicked => { root.confirm-print-action = "cancel"; root.confirm-print-job-id = job.job-id; root.confirm-print-job-title = job.short-id; root.confirm-print-uncertain = false; root.confirm-print-action-visible = true; } }
                             }
                         }
                     }
@@ -2547,123 +2530,57 @@ export component WeighingPrototype inherits Window {
 
     if root.active-page == 2: Rectangle {
         x: (parent.width - root.shell-width) / 2 + root.sidebar-width + root.page-offset;
-        width: root.page-width;
-        height: parent.height;
-        background: Palette.n50;
-
+        width: root.page-width; height: parent.height; background: Palette.n50;
         VerticalLayout {
-            padding: root.content-padding;
-            spacing: root.narrow ? 12px : 16px;
+            padding: root.narrow ? 16px : 22px; spacing: 10px;
             SettingsSectionNav {
-                active-page: root.active-page;
-                compact: root.narrow || root.short;
-                printers-label: root.settings-nav-printers-label;
-                queue-label: root.settings-nav-queue-label;
-                scales-label: root.settings-nav-scales-label;
-                diagnostics-label: root.settings-nav-diagnostics-label;
-                print-category: root.settings-nav-print-category;
-                queue-category: root.settings-nav-queue-category;
-                equipment-category: root.settings-nav-equipment-category;
-                system-category: root.settings-nav-system-category;
-                open-printers => { root.active-page = 3; root.reload-printer-settings(); }
-                open-queue => { root.active-page = 1; root.refresh-print-queue(); }
-                open-scales => { root.active-page = 4; root.reload-scale-settings(); }
-                open-diagnostics => { root.active-page = 2; root.probe-printers(); }
+                active-page: root.active-page; compact: true;
+                printers-label: root.settings-nav-printers-label; queue-label: root.settings-nav-queue-label;
+                scales-label: root.settings-nav-scales-label; diagnostics-label: root.settings-nav-diagnostics-label;
+                open-printers => { root.request-settings-page(3); }
+                open-queue => { root.request-settings-page(1); }
+                open-scales => { root.request-settings-page(4); }
+                open-diagnostics => { root.request-settings-page(2); }
+
             }
             HorizontalLayout {
-                height: 62px;
                 spacing: 12px;
                 VerticalLayout {
-                    alignment: center;
-                    spacing: 3px;
-                    Text { text: "Диагностика принтеров"; color: Palette.n900; font-size: 26px; font-weight: 750; }
-                    Text { text: root.diagnostics-status; color: Palette.n500; font-size: 13px; overflow: elide; }
+                    horizontal-stretch: 1; alignment: center; spacing: 3px;
+                    Text { min-width: 0px; text: root.form-diagnostics; color: Palette.n900; font-size: 24px; font-weight: 750; wrap: word-wrap; }
+                    Text { min-width: 0px; text: root.diagnostics-status; color: Palette.n500; font-size: 12px; wrap: word-wrap; }
                 }
-                Rectangle { horizontal-stretch: 1; }
-                CompactActionButton {
-                    width: root.narrow ? 168px : 210px;
-                    text: root.diagnostics-busy ? "ПРОВЕРКА…" : "ПРОВЕРИТЬ ВСЕ";
-                    primary: true;
-                    enabled: !root.diagnostics-busy;
-                    clicked => { root.probe-printers(); }
-                }
+                SettingsAction { width: 164px; text: root.diagnostics-busy ? root.form-working : root.form-check-all; enabled: !root.diagnostics-busy; clicked => { root.probe-printers(); } }
             }
-
-            Rectangle {
-                height: 64px;
-                border-radius: 16px;
-                border-width: 1px;
-                border-color: Palette.e200;
-                background: Palette.e50;
-                HorizontalLayout {
-                    padding-left: 18px;
-                    padding-right: 18px;
-                    spacing: 12px;
-                    HorizontalIcon { icon-size: 26px; icon: @image-url("../assets/icons/stethoscope.png"); icon-color: Palette.e600; }
-                    Text { text: "Проверка выполняется напрямую через TCP, Serial или очередь Windows. Рабочий экран остаётся отзывчивым."; color: Palette.e700; font-size: 13px; wrap: word-wrap; vertical-alignment: center; }
-                }
-            }
-
-            ScrollView {
-                vertical-stretch: 1;
-                viewport-width: self.width;
-                VerticalLayout {
-                    spacing: 12px;
-                    if root.printer-diagnostics.length == 0: Rectangle {
-                        height: 260px;
-                        border-radius: 22px;
-                        border-width: 1px;
-                        border-color: Palette.n200;
-                        background: white;
-                        VerticalLayout {
-                            alignment: center;
-                            spacing: 12px;
-                            VerticalIcon { icon-size: 50px; icon: @image-url("../assets/icons/printer.png"); icon-color: Palette.n400; }
-                            Text { text: root.diagnostics-busy ? "Опрашиваем оборудование…" : "Нажмите «Проверить все»"; color: Palette.n700; font-size: 19px; font-weight: 650; horizontal-alignment: center; }
-                        }
+            settings-diagnostics-view := ScrollView {
+                min-height: 0px; vertical-stretch: 1;
+                viewport-width: self.visible-width;
+                viewport-height: max(self.visible-height, settings-diagnostics-view-content.min-height);
+                viewport-y <=> root.settings-diagnostics-scroll-y;
+                horizontal-scrollbar-policy: ScrollBarPolicy.always-off; mouse-drag-pan-enabled: true;
+                settings-diagnostics-view-content := VerticalLayout {
+                    spacing: 12px; alignment: start; padding-right: 8px; padding-bottom: 4px;
+                    SettingsNotice { text: root.form-diagnostics-hint;  }
+                    if root.printer-diagnostics.length == 0: SettingsCard {
+                        title: root.form-check-empty;
+                        SettingsNotice { text: root.diagnostics-status;  }
                     }
                     for device in root.printer-diagnostics: Rectangle {
-                        height: root.narrow ? 138px : 128px;
-                        border-radius: 20px;
-                        border-width: 1px;
-                        border-color: !device.configured ? Palette.n300 : device.reachable ? Palette.e300 : Palette.r300;
-                        background: !device.configured ? Palette.n100 : device.reachable ? Palette.e50 : Palette.r50;
-                        HorizontalLayout {
-                            padding: 18px;
-                            spacing: 16px;
-                            Rectangle {
-                                width: 58px;
-                                vertical-stretch: 1;
-                                Rectangle {
-                                    width: 58px;
-                                    height: 58px;
-                                    y: (parent.height - self.height) / 2;
-                                    border-radius: 18px;
-                                    background: !device.configured ? Palette.n200 : device.reachable ? Palette.e100 : Palette.r100;
-                                    AppIcon { width: 30px; height: 30px; x: 14px; y: 14px; icon: @image-url("../assets/icons/printer.png"); icon-color: !device.configured ? Palette.n500 : device.reachable ? Palette.e600 : Palette.r600; }
+                        min-width: 0px; min-height: device-content.min-height; preferred-height: device-content.preferred-height; vertical-stretch: 0;
+                        border-radius: 14px; border-width: 1px; border-color: !device.configured ? Palette.n200 : device.reachable ? Palette.e300 : Palette.r300; background: white;
+                        device-content := VerticalLayout { padding: 16px; spacing: 10px; alignment: start;
+                            HorizontalLayout { spacing: 12px;
+                                VerticalLayout { horizontal-stretch: 1; spacing: 4px;
+                                    Text { min-width: 0px; text: device.role == "packPrinter" ? root.settings-pack-role-label : device.role == "boxPrinter" ? root.settings-box-role-label : root.settings-pallet-role-label; color: Palette.n500; font-size: 12px; wrap: word-wrap; }
+                                    Text { min-width: 0px; text: device.printer-name; color: Palette.n900; font-size: 16px; font-weight: 700; wrap: word-wrap; }
+                                }
+                                Rectangle { width: 156px; height: 36px; border-radius: 8px; background: !device.configured ? Palette.n100 : device.reachable ? Palette.e50 : Palette.r50;
+                                    Text { x: 8px; width: parent.width - 16px; text: device.status-label; color: !device.configured ? Palette.n600 : device.reachable ? Palette.e700 : Palette.r700; font-size: 12px; font-weight: 650; wrap: word-wrap; horizontal-alignment: center; vertical-alignment: center; }
                                 }
                             }
-                            VerticalLayout {
-                                alignment: center;
-                                spacing: 4px;
-                                Text { text: device.role-label; color: Palette.n500; font-size: 11px; font-weight: 750; letter-spacing: 0.8px; }
-                                Text { text: device.printer-name; color: Palette.n900; font-size: 17px; font-weight: 700; overflow: elide; }
-                                Text { text: device.transport + " · " + device.endpoint; color: Palette.n500; font-family: "Consolas"; font-size: 12px; overflow: elide; }
-                                Text { text: device.details; color: device.reachable ? Palette.e700 : device.configured ? Palette.r700 : Palette.n500; font-size: 12px; overflow: elide; }
-                            }
-                            Rectangle { horizontal-stretch: 1; }
-                            VerticalLayout {
-                                width: 170px;
-                                alignment: center;
-                                spacing: 6px;
-                                Rectangle {
-                                    height: 38px;
-                                    border-radius: 19px;
-                                    background: !device.configured ? Palette.n200 : device.reachable ? #10b98122 : #ef444422;
-                                    Text { text: device.status-label; color: !device.configured ? Palette.n600 : device.reachable ? Palette.e700 : Palette.r700; font-size: 12px; font-weight: 750; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
-                                }
-                                Text { text: device.queried; color: Palette.n400; font-size: 11px; horizontal-alignment: center; }
-                            }
+                            Text { min-width: 0px; text: device.transport + " · " + device.endpoint + " · " + device.queried; color: Palette.n500; font-size: 12px; wrap: word-wrap; }
+                            SettingsNotice { text: device.details; warning: device.configured && !device.reachable; success: device.reachable; }
+                            HorizontalLayout { Rectangle { horizontal-stretch: 1; } SettingsAction { width: 156px; text: root.form-configure; enabled: !root.settings-busy; clicked => { root.open-settings-diagnostic-role(device.role); } } }
                         }
                     }
                 }
@@ -2673,607 +2590,173 @@ export component WeighingPrototype inherits Window {
 
     if root.active-page == 3: Rectangle {
         x: (parent.width - root.shell-width) / 2 + root.sidebar-width + root.page-offset;
-        width: root.page-width;
-        height: parent.height;
-        background: Palette.n50;
-
+        width: root.page-width; height: parent.height; background: Palette.n50;
         VerticalLayout {
-            padding: root.content-padding;
-            spacing: root.narrow ? 9px : 12px;
-
+            padding: root.narrow ? 16px : 22px; spacing: 10px;
             SettingsSectionNav {
-                active-page: root.active-page;
-                compact: root.narrow || root.short;
-                printers-label: root.settings-nav-printers-label;
-                queue-label: root.settings-nav-queue-label;
-                scales-label: root.settings-nav-scales-label;
-                diagnostics-label: root.settings-nav-diagnostics-label;
-                print-category: root.settings-nav-print-category;
-                queue-category: root.settings-nav-queue-category;
-                equipment-category: root.settings-nav-equipment-category;
-                system-category: root.settings-nav-system-category;
-                open-printers => { root.active-page = 3; root.reload-printer-settings(); }
-                open-queue => { root.active-page = 1; root.refresh-print-queue(); }
-                open-scales => { root.active-page = 4; root.reload-scale-settings(); }
-                open-diagnostics => { root.active-page = 2; root.probe-printers(); }
-            }
+                active-page: root.active-page; compact: true;
+                printers-label: root.settings-nav-printers-label; queue-label: root.settings-nav-queue-label;
+                scales-label: root.settings-nav-scales-label; diagnostics-label: root.settings-nav-diagnostics-label;
+                open-printers => { root.request-settings-page(3); }
+                open-queue => { root.request-settings-page(1); }
+                open-scales => { root.request-settings-page(4); }
+                open-diagnostics => { root.request-settings-page(2); }
 
+            }
             HorizontalLayout {
-                height: root.short ? 50px : 58px;
                 spacing: 12px;
                 VerticalLayout {
-                    alignment: center;
-                    spacing: 2px;
-                    Text {
-                        text: root.settings-page-title;
-                        color: Palette.n900;
-                        font-size: root.narrow ? 23px : 26px;
-                        font-weight: 750;
-                    }
-                    Text {
-                        text: root.settings-page-hint;
-                        color: Palette.n500;
-                        font-size: 12px;
-                        overflow: elide;
-                    }
+                    horizontal-stretch: 1; alignment: center; spacing: 3px;
+                    Text { min-width: 0px; text: root.settings-page-title; color: Palette.n900; font-size: 24px; font-weight: 750; wrap: word-wrap; }
+                    Text { min-width: 0px; text: root.settings-selected-role-display + " · " + (root.settings-active ? root.settings-enabled-label : root.settings-disabled-label); color: Palette.n500; font-size: 12px; wrap: word-wrap; }
                 }
-                Rectangle { horizontal-stretch: 1; }
-                if root.settings-dirty: Rectangle {
-                    width: root.narrow ? 132px : 150px;
-                    height: 34px;
-                    border-radius: 17px;
-                    background: Palette.a50;
-                    border-width: 1px;
-                    border-color: Palette.a300;
-                    Text {
-                        text: root.settings-unsaved-label;
-                        color: Palette.a700;
-                        font-size: 10px;
-                        font-weight: 750;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                        overflow: elide;
-                    }
-                }
-                CompactActionButton {
-                    width: root.narrow ? 132px : 154px;
-                    text: root.settings-refresh-label;
-                    enabled: !root.settings-busy;
-                    clicked => { root.reload-printer-settings(); }
-                }
+                SettingsAction { width: 164px; text: root.settings-busy ? root.form-working : root.settings-refresh-label; enabled: !root.settings-busy; clicked => { root.request-settings-reload(false); } }
             }
-
             HorizontalLayout {
-                height: root.short ? 82px : 96px;
-                spacing: root.narrow ? 8px : 10px;
-                for role in root.printer-settings-roles: Rectangle {
+                spacing: 6px;
+                for role in root.printer-settings-roles: SettingsTab {
                     horizontal-stretch: 1;
-                    border-radius: 18px;
-                    border-width: role.role == root.settings-selected-role ? 2px : 1px;
-                    border-color: role.role == root.settings-selected-role ? Palette.e500 : Palette.n300;
-                    background: role.role == root.settings-selected-role ? Palette.e50 : role-touch.has-hover ? Palette.n100 : white;
-                    HorizontalLayout {
-                        padding: root.short ? 10px : 13px;
-                        spacing: 11px;
-                        Rectangle {
-                            width: root.short ? 40px : 46px;
-                            vertical-stretch: 1;
-                            Rectangle {
-                                width: root.short ? 40px : 46px;
-                                height: root.short ? 40px : 46px;
-                                y: (parent.height - self.height) / 2;
-                                border-radius: 14px;
-                                background: role.active ? Palette.e100 : Palette.n200;
-                                AppIcon {
-                                    width: 22px;
-                                    height: 22px;
-                                    x: (parent.width - self.width) / 2;
-                                    y: (parent.height - self.height) / 2;
-                                    icon: @image-url("../assets/icons/printer.png");
-                                    icon-color: role.active ? Palette.e600 : Palette.n500;
-                                }
-                            }
-                        }
-                        VerticalLayout {
-                            alignment: center;
-                            spacing: 3px;
-                            Text {
-                                text: role.role == "packPrinter" ? root.settings-pack-role-label : role.role == "boxPrinter" ? root.settings-box-role-label : root.settings-pallet-role-label;
-                                color: Palette.n900;
-                                font-size: 14px;
-                                font-weight: 700;
-                                overflow: elide;
-                            }
-                            Text {
-                                text: role.role == "packPrinter" ? root.settings-pack-role-hint : role.role == "boxPrinter" ? root.settings-box-role-hint : root.settings-pallet-role-hint;
-                                color: Palette.n500;
-                                font-size: 11px;
-                                overflow: elide;
-                            }
-                            Text {
-                                text: role.active
-                                    ? root.settings-enabled-label + " · " + (role.connection == "Ethernet" ? root.settings-network-label : role.connection == "Serial" ? root.settings-serial-label : root.settings-windows-label)
-                                    : root.settings-disabled-label;
-                                color: role.active ? Palette.e700 : Palette.n500;
-                                font-size: 10px;
-                                font-weight: 700;
-                                overflow: elide;
-                            }
-                        }
-                    }
-                    role-touch := TouchArea {
-                        enabled: !root.settings-busy;
-                        clicked => { root.settings-system-printer-scroll-y = 0px; root.settings-serial-port-scroll-y = 0px; root.select-printer-role(role.role); }
-                    }
+                    text: (role.role == "packPrinter" ? root.settings-pack-role-label : role.role == "boxPrinter" ? root.settings-box-role-label : root.settings-pallet-role-label);
+                    selected: role.role == root.settings-selected-role; enabled: !root.settings-busy;
+                    clicked => { root.request-settings-role(role.role); }
+
                 }
             }
-
-            Rectangle {
-                height: 50px;
-                border-radius: 14px;
-                border-width: 1px;
-                border-color: Palette.n200;
-                background: white;
-                HorizontalLayout {
-                    padding-left: 16px;
-                    padding-right: 16px;
-                    spacing: 10px;
-                    StatusDot { dot-size: 9px; dot-color: root.settings-active ? Palette.e500 : Palette.n400; }
-                    Text {
-                        text: root.settings-configuring-label + ":";
-                        color: Palette.n500;
-                        font-size: 12px;
-                        vertical-alignment: center;
-                    }
-                    Text {
-                        text: root.settings-selected-role-display;
-                        color: Palette.n900;
-                        font-size: 14px;
-                        font-weight: 700;
-                        vertical-alignment: center;
-                    }
-                    Text {
-                        horizontal-stretch: 1;
-                        text: root.settings-selected-role-hint;
-                        color: Palette.n500;
-                        font-size: 12px;
-                        horizontal-alignment: right;
-                        vertical-alignment: center;
-                        overflow: elide;
-                    }
-                }
+            HorizontalLayout {
+                spacing: 12px;
+                SettingsTab { horizontal-stretch: 1; text: root.form-connection; selected: root.settings-printer-section == 0; enabled: !root.settings-busy; clicked => { root.settings-printer-section = 0; root.settings-printer-scroll-y = 0px; } }
+                SettingsTab { horizontal-stretch: 1; text: root.form-label; selected: root.settings-printer-section == 1; enabled: !root.settings-busy; clicked => { root.settings-printer-section = 1; root.settings-printer-scroll-y = 0px; } }
+                SettingsTab { horizontal-stretch: 1; text: root.form-compatibility; selected: root.settings-printer-section == 2; enabled: !root.settings-busy; clicked => { root.settings-printer-section = 2; root.settings-printer-scroll-y = 0px; } }
             }
-
-            ScrollView {
-                vertical-stretch: 1;
-                viewport-width: self.width;
-                vertical-scrollbar-policy: ScrollBarPolicy.always-off;
-                horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
-                mouse-drag-pan-enabled: true;
-
-                VerticalLayout {
-                    spacing: 12px;
-
-                    if root.settings-selected-role == "packPrinter": Rectangle {
-                        height: 96px;
-                        border-radius: 18px;
-                        border-width: 1px;
-                        border-color: Palette.n200;
-                        background: white;
-                        VerticalLayout {
-                            padding: 14px;
-                            SettingsChoiceButton {
-                                height: 68px;
-                                text: root.settings-auto-print-label + ": " + (root.settings-auto-print ? root.settings-on-label : root.settings-off-label);
-                                subtext: root.settings-auto-print-hint;
-                                selected: root.settings-auto-print;
-                                enabled: !root.settings-busy;
-                                clicked => { root.settings-auto-print = !root.settings-auto-print; root.settings-dirty = true; }
-                            }
-                        }
-                    }
-
-                    Rectangle {
-                        height: root.settings-connection == "tcp" ? 288px : 362px;
-                        border-radius: 18px;
-                        border-width: 1px;
-                        border-color: Palette.n200;
-                        background: white;
-                        VerticalLayout {
-                            padding: 16px;
-                            spacing: 10px;
-                            VerticalLayout {
-                                height: 40px;
-                                spacing: 2px;
-                                Text { text: root.settings-connection-title; color: Palette.n700; font-size: 13px; font-weight: 750; horizontal-alignment: center; }
-                                Text { text: root.settings-connection-hint; color: Palette.n500; font-size: 11px; horizontal-alignment: center; overflow: elide; }
-                            }
+            printer-form-scroll := ScrollView {
+                min-height: 0px; vertical-stretch: 1;
+                viewport-width: self.visible-width;
+                viewport-height: max(self.visible-height, printer-form-scroll-content.min-height);
+                viewport-y <=> root.settings-printer-scroll-y;
+                horizontal-scrollbar-policy: ScrollBarPolicy.always-off; mouse-drag-pan-enabled: true;
+                printer-form-scroll-content := VerticalLayout {
+                    spacing: 12px; alignment: start; padding-right: 8px; padding-bottom: 4px;
+                    if root.settings-printer-section == 0: VerticalLayout {
+                        spacing: 12px; alignment: start;
+                        SettingsCard {
+                            title: root.form-connection; description: root.settings-connection-hint;
                             HorizontalLayout {
-                                height: 64px;
-                                spacing: 8px;
-                                SettingsChoiceButton {
-                                    horizontal-stretch: 1;
-                                    height: 64px;
-                                    text: root.settings-windows-label;
-                                    subtext: root.settings-windows-hint;
-                                    selected: root.settings-connection == "windows_driver";
-                                    enabled: !root.settings-busy;
-                                    clicked => { root.settings-connection = "windows_driver"; root.settings-system-printer-scroll-y = 0px; root.settings-dirty = true; }
-                                }
-                                SettingsChoiceButton {
-                                    horizontal-stretch: 1;
-                                    height: 64px;
-                                    text: root.settings-network-label;
-                                    subtext: root.settings-network-hint;
-                                    selected: root.settings-connection == "tcp";
-                                    enabled: !root.settings-busy;
-                                    clicked => { root.settings-connection = "tcp"; root.settings-dirty = true; }
-                                }
-                                SettingsChoiceButton {
-                                    horizontal-stretch: 1;
-                                    height: 64px;
-                                    text: root.settings-serial-label;
-                                    subtext: root.settings-serial-hint;
-                                    selected: root.settings-connection == "serial";
-                                    enabled: !root.settings-busy;
-                                    clicked => { root.settings-connection = "serial"; root.settings-serial-port-scroll-y = 0px; root.settings-dirty = true; }
-                                }
-                            }
-
-                            if root.settings-connection == "tcp": HorizontalLayout {
-                                height: 52px;
-                                spacing: 8px;
-                                LineEdit { horizontal-stretch: 1; text <=> root.settings-ip; placeholder-text: root.settings-address-placeholder; enabled: !root.settings-busy; edited => { root.settings-dirty = true; } }
-                                CompactActionButton {
-                                    width: 136px;
-                                    text: root.keyboard-label;
-                                    enabled: !root.settings-busy;
-                                    clicked => {
-                                        root.settings-input-target = "printer-ip";
-                                        root.settings-input-caption = root.settings-printer-address-label;
-                                        root.settings-input-draft = root.settings-ip;
-                                        root.touch-keyboard-layout = 2;
-                                        root.touch-keyboard-uppercase = false;
-                                        root.settings-input-keyboard-visible = true;
-                                    }
-                                }
-                                LineEdit { width: 118px; text <=> root.settings-port; placeholder-text: root.settings-port-placeholder; enabled: !root.settings-busy; edited => { root.settings-dirty = true; } }
-                                CompactActionButton {
-                                    width: 136px;
-                                    text: root.keyboard-label;
-                                    enabled: !root.settings-busy;
-                                    clicked => {
-                                        root.settings-input-target = "printer-port";
-                                        root.settings-input-caption = root.settings-printer-port-label;
-                                        root.settings-input-draft = root.settings-port;
-                                        root.touch-keyboard-layout = 2;
-                                        root.touch-keyboard-uppercase = false;
-                                        root.settings-input-keyboard-visible = true;
-                                    }
-                                }
-                            }
-                            if root.settings-connection == "tcp": Rectangle {
-                                height: 60px;
-                                border-radius: 13px;
-                                border-width: 1px;
-                                border-color: Palette.e200;
-                                background: Palette.e50;
-                                HorizontalLayout {
-                                    padding-left: 16px;
-                                    padding-right: 16px;
-                                    spacing: 12px;
-                                    Text { width: 30px; text: "↔"; color: Palette.e700; font-size: 20px; font-weight: 800; horizontal-alignment: center; vertical-alignment: center; }
-                                    VerticalLayout {
-                                        alignment: center;
-                                        spacing: 2px;
-                                        Text { text: root.settings-connection-auto-label; color: Palette.e700; font-size: 12px; font-weight: 800; horizontal-alignment: center; vertical-alignment: center; }
-                                        Text { text: root.settings-connection-auto-hint; color: Palette.n600; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
-                                    }
-                                }
-                            }
-
-                            if root.settings-connection == "windows_driver": Rectangle {
-                                height: 52px;
-                                border-radius: 13px;
-                                border-width: 1px;
-                                border-color: Palette.n200;
-                                background: Palette.n50;
-                                HorizontalLayout {
-                                    padding-left: 14px;
-                                    padding-right: 14px;
-                                    spacing: 12px;
-                                    Text { text: root.settings-selected-device-label; color: Palette.n500; font-size: 10px; font-weight: 750; vertical-alignment: center; }
-                                    Text { horizontal-stretch: 1; text: root.settings-driver-name == "" ? root.settings-not-selected-label : root.settings-driver-name; color: root.settings-driver-name == "" ? Palette.n500 : Palette.n900; font-size: 13px; font-weight: 650; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
-                                }
-                            }
-                            if root.settings-connection == "windows_driver": HorizontalLayout {
-                                height: 120px;
-                                spacing: 8px;
-                                printer-system-scroll := ScrollView {
-                                    horizontal-stretch: 1;
-                                    viewport-width: self.width;
-                                    viewport-y <=> root.settings-system-printer-scroll-y;
-                                    vertical-scrollbar-policy: ScrollBarPolicy.always-off;
-                                    horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
-                                    mouse-drag-pan-enabled: true;
-                                    VerticalLayout {
-                                        spacing: 6px;
-                                        if root.settings-system-printers.length == 0: Text { height: 50px; text: root.settings-windows-empty-label; color: Palette.n500; font-size: 12px; vertical-alignment: center; horizontal-alignment: center; }
-                                        for choice in root.settings-system-printers: Rectangle {
-                                            height: 50px;
-                                            border-radius: 12px;
-                                            border-width: 1px;
-                                            border-color: choice.value == root.settings-driver-name ? Palette.e400 : Palette.n200;
-                                            background: choice.value == root.settings-driver-name ? Palette.e50 : Palette.n50;
-                                            HorizontalLayout {
-                                                padding-left: 14px;
-                                                padding-right: 14px;
-                                                spacing: 10px;
-                                                Text { horizontal-stretch: 1; text: choice.label; color: Palette.n800; font-size: 12px; font-weight: 650; vertical-alignment: center; overflow: elide; }
-                                                Text { width: 180px; text: choice.details; color: Palette.n400; font-size: 10px; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
-                                            }
-                                            TouchArea { enabled: !root.settings-busy; clicked => { root.settings-driver-name = choice.value; root.settings-dirty = true; } }
-                                        }
-                                    }
-                                }
-                                if root.settings-system-printers.length > 2: VerticalLayout {
-                                    width: 52px;
-                                    TouchScrollStepButton { glyph: "▲"; enabled: root.settings-system-printer-scroll-y < 0px; clicked => { root.settings-system-printer-scroll-y = min(0px, root.settings-system-printer-scroll-y + 106px); } }
-                                    Rectangle { vertical-stretch: 1; background: transparent; }
-                                    TouchScrollStepButton { glyph: "▼"; enabled: printer-system-scroll.viewport-height > printer-system-scroll.visible-height && root.settings-system-printer-scroll-y > printer-system-scroll.visible-height - printer-system-scroll.viewport-height; clicked => { root.settings-system-printer-scroll-y = max(printer-system-scroll.visible-height - printer-system-scroll.viewport-height, root.settings-system-printer-scroll-y - 106px); } }
-                                }
-                            }
-
-                            if root.settings-connection == "serial": HorizontalLayout {
-                                height: 52px;
-                                spacing: 8px;
-                                Rectangle {
-                                    horizontal-stretch: 1;
-                                    border-radius: 13px;
-                                    border-width: 1px;
-                                    border-color: Palette.n200;
-                                    background: Palette.n50;
-                                    Text { text: root.settings-serial-port == "" ? root.settings-not-selected-label : root.settings-serial-port; color: root.settings-serial-port == "" ? Palette.n500 : Palette.n900; font-size: 13px; font-weight: 650; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
-                                }
-                                LineEdit { width: 150px; text <=> root.settings-baud-rate; placeholder-text: root.settings-baud-placeholder; enabled: !root.settings-busy; edited => { root.settings-dirty = true; } }
-                                CompactActionButton {
-                                    width: 136px;
-                                    text: root.keyboard-label;
-                                    enabled: !root.settings-busy;
-                                    clicked => {
-                                        root.settings-input-target = "printer-baud";
-                                        root.settings-input-caption = root.settings-serial-speed-label;
-                                        root.settings-input-draft = root.settings-baud-rate;
-                                        root.touch-keyboard-layout = 2;
-                                        root.touch-keyboard-uppercase = false;
-                                        root.settings-input-keyboard-visible = true;
-                                    }
-                                }
-                            }
-                            if root.settings-connection == "serial": HorizontalLayout {
-                                height: 120px;
-                                spacing: 8px;
-                                printer-serial-scroll := ScrollView {
-                                    horizontal-stretch: 1;
-                                    viewport-width: self.width;
-                                    viewport-y <=> root.settings-serial-port-scroll-y;
-                                    vertical-scrollbar-policy: ScrollBarPolicy.always-off;
-                                    horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
-                                    mouse-drag-pan-enabled: true;
-                                    VerticalLayout {
-                                        spacing: 6px;
-                                        if root.settings-serial-ports.length == 0: Text { height: 50px; text: root.settings-serial-empty-label; color: Palette.n500; font-size: 12px; vertical-alignment: center; horizontal-alignment: center; }
-                                        for choice in root.settings-serial-ports: Rectangle {
-                                            height: 50px;
-                                            border-radius: 12px;
-                                            border-width: 1px;
-                                            border-color: choice.value == root.settings-serial-port ? Palette.e400 : Palette.n200;
-                                            background: choice.value == root.settings-serial-port ? Palette.e50 : Palette.n50;
-                                            HorizontalLayout {
-                                                padding-left: 14px;
-                                                padding-right: 14px;
-                                                spacing: 10px;
-                                                Text { horizontal-stretch: 1; text: choice.label; color: Palette.n800; font-size: 12px; font-weight: 700; vertical-alignment: center; overflow: elide; }
-                                                Text { width: 180px; text: choice.details; color: Palette.n400; font-size: 10px; horizontal-alignment: right; vertical-alignment: center; overflow: elide; }
-                                            }
-                                            TouchArea { enabled: !root.settings-busy; clicked => { root.settings-serial-port = choice.value; root.settings-dirty = true; } }
-                                        }
-                                    }
-                                }
-                                if root.settings-serial-ports.length > 2: VerticalLayout {
-                                    width: 52px;
-                                    TouchScrollStepButton { glyph: "▲"; enabled: root.settings-serial-port-scroll-y < 0px; clicked => { root.settings-serial-port-scroll-y = min(0px, root.settings-serial-port-scroll-y + 106px); } }
-                                    Rectangle { vertical-stretch: 1; background: transparent; }
-                                    TouchScrollStepButton { glyph: "▼"; enabled: printer-serial-scroll.viewport-height > printer-serial-scroll.visible-height && root.settings-serial-port-scroll-y > printer-serial-scroll.visible-height - printer-serial-scroll.viewport-height; clicked => { root.settings-serial-port-scroll-y = max(printer-serial-scroll.visible-height - printer-serial-scroll.viewport-height, root.settings-serial-port-scroll-y - 106px); } }
-                                }
-                            }
-                        }
-                    }
-
-                    Rectangle {
-                        height: root.settings-advanced-visible
-                            ? 570px + (root.settings-language-help-visible ? 76px : 0px) + (root.settings-compatibility-help-visible ? 76px : 0px)
-                            : 84px;
-                        border-radius: 18px;
-                        border-width: 1px;
-                        border-color: Palette.n200;
-                        background: white;
-                        VerticalLayout {
-                            padding: 16px;
-                            spacing: 8px;
-                            HorizontalLayout {
-                                height: 50px;
                                 spacing: 12px;
-                                VerticalLayout {
-                                    alignment: center;
-                                    spacing: 2px;
-                                    Text { text: root.settings-advanced-title; color: Palette.n700; font-size: 13px; font-weight: 750; }
-                                    Text { text: root.settings-advanced-hint; color: Palette.n500; font-size: 11px; overflow: elide; }
-                                }
-                                Rectangle { horizontal-stretch: 1; }
-                                CompactActionButton {
-                                    width: root.narrow ? 132px : 154px;
-                                    text: root.settings-advanced-visible ? root.settings-hide-label : root.settings-show-label;
-                                    enabled: !root.settings-busy;
-                                    clicked => { root.settings-advanced-visible = !root.settings-advanced-visible; }
-                                }
+                                SettingsTab { horizontal-stretch: 1; text: root.settings-windows-label; selected: root.settings-connection == "windows_driver"; enabled: !root.settings-busy; clicked => { root.settings-connection = "windows_driver"; root.settings-dirty = true; } }
+                                SettingsTab { horizontal-stretch: 1; text: root.settings-network-label; selected: root.settings-connection == "tcp"; enabled: !root.settings-busy; clicked => { root.settings-connection = "tcp"; root.settings-dirty = true; } }
+                                SettingsTab { horizontal-stretch: 1; text: root.settings-serial-label; selected: root.settings-connection == "serial"; enabled: !root.settings-busy; clicked => { root.settings-connection = "serial"; root.settings-dirty = true; } }
                             }
+                            if root.settings-connection == "windows_driver": VerticalLayout {
 
-                            if root.settings-advanced-visible: HorizontalLayout {
-                                height: 34px;
-                                alignment: center;
-                                spacing: 8px;
-                                Text { text: root.settings-language-label; color: Palette.n500; font-size: 10px; font-weight: 750; letter-spacing: 0.7px; vertical-alignment: center; }
-                                ContextHelpButton {
-                                    selected: root.settings-language-help-visible;
-                                    clicked => {
-                                        root.settings-language-help-visible = !root.settings-language-help-visible;
-                                        if root.settings-language-help-visible { root.settings-compatibility-help-visible = false; }
-                                    }
+                                SettingsSelect { horizontal-stretch: 1; label: root.settings-windows-label; value: root.settings-driver-name == "" ? root.form-default-printer : root.settings-driver-name; hint: ""; enabled: !root.settings-busy; clicked => { root.settings-picker-target = "printer"; root.settings-picker-search = ""; root.settings-picker-scroll-y = 0px; } }
+                            }
+                            if root.settings-connection == "tcp": VerticalLayout {
+
+                                HorizontalLayout {
+                                    spacing: 12px;
+                                    SettingsField { horizontal-stretch: 1;  label: root.settings-printer-address-label; text <=> root.settings-ip; hint: ""; placeholder: "192.0.2.50"; enabled: !root.settings-busy; edited => { root.settings-dirty = true; } keyboard => { root.open-settings-input("printer-ip", root.settings-printer-address-label, root.settings-ip, 1); } }
+                                    SettingsField { horizontal-stretch: 1; max-width: 228px; label: root.settings-printer-port-label; text <=> root.settings-port; hint: "1–65535"; placeholder: ""; enabled: !root.settings-busy; edited => { root.settings-dirty = true; } keyboard => { root.open-settings-input("printer-port", root.settings-printer-port-label, root.settings-port, 2); } }
                                 }
                             }
-                            if root.settings-advanced-visible && root.settings-language-help-visible: Rectangle {
-                                height: 68px;
-                                border-radius: 13px;
-                                border-width: 1px;
-                                border-color: Palette.e200;
-                                background: Palette.e50;
-                                Text { x: 16px; width: parent.width - 32px; text: root.settings-language-help-text; color: Palette.e700; font-size: 11px; wrap: word-wrap; horizontal-alignment: center; vertical-alignment: center; }
-                            }
-                            if root.settings-advanced-visible: HorizontalLayout {
-                                height: 52px;
-                                spacing: 7px;
-                                SettingsChoiceButton { horizontal-stretch: 1; text: "ZPL"; selected: root.settings-protocol == "zpl"; enabled: !root.settings-busy; clicked => { root.settings-protocol = "zpl"; root.settings-dirty = true; } }
-                                SettingsChoiceButton { horizontal-stretch: 1; text: "TSPL"; selected: root.settings-protocol == "tspl"; enabled: !root.settings-busy; clicked => { root.settings-protocol = "tspl"; root.settings-dirty = true; } }
-                                SettingsChoiceButton { horizontal-stretch: 1; text: "EPL"; selected: root.settings-protocol == "epl"; enabled: !root.settings-busy; clicked => { root.settings-protocol = "epl"; root.settings-dirty = true; } }
-                                SettingsChoiceButton { horizontal-stretch: 1; text: "CPCL"; selected: root.settings-protocol == "cpcl"; enabled: !root.settings-busy; clicked => { root.settings-protocol = "cpcl"; root.settings-dirty = true; } }
-                            }
-                            if root.settings-advanced-visible: HorizontalLayout {
-                                height: 52px;
-                                spacing: 7px;
-                                SettingsChoiceButton { horizontal-stretch: 1; text: "DPL"; selected: root.settings-protocol == "dpl"; enabled: !root.settings-busy; clicked => { root.settings-protocol = "dpl"; root.settings-dirty = true; } }
-                                SettingsChoiceButton { horizontal-stretch: 1; text: "SBPL"; selected: root.settings-protocol == "sbpl"; enabled: !root.settings-busy; clicked => { root.settings-protocol = "sbpl"; root.settings-dirty = true; } }
-                                SettingsChoiceButton { horizontal-stretch: 1; text: "ZPL BITMAP"; selected: root.settings-protocol == "image"; enabled: !root.settings-busy; clicked => { root.settings-protocol = "image"; root.settings-dirty = true; } }
-                                SettingsChoiceButton { horizontal-stretch: 1; text: "WINDOWS"; selected: root.settings-protocol == "browser"; enabled: !root.settings-busy; clicked => { root.settings-protocol = "browser"; root.settings-dirty = true; } }
-                            }
+                            if root.settings-connection == "serial": VerticalLayout {
 
-                            if root.settings-advanced-visible: HorizontalLayout {
-                                height: 34px;
-                                alignment: center;
-                                spacing: 8px;
-                                Text { text: root.settings-compatibility-label; color: Palette.n500; font-size: 10px; font-weight: 750; letter-spacing: 0.7px; vertical-alignment: center; }
-                                ContextHelpButton {
-                                    selected: root.settings-compatibility-help-visible;
-                                    clicked => {
-                                        root.settings-compatibility-help-visible = !root.settings-compatibility-help-visible;
-                                        if root.settings-compatibility-help-visible { root.settings-language-help-visible = false; }
-                                    }
+                                HorizontalLayout {
+                                    spacing: 12px;
+                                    SettingsSelect { horizontal-stretch: 1; label: root.settings-com-placeholder; value: root.settings-serial-port == "" ? root.form-choose-port : root.settings-serial-port; hint: ""; enabled: !root.settings-busy; clicked => { root.settings-picker-target = "printer-serial"; root.settings-picker-search = ""; root.settings-picker-scroll-y = 0px; } }
+                                    SettingsField { horizontal-stretch: 1; max-width: 240px; label: root.settings-serial-speed-label; text <=> root.settings-baud-rate; hint: "300–921600"; placeholder: ""; enabled: !root.settings-busy; edited => { root.settings-dirty = true; } keyboard => { root.open-settings-input("printer-baud", root.settings-serial-speed-label, root.settings-baud-rate, 2); } }
                                 }
-                            }
-                            if root.settings-advanced-visible && root.settings-compatibility-help-visible: Rectangle {
-                                height: 68px;
-                                border-radius: 13px;
-                                border-width: 1px;
-                                border-color: Palette.e200;
-                                background: Palette.e50;
-                                Text { x: 16px; width: parent.width - 32px; text: root.settings-compatibility-help-text; color: Palette.e700; font-size: 11px; wrap: word-wrap; horizontal-alignment: center; vertical-alignment: center; }
-                            }
-                            if root.settings-advanced-visible: HorizontalLayout {
-                                height: 52px;
-                                spacing: 7px;
-                                SettingsChoiceButton { horizontal-stretch: 1; text: root.settings-auto-label; subtext: root.settings-preview-profile; selected: root.settings-compatibility == "auto"; enabled: !root.settings-busy; clicked => { root.settings-compatibility = "auto"; root.settings-dirty = true; } }
-                                SettingsChoiceButton { horizontal-stretch: 1; text: root.settings-compatible-label; selected: root.settings-compatibility == "compatible"; enabled: !root.settings-busy; clicked => { root.settings-compatibility = "compatible"; root.settings-dirty = true; } }
-                                SettingsChoiceButton { horizontal-stretch: 1; text: root.settings-full-label; selected: root.settings-compatibility == "advanced"; enabled: !root.settings-busy; clicked => { root.settings-compatibility = "advanced"; root.settings-dirty = true; } }
-                            }
-
-                            if root.settings-advanced-visible: Text { height: 18px; text: root.settings-quality-label; color: Palette.n500; font-size: 10px; font-weight: 750; letter-spacing: 0.7px; horizontal-alignment: center; vertical-alignment: bottom; }
-                            if root.settings-advanced-visible: HorizontalLayout {
-                                height: 52px;
-                                spacing: 7px;
-                                SettingsChoiceButton { horizontal-stretch: 1; text: "203 DPI"; selected: root.settings-dpi == "203"; enabled: !root.settings-busy; clicked => { root.settings-dpi = "203"; root.settings-dirty = true; } }
-                                SettingsChoiceButton { horizontal-stretch: 1; text: "300 DPI"; selected: root.settings-dpi == "300"; enabled: !root.settings-busy; clicked => { root.settings-dpi = "300"; root.settings-dirty = true; } }
-                                SettingsChoiceButton { horizontal-stretch: 1; text: "600 DPI"; selected: root.settings-dpi == "600"; enabled: !root.settings-busy; clicked => { root.settings-dpi = "600"; root.settings-dirty = true; } }
-                            }
-
-                            if root.settings-advanced-visible: Text { height: 18px; text: root.settings-cache-label; color: Palette.n500; font-size: 10px; font-weight: 750; letter-spacing: 0.7px; horizontal-alignment: center; vertical-alignment: bottom; }
-                            if root.settings-advanced-visible: HorizontalLayout {
-                                height: 52px;
-                                spacing: 7px;
-                                SettingsChoiceButton { horizontal-stretch: 1; text: root.settings-auto-label; selected: root.settings-ram-cache == "auto"; enabled: !root.settings-busy; clicked => { root.settings-ram-cache = "auto"; root.settings-dirty = true; } }
-                                SettingsChoiceButton { horizontal-stretch: 1; text: root.settings-on-label; selected: root.settings-ram-cache == "on"; enabled: !root.settings-busy; clicked => { root.settings-ram-cache = "on"; root.settings-dirty = true; } }
-                                SettingsChoiceButton { horizontal-stretch: 1; text: root.settings-off-label; selected: root.settings-ram-cache == "off"; enabled: !root.settings-busy; clicked => { root.settings-ram-cache = "off"; root.settings-dirty = true; } }
-                                SettingsChoiceButton { horizontal-stretch: 1; text: root.settings-z64 ? "Z64" : "RLE"; selected: root.settings-z64; enabled: !root.settings-busy; clicked => { root.settings-z64 = !root.settings-z64; root.settings-dirty = true; } }
-                            }
-
-                            if root.settings-advanced-visible: Rectangle {
-                                height: 48px;
-                                border-radius: 12px;
-                                background: Palette.a50;
-                                border-width: 1px;
-                                border-color: Palette.a300;
-                                Text { x: 14px; width: parent.width - 28px; text: root.settings-advanced-note; color: Palette.a700; font-size: 11px; wrap: word-wrap; vertical-alignment: center; horizontal-alignment: center; }
                             }
                         }
-                    }
-
-                    if root.settings-detection != "": Rectangle {
-                        height: 58px;
-                        border-radius: 14px;
-                        border-width: 1px;
-                        border-color: Palette.e300;
-                        background: Palette.e50;
-                        Text {
-                            text: root.settings-detection;
-                            color: Palette.e700;
-                            font-size: 12px;
-                            wrap: word-wrap;
-                            vertical-alignment: center;
-                            horizontal-alignment: center;
+                        SettingsCard {
+                            title: root.form-device;
+                            SettingsField { horizontal-stretch: 1;  label: root.form-name; text <=> root.settings-name; hint: ""; placeholder: ""; enabled: !root.settings-busy; edited => { root.settings-dirty = true; } keyboard => { root.open-settings-input("printer-name", root.form-name, root.settings-name, 0); } }
                         }
                     }
+                    if root.settings-printer-section == 1: VerticalLayout {
+                        spacing: 12px; alignment: start;
+                        if root.settings-selected-role == "packPrinter": SettingsCard {
+                            title: root.settings-pack-role-label;
+                            SettingsToggle { label: root.settings-auto-print-label; description: root.settings-auto-print-hint; state-label: root.settings-auto-print ? root.settings-on-label : root.settings-off-label; checked: root.settings-auto-print; enabled: !root.settings-busy; toggled => { root.settings-auto-print = !root.settings-auto-print; root.settings-dirty = true; } }
+                        }
+                        SettingsCard {
+                            title: root.form-paper; description: root.form-paper-hint;
+                            HorizontalLayout {
+                                spacing: 12px;
+                                SettingsField { horizontal-stretch: 1;  label: root.form-width; text <=> root.settings-width-mm; hint: "1–1000"; placeholder: root.form-default; enabled: !root.settings-busy; edited => { root.settings-dirty = true; } keyboard => { root.open-settings-input("printer-width", root.form-width, root.settings-width-mm, 2); } }
+                                SettingsField { horizontal-stretch: 1;  label: root.form-height; text <=> root.settings-height-mm; hint: "1–1500"; placeholder: root.form-default; enabled: !root.settings-busy; edited => { root.settings-dirty = true; } keyboard => { root.open-settings-input("printer-height", root.form-height, root.settings-height-mm, 2); } }
+                                SettingsField { horizontal-stretch: 1;  label: root.form-gap; text <=> root.settings-gap-mm; hint: "0–50"; placeholder: root.form-default; enabled: !root.settings-busy; edited => { root.settings-dirty = true; } keyboard => { root.open-settings-input("printer-gap", root.form-gap, root.settings-gap-mm, 2); } }
+                            }
+                        }
+                        SettingsCard {
+                            title: root.form-quality;
+                            HorizontalLayout {
+                                spacing: 12px;
+                                SettingsTab { horizontal-stretch: 1; text: "203 DPI"; selected: root.settings-dpi == "203"; enabled: !root.settings-busy; clicked => { root.settings-dpi = "203"; root.settings-dirty = true; } }
+                                SettingsTab { horizontal-stretch: 1; text: "300 DPI"; selected: root.settings-dpi == "300"; enabled: !root.settings-busy; clicked => { root.settings-dpi = "300"; root.settings-dirty = true; } }
+                                SettingsTab { horizontal-stretch: 1; text: "600 DPI"; selected: root.settings-dpi == "600"; enabled: !root.settings-busy; clicked => { root.settings-dpi = "600"; root.settings-dirty = true; } }
+                            }
+                            HorizontalLayout {
+                                spacing: 12px;
+                                SettingsField { horizontal-stretch: 1;  label: root.form-darkness; text <=> root.settings-darkness; hint: ""; placeholder: root.form-default; enabled: !root.settings-busy; edited => { root.settings-dirty = true; } keyboard => { root.open-settings-input("printer-darkness", root.form-darkness, root.settings-darkness, 2); } }
+                                SettingsField { horizontal-stretch: 1;  label: root.form-print-speed; text <=> root.settings-print-speed; hint: ""; placeholder: root.form-default; enabled: !root.settings-busy; edited => { root.settings-dirty = true; } keyboard => { root.open-settings-input("printer-speed", root.form-print-speed, root.settings-print-speed, 2); } }
+                            }
+                        }
 
-                    Rectangle { height: 4px; background: transparent; }
+                    }
+                    if root.settings-printer-section == 2: VerticalLayout {
+                        spacing: 12px; alignment: start;
+                        SettingsCard {
+                            title: root.settings-language-label; description: root.settings-language-help-text;
+                            HorizontalLayout {
+                                spacing: 12px;
+                                SettingsTab { horizontal-stretch: 1; text: "ZPL"; selected: root.settings-protocol == "zpl"; enabled: !root.settings-busy; clicked => { root.settings-protocol = "zpl"; root.settings-dirty = true; } }
+                                SettingsTab { horizontal-stretch: 1; text: "TSPL"; selected: root.settings-protocol == "tspl"; enabled: !root.settings-busy; clicked => { root.settings-protocol = "tspl"; root.settings-dirty = true; } }
+                                SettingsTab { horizontal-stretch: 1; text: "EPL"; selected: root.settings-protocol == "epl"; enabled: !root.settings-busy; clicked => { root.settings-protocol = "epl"; root.settings-dirty = true; } }
+                                SettingsTab { horizontal-stretch: 1; text: "CPCL"; selected: root.settings-protocol == "cpcl"; enabled: !root.settings-busy; clicked => { root.settings-protocol = "cpcl"; root.settings-dirty = true; } }
+                            }
+                            HorizontalLayout {
+                                spacing: 12px;
+                                SettingsTab { horizontal-stretch: 1; text: "DPL"; selected: root.settings-protocol == "dpl"; enabled: !root.settings-busy; clicked => { root.settings-protocol = "dpl"; root.settings-dirty = true; } }
+                                SettingsTab { horizontal-stretch: 1; text: "SBPL"; selected: root.settings-protocol == "sbpl"; enabled: !root.settings-busy; clicked => { root.settings-protocol = "sbpl"; root.settings-dirty = true; } }
+                                SettingsTab { horizontal-stretch: 1; text: "ZPL Bitmap"; selected: root.settings-protocol == "image"; enabled: !root.settings-busy; clicked => { root.settings-protocol = "image"; root.settings-dirty = true; } }
+                                SettingsTab { horizontal-stretch: 1; text: "Windows"; selected: root.settings-protocol == "browser"; enabled: !root.settings-busy; clicked => { root.settings-protocol = "browser"; root.settings-dirty = true; } }
+                            }
+                        }
+                        SettingsCard {
+                            title: root.settings-compatibility-label; description: root.settings-compatibility-help-text;
+                            HorizontalLayout {
+                                spacing: 12px;
+                                SettingsTab { horizontal-stretch: 1; text: root.settings-auto-label; selected: root.settings-compatibility == "auto"; enabled: !root.settings-busy; clicked => { root.settings-compatibility = "auto"; root.settings-dirty = true; } }
+                                SettingsTab { horizontal-stretch: 1; text: root.settings-compatible-label; selected: root.settings-compatibility == "compatible"; enabled: !root.settings-busy; clicked => { root.settings-compatibility = "compatible"; root.settings-dirty = true; } }
+                                SettingsTab { horizontal-stretch: 1; text: root.settings-full-label; selected: root.settings-compatibility == "advanced"; enabled: !root.settings-busy; clicked => { root.settings-compatibility = "advanced"; root.settings-dirty = true; } }
+                            }
+                            SettingsNotice { text: root.settings-preview-profile;  }
+                        }
+                        SettingsCard {
+                            title: root.form-graphics; description: root.settings-cache-label;
+                            HorizontalLayout {
+                                spacing: 12px;
+                                SettingsTab { horizontal-stretch: 1; text: root.settings-auto-label; selected: root.settings-ram-cache == "auto"; enabled: !root.settings-busy; clicked => { root.settings-ram-cache = "auto"; root.settings-dirty = true; } }
+                                SettingsTab { horizontal-stretch: 1; text: root.settings-on-label; selected: root.settings-ram-cache == "on"; enabled: !root.settings-busy; clicked => { root.settings-ram-cache = "on"; root.settings-dirty = true; } }
+                                SettingsTab { horizontal-stretch: 1; text: root.settings-off-label; selected: root.settings-ram-cache == "off"; enabled: !root.settings-busy; clicked => { root.settings-ram-cache = "off"; root.settings-dirty = true; } }
+                            }
+                            SettingsToggle { label: root.form-compression; state-label: root.settings-z64 ? "Z64" : "RLE"; checked: root.settings-z64; enabled: !root.settings-busy; toggled => { root.settings-z64 = !root.settings-z64; root.settings-dirty = true; } }
+                        }
+                    }
+                    if root.settings-detection != "": VerticalLayout {
+
+                        SettingsNotice { text: root.settings-detection;  }
+                    }
                 }
             }
-
             Rectangle {
-                height: root.short ? 58px : 66px;
-                border-radius: 16px;
-                border-width: 1px;
-                border-color: Palette.n200;
-                background: white;
+                height: 68px; border-radius: 14px; border-width: 1px; border-color: Palette.n200; background: white;
                 HorizontalLayout {
-                    padding-left: 8px;
-                    padding-right: 8px;
-                    spacing: 9px;
-                    if !root.narrow: Text {
-                        horizontal-stretch: 1;
-                        text: root.settings-busy ? root.settings-busy-label : root.settings-save-hint;
-                        color: Palette.n500;
-                        font-size: 12px;
-                        vertical-alignment: center;
-                        overflow: elide;
-                    }
-                    if root.narrow: Rectangle { horizontal-stretch: 1; }
-                    CompactActionButton {
-                        width: root.narrow ? 154px : 170px;
-                        text: root.settings-test-label;
-                        enabled: !root.settings-busy;
-                        clicked => { root.test-printer-settings(); }
-                    }
-                    CompactActionButton {
-                        width: root.narrow ? 194px : 218px;
-                        text: root.settings-detect-label;
-                        enabled: !root.settings-busy;
-                        clicked => { root.detect-printer-settings(); }
-                    }
-                    CompactActionButton {
-                        width: root.narrow ? 158px : 180px;
-                        text: root.settings-busy ? root.settings-saving-label : root.settings-save-label;
-                        primary: true;
-                        enabled: !root.settings-busy;
-                        clicked => { root.save-printer-settings(); }
-                    }
+                    padding: 10px; spacing: 8px;
+                    Text { min-width: 0px; horizontal-stretch: 1; text: root.settings-busy ? root.settings-status : root.settings-dirty ? root.form-unsaved : root.settings-status; color: root.settings-dirty ? Palette.a700 : Palette.n500; font-size: 12px; wrap: word-wrap; vertical-alignment: center; }
+                    SettingsAction { width: 186px; text: root.settings-detect-label; enabled: !root.settings-busy; clicked => { root.detect-printer-settings(); } }
+                    SettingsAction { width: 166px; text: root.settings-test-label; enabled: !root.settings-busy; clicked => { root.test-printer-settings(); } }
+                    SettingsAction { width: 158px; text: root.settings-busy ? root.form-working : root.settings-save-label; primary: true; enabled: !root.settings-busy; clicked => { root.save-printer-settings(); } }
                 }
             }
         }
@@ -3281,432 +2764,111 @@ export component WeighingPrototype inherits Window {
 
     if root.active-page == 4: Rectangle {
         x: (parent.width - root.shell-width) / 2 + root.sidebar-width + root.page-offset;
-        width: root.page-width;
-        height: parent.height;
-        background: Palette.n50;
-
+        width: root.page-width; height: parent.height; background: Palette.n50;
         VerticalLayout {
-            padding: root.content-padding;
-            spacing: root.narrow ? 10px : 12px;
-
+            padding: root.narrow ? 16px : 22px; spacing: 10px;
             SettingsSectionNav {
-                active-page: root.active-page;
-                compact: root.narrow || root.short;
-                printers-label: root.settings-nav-printers-label;
-                queue-label: root.settings-nav-queue-label;
-                scales-label: root.settings-nav-scales-label;
-                diagnostics-label: root.settings-nav-diagnostics-label;
-                print-category: root.settings-nav-print-category;
-                queue-category: root.settings-nav-queue-category;
-                equipment-category: root.settings-nav-equipment-category;
-                system-category: root.settings-nav-system-category;
-                open-printers => { root.active-page = 3; root.reload-printer-settings(); }
-                open-queue => { root.active-page = 1; root.refresh-print-queue(); }
-                open-scales => { root.active-page = 4; root.reload-scale-settings(); }
-                open-diagnostics => { root.active-page = 2; root.probe-printers(); }
-            }
+                active-page: root.active-page; compact: true;
+                printers-label: root.settings-nav-printers-label; queue-label: root.settings-nav-queue-label;
+                scales-label: root.settings-nav-scales-label; diagnostics-label: root.settings-nav-diagnostics-label;
+                open-printers => { root.request-settings-page(3); }
+                open-queue => { root.request-settings-page(1); }
+                open-scales => { root.request-settings-page(4); }
+                open-diagnostics => { root.request-settings-page(2); }
 
-            Rectangle {
-                height: 58px;
-                background: transparent;
-                if root.scale-settings-dirty: Rectangle {
-                    width: 176px;
-                    height: 34px;
-                    y: (parent.height - self.height) / 2;
-                    border-radius: 17px;
-                    background: Palette.a50;
-                    border-width: 1px;
-                    border-color: Palette.a300;
-                    Text { text: root.scale-changes-label; color: Palette.a700; font-size: 10px; font-weight: 750; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
-                }
+            }
+            HorizontalLayout {
+                spacing: 12px;
                 VerticalLayout {
-                    width: parent.width - 380px;
-                    height: parent.height;
-                    x: (parent.width - self.width) / 2;
-                    alignment: center;
-                    spacing: 2px;
-                    Text { horizontal-stretch: 1; text: root.scale-page-title-label; color: Palette.n900; font-size: 25px; font-weight: 750; horizontal-alignment: center; overflow: elide; }
-                    Text { horizontal-stretch: 1; text: root.scale-settings-status; color: root.scale-settings-dirty ? Palette.a700 : Palette.n500; font-size: 12px; horizontal-alignment: center; overflow: elide; }
+                    horizontal-stretch: 1; alignment: center; spacing: 3px;
+                    Text { min-width: 0px; text: root.scale-page-title-label; color: Palette.n900; font-size: 24px; font-weight: 750; wrap: word-wrap; }
+                    Text { min-width: 0px; text: (root.scale-settings-runtime-status == "connected" ? root.scale-connected-label : root.scale-disconnected-label) + " · " + root.scale-settings-endpoint; color: Palette.n500; font-size: 12px; wrap: word-wrap; }
                 }
-                CompactActionButton {
-                    width: 148px;
-                    x: parent.width - self.width;
-                    y: (parent.height - self.height) / 2;
-                    text: root.scale-refresh-label;
-                    enabled: !root.scale-settings-busy;
-                    clicked => { root.reload-scale-settings(); }
-                }
+                SettingsAction { width: 164px; text: root.scale-settings-busy ? root.form-working : root.settings-refresh-label; enabled: !root.scale-settings-busy; clicked => { root.request-settings-reload(true); } }
             }
-
-            Rectangle {
-                height: 76px;
-                border-radius: 18px;
-                border-width: 1px;
-                border-color: root.scale-settings-runtime-status == "connected" ? Palette.e300 : root.scale-settings-runtime-status == "connecting" || root.scale-settings-runtime-status == "reconnecting" ? Palette.a300 : Palette.n300;
-                background: root.scale-settings-runtime-status == "connected" ? Palette.e50 : root.scale-settings-runtime-status == "connecting" || root.scale-settings-runtime-status == "reconnecting" ? Palette.a50 : white;
-                HorizontalLayout {
-                    alignment: center;
-                    spacing: 14px;
-                    Rectangle {
-                        width: 48px;
-                        height: 48px;
-                        border-radius: 14px;
-                        background: root.scale-settings-runtime-status == "connected" ? Palette.e100 : Palette.n200;
-                        AppIcon { width: 24px; height: 24px; x: 12px; y: 12px; icon: @image-url("../assets/icons/scale-green.png"); }
-                    }
-                    VerticalLayout {
-                        width: root.narrow ? 360px : 440px;
-                        alignment: center;
-                        spacing: 3px;
-                        Text { horizontal-stretch: 1; text: root.scale-settings-protocol-name; color: Palette.n900; font-size: 15px; font-weight: 750; horizontal-alignment: center; overflow: elide; }
-                        Text { horizontal-stretch: 1; text: root.scale-settings-endpoint + " · " + root.scale-settings-protocol; color: Palette.n500; font-family: "Consolas"; font-size: 11px; horizontal-alignment: center; overflow: elide; }
-                    }
-                    Rectangle {
-                        width: 154px;
-                        height: 34px;
-                        border-radius: 17px;
-                        background: root.scale-settings-runtime-status == "connected" ? Palette.e100 : Palette.n200;
-                        Text {
-                            text: root.scale-settings-runtime-status == "connected" ? root.scale-connected-label : root.scale-settings-runtime-status == "connecting" || root.scale-settings-runtime-status == "reconnecting" ? root.scale-connecting-label : root.scale-disconnected-label;
-                            color: root.scale-settings-runtime-status == "connected" ? Palette.e700 : Palette.n600;
-                            font-size: 11px;
-                            font-weight: 750;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                            overflow: elide;
-                        }
-                    }
-                }
+            HorizontalLayout {
+                spacing: 12px;
+                SettingsTab { horizontal-stretch: 1; text: root.form-connection; selected: root.settings-scale-section == 0; enabled: !root.scale-settings-busy; clicked => { root.settings-scale-section = 0; root.scale-settings-page-scroll-y = 0px; } }
+                SettingsTab { horizontal-stretch: 1; text: root.form-stability; selected: root.settings-scale-section == 1; enabled: !root.scale-settings-busy; clicked => { root.settings-scale-section = 1; root.scale-settings-page-scroll-y = 0px; } }
             }
-
-            scale-page-scroll := ScrollView {
-                vertical-stretch: 1;
-                viewport-width: self.width;
+            scale-form-scroll := ScrollView {
+                min-height: 0px; vertical-stretch: 1;
+                viewport-width: self.visible-width;
+                viewport-height: max(self.visible-height, scale-form-scroll-content.min-height);
                 viewport-y <=> root.scale-settings-page-scroll-y;
-                vertical-scrollbar-policy: ScrollBarPolicy.always-off;
-                horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
-                mouse-drag-pan-enabled: true;
+                horizontal-scrollbar-policy: ScrollBarPolicy.always-off; mouse-drag-pan-enabled: true;
+                scale-form-scroll-content := VerticalLayout {
+                    spacing: 12px; alignment: start; padding-right: 8px; padding-bottom: 4px;
+                    if root.settings-scale-section == 0: HorizontalLayout {
+                        spacing: 12px;
+                        VerticalLayout { horizontal-stretch: 0; alignment: start; width: root.scale-settings-connection == "simulator" ? scale-form-scroll.visible-width - 8px : (scale-form-scroll.visible-width - 20px) * 0.60;
+                            SettingsCard {
+                                title: root.form-connection;
+                                HorizontalLayout {
+                                    spacing: 12px;
+                                    SettingsTab { horizontal-stretch: 1; text: root.scale-com-label; selected: root.scale-settings-connection == "serial"; enabled: !root.scale-settings-busy; clicked => { root.scale-settings-connection = "serial"; root.scale-settings-dirty = true; if root.scale-settings-protocol == "simulator" { root.scale-settings-protocol = "generic"; root.scale-settings-protocol-name = "Generic Text"; root.scale-settings-protocol-description = ""; } } }
+                                    SettingsTab { horizontal-stretch: 1; text: root.scale-network-label; selected: root.scale-settings-connection == "tcp"; enabled: !root.scale-settings-busy; clicked => { root.scale-settings-connection = "tcp"; root.scale-settings-dirty = true; if root.scale-settings-protocol == "simulator" { root.scale-settings-protocol = "generic"; root.scale-settings-protocol-name = "Generic Text"; root.scale-settings-protocol-description = ""; } } }
+                                    SettingsTab { horizontal-stretch: 1; text: root.scale-simulator-label; selected: root.scale-settings-connection == "simulator"; enabled: !root.scale-settings-busy; clicked => { root.scale-settings-connection = "simulator"; root.scale-settings-dirty = true; root.scale-settings-protocol = "simulator"; root.scale-settings-protocol-name = "Simulator"; root.scale-settings-protocol-description = root.scale-simulator-hint-label; } }
+                                }
+                                if root.scale-settings-connection == "tcp": VerticalLayout {
 
-                VerticalLayout {
-                    spacing: 12px;
-
-                    Rectangle {
-                        height: root.scale-settings-connection == "serial" ? 330px : root.scale-settings-connection == "tcp" ? 210px : 218px;
-                        border-radius: 18px;
-                        border-width: 1px;
-                        border-color: Palette.n200;
-                        background: white;
-                        VerticalLayout {
-                            padding: 16px;
-                            spacing: 10px;
-                            Text {
-                                height: 20px;
-                                text: root.scale-connection-label;
-                                color: Palette.n500;
-                                font-size: 11px;
-                                font-weight: 750;
-                                letter-spacing: 0.8px;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
-                            }
-                            HorizontalLayout {
-                                height: 58px;
-                                spacing: 9px;
-                                SettingsChoiceButton {
-                                    horizontal-stretch: 1;
-                                    height: 58px;
-                                    text: root.scale-com-label;
-                                    subtext: root.settings-serial-hint;
-                                    selected: root.scale-settings-connection == "serial";
-                                    enabled: !root.scale-settings-busy;
-                                    clicked => {
-                                        root.scale-settings-connection = "serial";
-                                        root.scale-settings-serial-scroll-y = 0px;
-                                        if root.scale-settings-protocol == "simulator" {
-                                            root.scale-settings-protocol = "generic";
-                                            root.scale-settings-protocol-name = "Generic Text";
-                                            root.scale-settings-protocol-description = "Универсальный текстовый протокол";
-                                        }
-                                        root.scale-settings-dirty = true;
-                                    }
-                                }
-                                SettingsChoiceButton {
-                                    horizontal-stretch: 1;
-                                    height: 58px;
-                                    text: root.scale-network-label;
-                                    subtext: root.settings-network-hint;
-                                    selected: root.scale-settings-connection == "tcp";
-                                    enabled: !root.scale-settings-busy;
-                                    clicked => {
-                                        root.scale-settings-connection = "tcp";
-                                        if root.scale-settings-protocol == "simulator" {
-                                            root.scale-settings-protocol = "generic";
-                                            root.scale-settings-protocol-name = "Generic Text";
-                                            root.scale-settings-protocol-description = "Универсальный текстовый протокол";
-                                        }
-                                        root.scale-settings-dirty = true;
-                                    }
-                                }
-                                SettingsChoiceButton {
-                                    horizontal-stretch: 1;
-                                    height: 58px;
-                                    text: root.scale-simulator-label;
-                                    subtext: root.ui-language == "de" ? "Testbetrieb" : root.ui-language == "en" ? "For testing" : root.ui-language == "uk" ? "Для перевірки" : "Для проверки";
-                                    selected: root.scale-settings-connection == "simulator";
-                                    enabled: !root.scale-settings-busy;
-                                    clicked => {
-                                        root.scale-settings-connection = "simulator";
-                                        root.scale-settings-protocol = "simulator";
-                                        root.scale-settings-protocol-name = "Simulator";
-                                        root.scale-settings-protocol-description = root.scale-simulator-hint-label;
-                                        root.scale-settings-dirty = true;
-                                    }
-                                }
-                            }
-
-                            if root.scale-settings-connection == "tcp": HorizontalLayout {
-                                height: 54px;
-                                spacing: 8px;
-                                LineEdit { horizontal-stretch: 1; text <=> root.scale-settings-host; placeholder-text: root.settings-scale-address-label; enabled: !root.scale-settings-busy; edited => { root.scale-settings-dirty = true; } }
-                                CompactActionButton {
-                                    width: 140px;
-                                    text: root.keyboard-label;
-                                    enabled: !root.scale-settings-busy;
-                                    clicked => {
-                                        root.settings-input-target = "scale-host";
-                                        root.settings-input-caption = root.settings-scale-address-label;
-                                        root.settings-input-draft = root.scale-settings-host;
-                                        root.touch-keyboard-layout = 2;
-                                        root.touch-keyboard-uppercase = false;
-                                        root.settings-input-keyboard-visible = true;
-                                    }
-                                }
-                                LineEdit { width: 126px; text <=> root.scale-settings-port; placeholder-text: root.settings-scale-port-label; enabled: !root.scale-settings-busy; edited => { root.scale-settings-dirty = true; } }
-                                CompactActionButton {
-                                    width: 140px;
-                                    text: root.keyboard-label;
-                                    enabled: !root.scale-settings-busy;
-                                    clicked => {
-                                        root.settings-input-target = "scale-port";
-                                        root.settings-input-caption = root.settings-scale-port-label;
-                                        root.settings-input-draft = root.scale-settings-port;
-                                        root.touch-keyboard-layout = 2;
-                                        root.touch-keyboard-uppercase = false;
-                                        root.settings-input-keyboard-visible = true;
-                                    }
-                                }
-                            }
-
-                            if root.scale-settings-connection == "serial": HorizontalLayout {
-                                height: 54px;
-                                spacing: 8px;
-                                Rectangle {
-                                    horizontal-stretch: 1;
-                                    border-radius: 13px;
-                                    border-width: 1px;
-                                    border-color: Palette.n200;
-                                    background: Palette.n50;
                                     HorizontalLayout {
-                                        padding-left: 14px;
-                                        padding-right: 14px;
-                                        spacing: 10px;
-                                        Text { text: root.scale-selected-port-label; color: Palette.n500; font-size: 10px; font-weight: 750; vertical-alignment: center; }
-                                        Text { horizontal-stretch: 1; text: root.scale-settings-serial-path == "" ? root.settings-not-selected-label : root.scale-settings-serial-path; color: root.scale-settings-serial-path == "" ? Palette.n500 : Palette.n900; font-size: 13px; font-weight: 650; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
+                                        spacing: 12px;
+                                        SettingsField { horizontal-stretch: 1;  label: root.settings-scale-address-label; text <=> root.scale-settings-host; hint: ""; placeholder: "192.0.2.20"; enabled: !root.scale-settings-busy; edited => { root.scale-settings-dirty = true; } keyboard => { root.open-settings-input("scale-host", root.settings-scale-address-label, root.scale-settings-host, 1); } }
+                                        SettingsField { horizontal-stretch: 1; max-width: 228px; label: root.settings-scale-port-label; text <=> root.scale-settings-port; hint: "1–65535"; placeholder: ""; enabled: !root.scale-settings-busy; edited => { root.scale-settings-dirty = true; } keyboard => { root.open-settings-input("scale-port", root.settings-scale-port-label, root.scale-settings-port, 2); } }
                                     }
                                 }
-                                LineEdit { width: 150px; text <=> root.scale-settings-baud-rate; placeholder-text: root.settings-baud-placeholder; enabled: !root.scale-settings-busy; edited => { root.scale-settings-dirty = true; } }
-                                CompactActionButton {
-                                    width: 140px;
-                                    text: root.keyboard-label;
-                                    enabled: !root.scale-settings-busy;
-                                    clicked => {
-                                        root.settings-input-target = "scale-baud";
-                                        root.settings-input-caption = root.settings-serial-speed-label;
-                                        root.settings-input-draft = root.scale-settings-baud-rate;
-                                        root.touch-keyboard-layout = 2;
-                                        root.touch-keyboard-uppercase = false;
-                                        root.settings-input-keyboard-visible = true;
-                                    }
-                                }
-                            }
-                            if root.scale-settings-connection == "serial": HorizontalLayout {
-                                height: 122px;
-                                spacing: 8px;
-                                scale-serial-scroll := ScrollView {
-                                    horizontal-stretch: 1;
-                                    viewport-width: self.width;
-                                    viewport-y <=> root.scale-settings-serial-scroll-y;
-                                    vertical-scrollbar-policy: ScrollBarPolicy.always-off;
-                                    horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
-                                    mouse-drag-pan-enabled: true;
-                                    VerticalLayout {
-                                        spacing: 6px;
-                                        if root.scale-settings-serial-ports.length == 0: Text { height: 52px; text: root.settings-serial-empty-label; color: Palette.n500; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
-                                        for choice in root.scale-settings-serial-ports: Rectangle {
-                                            height: 52px;
-                                            border-radius: 12px;
-                                            border-width: 1px;
-                                            border-color: choice.value == root.scale-settings-serial-path ? Palette.e400 : Palette.n200;
-                                            background: choice.value == root.scale-settings-serial-path ? Palette.e50 : Palette.n50;
-                                            HorizontalLayout {
-                                                alignment: center;
-                                                padding-left: 14px;
-                                                padding-right: 14px;
-                                                spacing: 10px;
-                                                Text { text: choice.label; color: Palette.n800; font-size: 13px; font-weight: 700; vertical-alignment: center; }
-                                                Text { text: choice.details; color: Palette.n400; font-size: 10px; vertical-alignment: center; overflow: elide; }
-                                            }
-                                            TouchArea { enabled: !root.scale-settings-busy; clicked => { root.scale-settings-serial-path = choice.value; root.scale-settings-dirty = true; } }
-                                        }
-                                    }
-                                }
-                                if root.scale-settings-serial-ports.length > 2: VerticalLayout {
-                                    width: 52px;
-                                    TouchScrollStepButton { glyph: "▲"; enabled: root.scale-settings-serial-scroll-y < 0px; clicked => { root.scale-settings-serial-scroll-y = min(0px, root.scale-settings-serial-scroll-y + 110px); } }
-                                    Rectangle { vertical-stretch: 1; background: transparent; }
-                                    TouchScrollStepButton { glyph: "▼"; enabled: scale-serial-scroll.viewport-height > scale-serial-scroll.visible-height && root.scale-settings-serial-scroll-y > scale-serial-scroll.visible-height - scale-serial-scroll.viewport-height; clicked => { root.scale-settings-serial-scroll-y = max(scale-serial-scroll.visible-height - scale-serial-scroll.viewport-height, root.scale-settings-serial-scroll-y - 110px); } }
-                                }
-                            }
+                                if root.scale-settings-connection == "serial": VerticalLayout {
 
-                            if root.scale-settings-connection == "simulator": Rectangle {
-                                height: 82px;
-                                border-radius: 14px;
-                                background: Palette.e50;
-                                border-width: 1px;
-                                border-color: Palette.e300;
-                                Text { x: 18px; width: parent.width - 36px; text: root.scale-simulator-hint-label; color: Palette.e700; font-size: 12px; wrap: word-wrap; horizontal-alignment: center; vertical-alignment: center; }
-                            }
-                        }
-                    }
-
-                    Rectangle {
-                        height: 144px;
-                        border-radius: 18px;
-                        border-width: 1px;
-                        border-color: Palette.n200;
-                        background: white;
-                        VerticalLayout {
-                            padding: 16px;
-                            spacing: 10px;
-                            Text { height: 20px; text: root.scale-stability-label; color: Palette.n500; font-size: 11px; font-weight: 750; letter-spacing: 0.8px; horizontal-alignment: center; vertical-alignment: center; }
-                            HorizontalLayout {
-                                height: 66px;
-                                spacing: 10px;
-                                SettingsChoiceButton { horizontal-stretch: 1; height: 66px; text: root.scale-fast-label; subtext: "~450 ms"; selected: root.scale-settings-polling == "150" && root.scale-settings-stability-count == "3"; enabled: !root.scale-settings-busy; clicked => { root.scale-settings-polling = "150"; root.scale-settings-stability-count = "3"; root.scale-settings-dirty = true; } }
-                                SettingsChoiceButton { horizontal-stretch: 1; height: 66px; text: root.scale-balanced-label; subtext: "~1 s"; selected: root.scale-settings-polling == "250" && root.scale-settings-stability-count == "4"; enabled: !root.scale-settings-busy; clicked => { root.scale-settings-polling = "250"; root.scale-settings-stability-count = "4"; root.scale-settings-dirty = true; } }
-                                SettingsChoiceButton { horizontal-stretch: 1; height: 66px; text: root.scale-precise-label; subtext: "~2.5 s"; selected: root.scale-settings-polling == "500" && root.scale-settings-stability-count == "5"; enabled: !root.scale-settings-busy; clicked => { root.scale-settings-polling = "500"; root.scale-settings-stability-count = "5"; root.scale-settings-dirty = true; } }
-                            }
-                        }
-                    }
-
-                    Rectangle {
-                        height: 326px;
-                        border-radius: 18px;
-                        border-width: 1px;
-                        border-color: Palette.n200;
-                        background: white;
-                        VerticalLayout {
-                            padding: 14px;
-                            spacing: 10px;
-                            HorizontalLayout {
-                                height: 48px;
-                                alignment: center;
-                                spacing: 14px;
-                                VerticalLayout {
-                                    width: root.narrow ? 440px : 540px;
-                                    alignment: center;
-                                    spacing: 2px;
-                                    Text { horizontal-stretch: 1; text: root.scale-protocols-label + " · " + root.scale-settings-protocols.length; color: Palette.n500; font-size: 11px; font-weight: 750; letter-spacing: 0.8px; horizontal-alignment: center; overflow: elide; }
-                                    Text { horizontal-stretch: 1; text: root.scale-settings-protocol-description; color: Palette.n600; font-size: 11px; horizontal-alignment: center; overflow: elide; }
-                                }
-                                Rectangle {
-                                    width: 116px;
-                                    height: 34px;
-                                    border-radius: 17px;
-                                    background: Palette.e100;
-                                    Text { text: root.scale-settings-protocol; color: Palette.e700; font-family: "Consolas"; font-size: 10px; font-weight: 750; horizontal-alignment: center; vertical-alignment: center; overflow: elide; }
-                                }
-                            }
-                            HorizontalLayout {
-                                vertical-stretch: 1;
-                                spacing: 8px;
-                                scale-protocol-scroll := ScrollView {
-                                    horizontal-stretch: 1;
-                                    viewport-width: self.width;
-                                    viewport-y <=> root.scale-settings-protocol-scroll-y;
-                                    vertical-scrollbar-policy: ScrollBarPolicy.always-off;
-                                    horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
-                                    mouse-drag-pan-enabled: true;
-                                    VerticalLayout {
-                                        spacing: 7px;
-                                        for protocol in root.scale-settings-protocols: Rectangle {
-                                            height: 62px;
-                                            border-radius: 13px;
-                                            border-width: protocol.id == root.scale-settings-protocol ? 2px : 1px;
-                                            border-color: protocol.id == root.scale-settings-protocol ? Palette.e500 : Palette.n200;
-                                            background: protocol.id == root.scale-settings-protocol ? Palette.e50 : protocol-touch.has-hover ? Palette.n100 : Palette.n50;
-                                            HorizontalLayout {
-                                                padding-left: 14px;
-                                                padding-right: 14px;
-                                                spacing: 10px;
-                                                VerticalLayout {
-                                                    horizontal-stretch: 1;
-                                                    alignment: center;
-                                                    spacing: 2px;
-                                                    Text { horizontal-stretch: 1; text: protocol.name; color: Palette.n900; font-size: 13px; font-weight: 700; horizontal-alignment: center; overflow: elide; }
-                                                    Text { horizontal-stretch: 1; text: protocol.description; color: Palette.n500; font-size: 10px; horizontal-alignment: center; overflow: elide; }
-                                                }
-                                                Text { width: 128px; text: protocol.default-baud-rate + " · " + protocol.serial-format; color: Palette.n500; font-family: "Consolas"; font-size: 10px; horizontal-alignment: center; vertical-alignment: center; }
-                                            }
-                                            protocol-touch := TouchArea {
-                                                enabled: !root.scale-settings-busy && root.scale-settings-connection != "simulator" && protocol.id != "simulator";
-                                                clicked => {
-                                                    root.scale-settings-protocol = protocol.id;
-                                                    root.scale-settings-protocol-name = protocol.name;
-                                                    root.scale-settings-protocol-description = protocol.description;
-                                                    root.scale-settings-baud-rate = protocol.default-baud-rate;
-                                                    root.scale-settings-dirty = true;
-                                                }
-                                            }
-                                        }
+                                    HorizontalLayout {
+                                        spacing: 12px;
+                                        SettingsSelect { horizontal-stretch: 1; label: root.settings-com-placeholder; value: root.scale-settings-serial-path == "" ? root.form-choose-port : root.scale-settings-serial-path; hint: ""; enabled: !root.scale-settings-busy; clicked => { root.settings-picker-target = "scale-serial"; root.settings-picker-search = ""; root.settings-picker-scroll-y = 0px; } }
+                                        SettingsField { horizontal-stretch: 1; max-width: 240px; label: root.settings-serial-speed-label; text <=> root.scale-settings-baud-rate; hint: "300–3000000"; placeholder: ""; enabled: !root.scale-settings-busy; edited => { root.scale-settings-dirty = true; } keyboard => { root.open-settings-input("scale-baud", root.settings-serial-speed-label, root.scale-settings-baud-rate, 2); } }
                                     }
                                 }
-                                if root.scale-settings-protocols.length > 3: VerticalLayout {
-                                    width: 52px;
-                                    TouchScrollStepButton { glyph: "▲"; enabled: root.scale-settings-protocol-scroll-y < 0px; clicked => { root.scale-settings-protocol-scroll-y = min(0px, root.scale-settings-protocol-scroll-y + 138px); } }
-                                    Rectangle { vertical-stretch: 1; background: transparent; }
-                                    TouchScrollStepButton { glyph: "▼"; enabled: scale-protocol-scroll.viewport-height > scale-protocol-scroll.visible-height && root.scale-settings-protocol-scroll-y > scale-protocol-scroll.visible-height - scale-protocol-scroll.viewport-height; clicked => { root.scale-settings-protocol-scroll-y = max(scale-protocol-scroll.visible-height - scale-protocol-scroll.viewport-height, root.scale-settings-protocol-scroll-y - 138px); } }
+                                if root.scale-settings-connection == "simulator": VerticalLayout {
+
+                                    SettingsNotice { text: root.scale-simulator-hint-label; success: true; }
                                 }
                             }
                         }
+                        if root.scale-settings-connection != "simulator": VerticalLayout { horizontal-stretch: 0; alignment: start; width: (scale-form-scroll.visible-width - 20px) * 0.40;
+                            if root.scale-settings-connection != "simulator": SettingsCard {
+                                title: root.form-choose-protocol;
+                                SettingsSelect { horizontal-stretch: 1; label: ""; value: root.scale-settings-protocol-name; hint: root.scale-settings-protocol-description; enabled: !root.scale-settings-busy; clicked => { root.settings-picker-target = "scale-protocol"; root.settings-picker-search = ""; root.settings-picker-scroll-y = 0px; } }
+                            }
+                        }
                     }
+                    if root.settings-scale-section == 1: VerticalLayout {
+                        spacing: 12px; alignment: start;
+                        SettingsCard {
+                            title: root.form-stability; description: root.form-stability-hint;
+                            HorizontalLayout {
+                                spacing: 12px;
+                                SettingsTab { horizontal-stretch: 1; text: root.scale-fast-label + " · ~450 ms"; selected: root.scale-settings-polling == "150" && root.scale-settings-stability-count == "3"; enabled: !root.scale-settings-busy; clicked => { root.scale-settings-polling = "150"; root.scale-settings-stability-count = "3"; root.scale-settings-dirty = true; } }
+                                SettingsTab { horizontal-stretch: 1; text: root.scale-balanced-label + " · ~1 s"; selected: root.scale-settings-polling == "250" && root.scale-settings-stability-count == "4"; enabled: !root.scale-settings-busy; clicked => { root.scale-settings-polling = "250"; root.scale-settings-stability-count = "4"; root.scale-settings-dirty = true; } }
+                                SettingsTab { horizontal-stretch: 1; text: root.scale-precise-label + " · ~2.5 s"; selected: root.scale-settings-polling == "500" && root.scale-settings-stability-count == "5"; enabled: !root.scale-settings-busy; clicked => { root.scale-settings-polling = "500"; root.scale-settings-stability-count = "5"; root.scale-settings-dirty = true; } }
+                            }
+                            HorizontalLayout {
+                                spacing: 12px;
+                                SettingsField { horizontal-stretch: 1;  label: root.form-polling; text <=> root.scale-settings-polling; hint: "50–60000"; placeholder: ""; enabled: !root.scale-settings-busy; edited => { root.scale-settings-dirty = true; } keyboard => { root.open-settings-input("scale-polling", root.form-polling, root.scale-settings-polling, 2); } }
+                                SettingsField { horizontal-stretch: 1;  label: root.form-samples; text <=> root.scale-settings-stability-count; hint: "2–32"; placeholder: ""; enabled: !root.scale-settings-busy; edited => { root.scale-settings-dirty = true; } keyboard => { root.open-settings-input("scale-samples", root.form-samples, root.scale-settings-stability-count, 2); } }
+                            }
+                        }
+                    }
+                    if root.scale-settings-probe != "": VerticalLayout {
 
-                    if root.scale-settings-probe != "": Rectangle {
-                        height: 56px;
-                        border-radius: 13px;
-                        border-width: 1px;
-                        border-color: Palette.e300;
-                        background: Palette.e50;
-                        Text { x: 16px; width: parent.width - 32px; text: root.scale-settings-probe; color: Palette.e700; font-size: 12px; wrap: word-wrap; horizontal-alignment: center; vertical-alignment: center; }
+                        SettingsNotice { text: root.scale-settings-probe;  }
                     }
-                    Rectangle { height: 4px; background: transparent; }
                 }
             }
-
             Rectangle {
-                height: root.short ? 58px : 66px;
-                border-radius: 16px;
-                border-width: 1px;
-                border-color: Palette.n200;
-                background: white;
+                height: 68px; border-radius: 14px; border-width: 1px; border-color: Palette.n200; background: white;
                 HorizontalLayout {
-                    alignment: center;
-                    padding-left: 10px;
-                    padding-right: 10px;
-                    spacing: 10px;
-                    if !root.narrow: Text { width: 300px; text: root.scale-settings-busy ? root.settings-busy-label : root.scale-save-hint-label; color: Palette.n500; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; wrap: word-wrap; }
-                    CompactActionButton { width: root.narrow ? 180px : 200px; text: root.scale-test-label; enabled: !root.scale-settings-busy; clicked => { root.test-scale-settings(); } }
-                    CompactActionButton { width: root.narrow ? 224px : 252px; text: root.scale-settings-busy ? root.scale-saving-label : root.scale-save-label; primary: true; enabled: !root.scale-settings-busy; clicked => { root.save-scale-settings(); } }
+                    padding: 10px; spacing: 8px;
+                    Text { min-width: 0px; horizontal-stretch: 1; text: root.scale-settings-busy ? root.scale-settings-status : root.scale-settings-dirty ? root.form-unsaved : root.scale-settings-status; color: root.scale-settings-dirty ? Palette.a700 : Palette.n500; font-size: 12px; wrap: word-wrap; vertical-alignment: center; }
+                    SettingsAction { width: 166px; text: root.scale-test-label; enabled: !root.scale-settings-busy; clicked => { root.test-scale-settings(); } }
+                    SettingsAction { width: 158px; text: root.scale-settings-busy ? root.form-working : root.settings-save-label; primary: true; enabled: !root.scale-settings-busy; clicked => { root.save-scale-settings(); } }
                 }
             }
         }
@@ -6857,6 +6019,70 @@ export component WeighingPrototype inherits Window {
             }
         }
     }
+    if root.settings-picker-target != "": Rectangle {
+        width: parent.width; height: parent.height; background: #00000066;
+        TouchArea { }
+        Rectangle {
+            width: min(parent.width - 48px, 800px); height: min(parent.height - 48px, 640px);
+            x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+            border-radius: 18px; background: white;
+            VerticalLayout { padding: 20px; spacing: 12px;
+                HorizontalLayout { spacing: 12px;
+                    Text { min-width: 0px; horizontal-stretch: 1; text: root.settings-picker-target == "scale-protocol" ? root.form-choose-protocol : root.form-choose-device; color: Palette.n900; font-size: 22px; font-weight: 700; wrap: word-wrap; vertical-alignment: center; }
+                    SettingsAction { width: 124px; text: root.close-label; clicked => { root.settings-picker-target = ""; } }
+                }
+                SettingsField { label: root.form-search; text <=> root.settings-picker-search; placeholder: root.form-search;
+                    edited => { root.settings-picker-scroll-y = 0px; }
+                    keyboard => { root.open-settings-input("device-search", root.form-search, root.settings-picker-search, 0); }
+                }
+                settings-picker-view := ScrollView {
+                    min-height: 0px; vertical-stretch: 1; viewport-width: self.visible-width;
+                    viewport-height: max(self.visible-height, picker-content.min-height);
+                    viewport-y <=> root.settings-picker-scroll-y;
+                    horizontal-scrollbar-policy: ScrollBarPolicy.always-off; mouse-drag-pan-enabled: true;
+                    picker-content := VerticalLayout { spacing: 8px; alignment: start; padding-right: 8px;
+                        if root.settings-picker-target == "printer" && root.settings-picker-search == "": SettingsSelect {
+                            label: root.form-default; value: root.form-default-printer; option: true; selected: root.settings-driver-name == "";
+                            clicked => { root.select-settings-device("", "", "", 0); }
+                        }
+                        if root.settings-picker-target != "scale-protocol": VerticalLayout { spacing: 8px; alignment: start;
+                            if root.settings-picker-devices.length == 0: SettingsNotice { text: root.form-no-results; }
+                            for choice in root.settings-picker-devices: SettingsSelect {
+                                label: choice.details; value: choice.label; option: true; selected: choice.value == (root.settings-picker-target == "printer" ? root.settings-driver-name : root.settings-picker-target == "printer-serial" ? root.settings-serial-port : root.scale-settings-serial-path);
+                                clicked => { root.select-settings-device(choice.value, choice.label, choice.details, 0); }
+                            }
+                        }
+                        if root.settings-picker-target == "scale-protocol": VerticalLayout { spacing: 8px; alignment: start;
+                            if root.settings-picker-protocols.length == 0: SettingsNotice { text: root.form-no-results; }
+                            for protocol in root.settings-picker-protocols: SettingsSelect {
+                                label: protocol.default-baud-rate + " baud · " + protocol.serial-format;
+                                value: protocol.name; hint: protocol.description; option: true; selected: protocol.id == root.scale-settings-protocol;
+                                clicked => { root.select-settings-device(protocol.id, protocol.name, protocol.description, protocol.default-baud-rate); }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if root.settings-discard-visible: Rectangle {
+        width: parent.width; height: parent.height; background: #00000066;
+        TouchArea { }
+        Rectangle {
+            width: min(parent.width - 48px, 590px); height: discard-content.min-height;
+            x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+            border-radius: 18px; background: white;
+            discard-content := VerticalLayout { padding: 24px; spacing: 18px;
+                Text { min-width: 0px; text: root.form-discard-title; color: Palette.n900; font-size: 22px; font-weight: 700; wrap: word-wrap; }
+                SettingsNotice { text: root.form-discard-text; warning: true; }
+                HorizontalLayout { spacing: 10px;
+                    SettingsAction { horizontal-stretch: 1; primary: true; text: root.form-stay; clicked => { root.cancel-settings-discard(); } }
+                    SettingsAction { horizontal-stretch: 1; danger: true; text: root.form-discard; clicked => { root.confirm-settings-discard(); } }
+                }
+            }
+        }
+    }
+
     if root.settings-input-keyboard-visible: Rectangle {
         width: parent.width;
         height: parent.height;
@@ -6933,28 +6159,7 @@ export component WeighingPrototype inherits Window {
                         root.settings-input-draft = root.edit-touch-text(root.settings-input-draft, "__BACKSPACE__", false);
                     }
                     clear => { root.settings-input-draft = ""; }
-                    done => {
-                        if root.settings-input-target == "printer-ip" {
-                            root.settings-ip = root.settings-input-draft;
-                            root.settings-dirty = true;
-                        } else if root.settings-input-target == "printer-port" {
-                            root.settings-port = root.settings-input-draft;
-                            root.settings-dirty = true;
-                        } else if root.settings-input-target == "printer-baud" {
-                            root.settings-baud-rate = root.settings-input-draft;
-                            root.settings-dirty = true;
-                        } else if root.settings-input-target == "scale-host" {
-                            root.scale-settings-host = root.settings-input-draft;
-                            root.scale-settings-dirty = true;
-                        } else if root.settings-input-target == "scale-port" {
-                            root.scale-settings-port = root.settings-input-draft;
-                            root.scale-settings-dirty = true;
-                        } else if root.settings-input-target == "scale-baud" {
-                            root.scale-settings-baud-rate = root.settings-input-draft;
-                            root.scale-settings-dirty = true;
-                        }
-                        root.settings-input-keyboard-visible = false;
-                    }
+                    done => { root.accept-settings-input(); }
                 }
                 CompactActionButton {
                     height: root.short ? 46px : 50px;

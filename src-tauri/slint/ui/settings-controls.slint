@@ -1,0 +1,174 @@
+import { LineEdit } from "std-widgets.slint";
+
+// Settings-only controls: fixed touch targets, persistent labels, intrinsic cards.
+export component SettingsAction inherits Rectangle {
+    in property <string> text;
+    in property <image> icon;
+    in property <bool> enabled: true;
+    in property <bool> primary: false;
+    in property <bool> danger: false;
+    callback clicked;
+    min-width: 0px;
+    height: 44px;
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: !root.enabled ? #e5e5e5 : root.danger ? #fca5a5 : root.primary ? #059669 : #d4d4d4;
+    background: !root.enabled ? #f5f5f5 : root.primary ? (touch.pressed ? #047857 : touch.has-hover ? #10b981 : #059669) : touch.pressed ? #e5e5e5 : touch.has-hover ? #f5f5f5 : white;
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-enabled: root.enabled;
+    Image { width: 22px; height: 22px; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; source: root.icon; visible: root.text == ""; image-fit: contain; }
+    if root.text != "": Text {
+        x: 10px; width: parent.width - 20px;
+        text: root.text;
+        color: !root.enabled ? #a3a3a3 : root.primary ? white : root.danger ? #dc2626 : #404040;
+        font-size: 13px; font-weight: 650;
+        horizontal-alignment: center; vertical-alignment: center; wrap: word-wrap;
+    }
+    touch := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
+}
+
+export component SettingsTab inherits Rectangle {
+    in property <string> text;
+    in property <bool> selected: false;
+    in property <bool> enabled: true;
+    callback clicked;
+    min-width: 0px;
+    height: 44px;
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: root.selected ? #6ee7b7 : transparent;
+    background: !root.enabled ? #fafafa : root.selected ? #ecfdf5 : touch.has-hover ? #f5f5f5 : white;
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-enabled: root.enabled;
+    Text {
+        x: 8px; width: parent.width - 16px;
+        text: root.text;
+        color: !root.enabled ? #a3a3a3 : root.selected ? #047857 : #525252;
+        font-size: 13px; font-weight: root.selected ? 700 : 500;
+        horizontal-alignment: center; vertical-alignment: center; wrap: word-wrap;
+    }
+    touch := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
+}
+
+export component SettingsCard inherits Rectangle {
+    in property <string> title;
+    in property <string> description: "";
+    min-width: 0px;
+    min-height: content.min-height;
+    preferred-height: content.preferred-height;
+    vertical-stretch: 0;
+    border-radius: 14px; border-width: 1px; border-color: #e5e5e5; background: white;
+    content := VerticalLayout {
+        padding: 16px; spacing: 12px; alignment: start;
+        VerticalLayout {
+            spacing: 4px;
+            Text { min-width: 0px; text: root.title; color: #262626; font-size: 16px; font-weight: 700; wrap: word-wrap; }
+            if root.description != "": Text { min-width: 0px; text: root.description; color: #737373; font-size: 12px; wrap: word-wrap; }
+        }
+        @children
+    }
+}
+
+export component SettingsField inherits Rectangle {
+    in property <string> label;
+    in property <string> hint: "";
+    in property <string> placeholder: "";
+    in property <bool> enabled: true;
+    in-out property <string> text;
+    callback edited;
+    callback keyboard;
+    min-width: 0px;
+    min-height: content.min-height;
+    preferred-height: content.preferred-height;
+    vertical-stretch: 0;
+    forward-focus: edit;
+    content := VerticalLayout {
+        alignment: start; spacing: 6px;
+        Text { min-width: 0px; text: root.label; font-size: 12px; font-weight: 600; color: #525252; wrap: word-wrap; }
+        HorizontalLayout {
+            spacing: 6px; height: 44px;
+            edit := LineEdit { min-width: 0px; horizontal-stretch: 1; height: 44px; text <=> root.text; placeholder-text: root.placeholder; enabled: root.enabled; edited => { root.edited(); } }
+            SettingsAction { width: 46px; text: ""; icon: @image-url("../assets/icons/settings-keyboard.svg"); accessible-label: root.label; enabled: root.enabled; clicked => { root.keyboard(); } }
+        }
+        if root.hint != "": Text { min-width: 0px; text: root.hint; font-size: 11px; color: #737373; wrap: word-wrap; }
+    }
+}
+
+export component SettingsSelect inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+    in property <string> hint: "";
+    in property <bool> enabled: true;
+    in property <bool> option: false;
+    in property <bool> selected: false;
+    callback clicked;
+    min-width: 0px;
+    min-height: content.min-height;
+    preferred-height: content.preferred-height;
+    vertical-stretch: 0;
+    content := VerticalLayout {
+        spacing: 6px; alignment: start;
+        if root.label != "": Text { min-width: 0px; text: root.label; font-size: 12px; font-weight: 600; color: #525252; wrap: word-wrap; }
+        Rectangle {
+            min-height: max(48px, value-row.min-height); preferred-height: max(48px, value-row.preferred-height);
+            border-radius: 10px; border-width: 1px; border-color: root.selected || touch.has-hover ? #10b981 : #d4d4d4;
+            background: !root.enabled ? #f5f5f5 : root.selected || touch.pressed ? #ecfdf5 : white;
+            accessible-role: button; accessible-label: root.label + ": " + root.value; accessible-enabled: root.enabled;
+            value-row := HorizontalLayout {
+                padding: 10px; spacing: 10px;
+                Text { min-width: 0px; horizontal-stretch: 1; text: root.value; font-size: 14px; color: root.enabled ? #262626 : #a3a3a3; wrap: word-wrap; vertical-alignment: center; }
+                Image { width: 22px; height: 22px; source: root.option ? @image-url("../assets/icons/settings-check.svg") : @image-url("../assets/icons/settings-chevron.svg"); visible: !root.option || root.selected; image-fit: contain; }
+            }
+            touch := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
+        }
+        if root.hint != "": Text { min-width: 0px; text: root.hint; font-size: 12px; color: #737373; wrap: word-wrap; }
+    }
+}
+
+export component SettingsToggle inherits Rectangle {
+    in property <string> label;
+    in property <string> description: "";
+    in property <string> state-label;
+    in property <bool> checked: false;
+    in property <bool> enabled: true;
+    callback toggled;
+    min-width: 0px;
+    min-height: max(48px, content.min-height);
+    preferred-height: max(48px, content.preferred-height);
+    vertical-stretch: 0;
+    accessible-role: button; accessible-label: root.label + ": " + root.state-label; accessible-enabled: root.enabled;
+    content := HorizontalLayout {
+        spacing: 16px;
+        VerticalLayout {
+            horizontal-stretch: 1; spacing: 4px; alignment: center;
+            Text { min-width: 0px; text: root.label; font-size: 14px; font-weight: 600; color: #262626; wrap: word-wrap; }
+            if root.description != "": Text { min-width: 0px; text: root.description; font-size: 12px; color: #737373; wrap: word-wrap; }
+        }
+        Text { text: root.state-label; color: root.checked ? #047857 : #737373; font-size: 12px; vertical-alignment: center; }
+        Rectangle {
+            width: 48px; height: 28px; border-radius: 14px;
+            background: !root.enabled ? #d4d4d4 : root.checked ? #059669 : #a3a3a3;
+            Rectangle { width: 22px; height: 22px; x: root.checked ? 23px : 3px; y: 3px; border-radius: 11px; background: white; }
+        }
+    }
+    TouchArea { enabled: root.enabled; clicked => { root.toggled(); } }
+}
+
+export component SettingsNotice inherits Rectangle {
+    in property <string> text;
+    in property <bool> warning: false;
+    in property <bool> success: false;
+    min-width: 0px;
+    min-height: content.min-height;
+    preferred-height: content.preferred-height;
+    vertical-stretch: 0;
+    border-radius: 10px; border-width: 1px;
+    border-color: root.warning ? #fcd34d : root.success ? #a7f3d0 : #e5e5e5;
+    background: root.warning ? #fffbeb : root.success ? #ecfdf5 : #f5f5f5;
+    content := VerticalLayout {
+        padding: 12px;
+        Text { min-width: 0px; text: root.text; color: root.warning ? #b45309 : root.success ? #047857 : #525252; font-size: 12px; wrap: word-wrap; }
+    }
+}

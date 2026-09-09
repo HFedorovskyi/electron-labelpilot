@@ -10,6 +10,7 @@ fn main() {
     #[cfg(feature = "slint-ui")]
     {
         println!("cargo:rerun-if-changed=slint/ui/weighing.slint");
+        println!("cargo:rerun-if-changed=slint/ui/settings-controls.slint");
         println!("cargo:rerun-if-changed=slint/assets");
         let config = slint_build::CompilerConfiguration::new()
             .embed_resources(slint_build::EmbedResourcesKind::EmbedFiles);
