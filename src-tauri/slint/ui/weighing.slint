@@ -1115,25 +1115,14 @@ export component WeighingPrototype inherits Window {
     in-out property <length> settings-system-printer-scroll-y: 0px;
     in-out property <length> settings-serial-port-scroll-y: 0px;
     property <string> form-connection: root.ui-language == "en" ? "Connection" : root.ui-language == "de" ? "Verbindung" : root.ui-language == "uk" ? "Підключення" : "Подключение";
-    property <string> form-label: root.ui-language == "en" ? "Label" : root.ui-language == "de" ? "Etikett" : root.ui-language == "uk" ? "Етикетка" : "Этикетка";
     property <string> form-compatibility: root.ui-language == "en" ? "Compatibility" : root.ui-language == "de" ? "Kompatibilität" : root.ui-language == "uk" ? "Сумісність" : "Совместимость";
     property <string> form-stability: root.ui-language == "en" ? "Stability" : root.ui-language == "de" ? "Stabilität" : root.ui-language == "uk" ? "Стабільність" : "Стабильность";
-    property <string> form-device: root.ui-language == "en" ? "Device" : root.ui-language == "de" ? "Gerät" : root.ui-language == "uk" ? "Пристрій" : "Устройство";
-    property <string> form-name: root.ui-language == "en" ? "Printer name" : root.ui-language == "de" ? "Druckername" : root.ui-language == "uk" ? "Назва принтера" : "Название принтера";
     property <string> form-default-printer: root.ui-language == "en" ? "Default Windows printer" : root.ui-language == "de" ? "Windows-Standarddrucker" : root.ui-language == "uk" ? "Типовий принтер Windows" : "Принтер Windows по умолчанию";
     property <string> form-choose-port: root.ui-language == "en" ? "Select a COM port" : root.ui-language == "de" ? "COM-Anschluss wählen" : root.ui-language == "uk" ? "Виберіть COM-порт" : "Выберите COM-порт";
     property <string> form-choose-protocol: root.ui-language == "en" ? "Scale protocol" : root.ui-language == "de" ? "Waagenprotokoll" : root.ui-language == "uk" ? "Протокол ваг" : "Протокол весов";
     property <string> form-choose-device: root.ui-language == "en" ? "Select device" : root.ui-language == "de" ? "Gerät auswählen" : root.ui-language == "uk" ? "Вибір пристрою" : "Выбор устройства";
     property <string> form-search: root.ui-language == "en" ? "Search name or port" : root.ui-language == "de" ? "Name oder Anschluss suchen" : root.ui-language == "uk" ? "Пошук за назвою чи портом" : "Поиск по названию или порту";
     property <string> form-no-results: root.ui-language == "en" ? "No matches. Change the search or refresh the device list." : root.ui-language == "de" ? "Keine Treffer. Suche ändern oder Geräteliste aktualisieren." : root.ui-language == "uk" ? "Збігів немає. Змініть пошук або оновіть список пристроїв." : "Совпадений нет. Измените поиск или обновите список устройств.";
-    property <string> form-paper: root.ui-language == "en" ? "Label size" : root.ui-language == "de" ? "Etikettengröße" : root.ui-language == "uk" ? "Розмір етикетки" : "Размер этикетки";
-    property <string> form-paper-hint: root.ui-language == "en" ? "Leave blank to use the template size; the gap uses the printer setting." : root.ui-language == "de" ? "Leer: Größe aus Vorlage; Abstand aus Druckereinstellung." : root.ui-language == "uk" ? "Порожнє поле — розмір із шаблону; зазор — налаштування принтера." : "Пустое поле — размер из шаблона; зазор — настройка принтера.";
-    property <string> form-width: root.ui-language == "en" ? "Width, mm" : root.ui-language == "de" ? "Breite, mm" : root.ui-language == "uk" ? "Ширина, мм" : "Ширина, мм";
-    property <string> form-height: root.ui-language == "en" ? "Height, mm" : root.ui-language == "de" ? "Höhe, mm" : root.ui-language == "uk" ? "Висота, мм" : "Высота, мм";
-    property <string> form-gap: root.ui-language == "en" ? "Gap, mm" : root.ui-language == "de" ? "Abstand, mm" : root.ui-language == "uk" ? "Зазор, мм" : "Зазор, мм";
-    property <string> form-quality: root.ui-language == "en" ? "Quality and speed" : root.ui-language == "de" ? "Qualität und Geschwindigkeit" : root.ui-language == "uk" ? "Якість і швидкість" : "Качество и скорость";
-    property <string> form-darkness: root.ui-language == "en" ? "Darkness · 0–30" : root.ui-language == "de" ? "Druckdichte · 0–30" : root.ui-language == "uk" ? "Щільність друку · 0–30" : "Плотность печати · 0–30";
-    property <string> form-print-speed: root.ui-language == "en" ? "Speed · 1–14 in/s" : root.ui-language == "de" ? "Tempo · 1–14 Zoll/s" : root.ui-language == "uk" ? "Швидкість · 1–14 дюйм/с" : "Скорость · 1–14 дюйм/с";
     property <string> form-default: root.ui-language == "en" ? "Default" : root.ui-language == "de" ? "Standard" : root.ui-language == "uk" ? "Типово" : "По умолчанию";
     property <string> form-polling: root.ui-language == "en" ? "Polling interval, ms" : root.ui-language == "de" ? "Abfrageintervall, ms" : root.ui-language == "uk" ? "Інтервал опитування, мс" : "Интервал опроса, мс";
     property <string> form-samples: root.ui-language == "en" ? "Stable readings" : root.ui-language == "de" ? "Stabile Messwerte" : root.ui-language == "uk" ? "Відліки стабільності" : "Отсчёты стабильности";
@@ -1627,12 +1616,6 @@ export component WeighingPrototype inherits Window {
         if root.settings-input-target == "printer-ip" && root.settings-ip != root.settings-input-draft { root.settings-ip = root.settings-input-draft; root.settings-dirty = true; }
         if root.settings-input-target == "printer-port" && root.settings-port != root.settings-input-draft { root.settings-port = root.settings-input-draft; root.settings-dirty = true; }
         if root.settings-input-target == "printer-baud" && root.settings-baud-rate != root.settings-input-draft { root.settings-baud-rate = root.settings-input-draft; root.settings-dirty = true; }
-        if root.settings-input-target == "printer-name" && root.settings-name != root.settings-input-draft { root.settings-name = root.settings-input-draft; root.settings-dirty = true; }
-        if root.settings-input-target == "printer-width" && root.settings-width-mm != root.settings-input-draft { root.settings-width-mm = root.settings-input-draft; root.settings-dirty = true; }
-        if root.settings-input-target == "printer-height" && root.settings-height-mm != root.settings-input-draft { root.settings-height-mm = root.settings-input-draft; root.settings-dirty = true; }
-        if root.settings-input-target == "printer-gap" && root.settings-gap-mm != root.settings-input-draft { root.settings-gap-mm = root.settings-input-draft; root.settings-dirty = true; }
-        if root.settings-input-target == "printer-darkness" && root.settings-darkness != root.settings-input-draft { root.settings-darkness = root.settings-input-draft; root.settings-dirty = true; }
-        if root.settings-input-target == "printer-speed" && root.settings-print-speed != root.settings-input-draft { root.settings-print-speed = root.settings-input-draft; root.settings-dirty = true; }
         if root.settings-input-target == "scale-host" && root.scale-settings-host != root.settings-input-draft { root.scale-settings-host = root.settings-input-draft; root.scale-settings-dirty = true; }
         if root.settings-input-target == "scale-port" && root.scale-settings-port != root.settings-input-draft { root.scale-settings-port = root.settings-input-draft; root.scale-settings-dirty = true; }
         if root.settings-input-target == "scale-baud" && root.scale-settings-baud-rate != root.settings-input-draft { root.scale-settings-baud-rate = root.settings-input-draft; root.scale-settings-dirty = true; }
@@ -2625,8 +2608,7 @@ export component WeighingPrototype inherits Window {
             HorizontalLayout {
                 spacing: 12px;
                 SettingsTab { horizontal-stretch: 1; text: root.form-connection; selected: root.settings-printer-section == 0; enabled: !root.settings-busy; clicked => { root.settings-printer-section = 0; root.settings-printer-scroll-y = 0px; } }
-                SettingsTab { horizontal-stretch: 1; text: root.form-label; selected: root.settings-printer-section == 1; enabled: !root.settings-busy; clicked => { root.settings-printer-section = 1; root.settings-printer-scroll-y = 0px; } }
-                SettingsTab { horizontal-stretch: 1; text: root.form-compatibility; selected: root.settings-printer-section == 2; enabled: !root.settings-busy; clicked => { root.settings-printer-section = 2; root.settings-printer-scroll-y = 0px; } }
+                SettingsTab { horizontal-stretch: 1; text: root.form-compatibility; selected: root.settings-printer-section == 1; enabled: !root.settings-busy; clicked => { root.settings-printer-section = 1; root.settings-printer-scroll-y = 0px; } }
             }
             printer-form-scroll := ScrollView {
                 min-height: 0px; vertical-stretch: 1;
@@ -2667,43 +2649,12 @@ export component WeighingPrototype inherits Window {
                                 }
                             }
                         }
-                        SettingsCard {
-                            title: root.form-device;
-                            SettingsField { horizontal-stretch: 1;  label: root.form-name; text <=> root.settings-name; hint: ""; placeholder: ""; enabled: !root.settings-busy; edited => { root.settings-dirty = true; } keyboard => { root.open-settings-input("printer-name", root.form-name, root.settings-name, 0); } }
-                        }
-                    }
-                    if root.settings-printer-section == 1: VerticalLayout {
-                        spacing: 12px; alignment: start;
                         if root.settings-selected-role == "packPrinter": SettingsCard {
                             title: root.settings-pack-role-label;
                             SettingsToggle { label: root.settings-auto-print-label; description: root.settings-auto-print-hint; state-label: root.settings-auto-print ? root.settings-on-label : root.settings-off-label; checked: root.settings-auto-print; enabled: !root.settings-busy; toggled => { root.settings-auto-print = !root.settings-auto-print; root.settings-dirty = true; } }
                         }
-                        SettingsCard {
-                            title: root.form-paper; description: root.form-paper-hint;
-                            HorizontalLayout {
-                                spacing: 12px;
-                                SettingsField { horizontal-stretch: 1;  label: root.form-width; text <=> root.settings-width-mm; hint: "1–1000"; placeholder: root.form-default; enabled: !root.settings-busy; edited => { root.settings-dirty = true; } keyboard => { root.open-settings-input("printer-width", root.form-width, root.settings-width-mm, 2); } }
-                                SettingsField { horizontal-stretch: 1;  label: root.form-height; text <=> root.settings-height-mm; hint: "1–1500"; placeholder: root.form-default; enabled: !root.settings-busy; edited => { root.settings-dirty = true; } keyboard => { root.open-settings-input("printer-height", root.form-height, root.settings-height-mm, 2); } }
-                                SettingsField { horizontal-stretch: 1;  label: root.form-gap; text <=> root.settings-gap-mm; hint: "0–50"; placeholder: root.form-default; enabled: !root.settings-busy; edited => { root.settings-dirty = true; } keyboard => { root.open-settings-input("printer-gap", root.form-gap, root.settings-gap-mm, 2); } }
-                            }
-                        }
-                        SettingsCard {
-                            title: root.form-quality;
-                            HorizontalLayout {
-                                spacing: 12px;
-                                SettingsTab { horizontal-stretch: 1; text: "203 DPI"; selected: root.settings-dpi == "203"; enabled: !root.settings-busy; clicked => { root.settings-dpi = "203"; root.settings-dirty = true; } }
-                                SettingsTab { horizontal-stretch: 1; text: "300 DPI"; selected: root.settings-dpi == "300"; enabled: !root.settings-busy; clicked => { root.settings-dpi = "300"; root.settings-dirty = true; } }
-                                SettingsTab { horizontal-stretch: 1; text: "600 DPI"; selected: root.settings-dpi == "600"; enabled: !root.settings-busy; clicked => { root.settings-dpi = "600"; root.settings-dirty = true; } }
-                            }
-                            HorizontalLayout {
-                                spacing: 12px;
-                                SettingsField { horizontal-stretch: 1;  label: root.form-darkness; text <=> root.settings-darkness; hint: ""; placeholder: root.form-default; enabled: !root.settings-busy; edited => { root.settings-dirty = true; } keyboard => { root.open-settings-input("printer-darkness", root.form-darkness, root.settings-darkness, 2); } }
-                                SettingsField { horizontal-stretch: 1;  label: root.form-print-speed; text <=> root.settings-print-speed; hint: ""; placeholder: root.form-default; enabled: !root.settings-busy; edited => { root.settings-dirty = true; } keyboard => { root.open-settings-input("printer-speed", root.form-print-speed, root.settings-print-speed, 2); } }
-                            }
-                        }
-
                     }
-                    if root.settings-printer-section == 2: VerticalLayout {
+                    if root.settings-printer-section == 1: VerticalLayout {
                         spacing: 12px; alignment: start;
                         SettingsCard {
                             title: root.settings-language-label; description: root.settings-language-help-text;

@@ -22,7 +22,7 @@ assert.match(controls, /accessible-label: root.label/);
 assert.match(controls, /settings-keyboard.svg/);
 assert.match(controls, /settings-chevron.svg/);
 assert.match(controls, /settings-check.svg/);
-const fields = ['printer-ip', 'printer-port', 'printer-baud', 'printer-name', 'printer-width', 'printer-height', 'printer-gap', 'printer-darkness', 'printer-speed', 'scale-host', 'scale-port', 'scale-baud', 'scale-polling', 'scale-samples'];
+const fields = ['printer-ip', 'printer-port', 'printer-baud', 'scale-host', 'scale-port', 'scale-baud', 'scale-polling', 'scale-samples'];
 for (const field of fields) {
     assert.ok(settings.includes(`open-settings-input("${field}"`), `${field}: keyboard missing`);
     assert.ok(ui.includes(`settings-input-target == "${field}"`), `${field}: acceptance missing`);
@@ -40,6 +40,18 @@ assert.match(runtime, /initialize_settings_models\(&ui\)/);
 assert.match(runtime, /settings_draft_open\(ui\.get_settings_dirty\(\), ui\.get_settings_input_keyboard_visible\(\)\)/);
 assert.match(runtime, /settings_draft_open\(ui\.get_scale_settings_dirty\(\), ui\.get_settings_input_keyboard_visible\(\)\)/);
 assert.match(runtime, /bounded_text\(value, 4096\)/);
+// Printer-local label parameters must never reappear as editable settings.
+const printerForm = settings.slice(settings.indexOf('    if root.active-page == 3: Rectangle {'), settings.indexOf('    if root.active-page == 4: Rectangle {'));
+for (const property of ['name', 'width-mm', 'height-mm', 'gap-mm', 'dpi', 'darkness', 'print-speed']) {
+    assert.ok(!printerForm.includes(`root.settings-${property}`), `${property}: printer-local field returned`);
+}
+for (const target of ['printer-name', 'printer-width', 'printer-height', 'printer-gap', 'printer-darkness', 'printer-speed']) {
+    assert.ok(!ui.includes(`open-settings-input("${target}"`), `${target}: keyboard entry returned`);
+    assert.ok(!ui.includes(`settings-input-target == "${target}"`), `${target}: hidden edit route returned`);
+}
+assert.doesNotMatch(printerForm, /root\.form-label/);
+assert.match(printerForm, /SettingsToggle \{ label: root\.settings-auto-print-label/);
+assert.match(printerForm, /root\.settings-driver-name/);
 // Existing printer activation policy is unchanged by the UI reorganization.
 assert.match(runtime, /active: true,\s*name: ui\.get_settings_name\(\)/);
-console.log('Native settings: 4 sections, 14 labeled keyboard fields, bounded scrolling, draft protection and existing print confirmations verified');
+console.log('Native settings: 4 sections, 8 labeled keyboard fields; no editable printer name or label parameters, bounded scrolling, draft protection and existing print confirmations verified');

@@ -43,7 +43,7 @@ pub fn verify() -> Result<Vec<String>, slint::PlatformError> {
             weak.upgrade().unwrap().set_settings_selected_role(role);
         }
     });
-    ui.set_settings_name("Draft printer".into());
+    ui.set_settings_ip("192.0.2.99".into());
     ui.set_settings_dirty(true);
     ui.invoke_request_settings_role("boxPrinter".into());
     assert!(ui.get_settings_discard_visible() && ui.get_settings_dirty());
@@ -53,7 +53,7 @@ pub fn verify() -> Result<Vec<String>, slint::PlatformError> {
     ui.invoke_cancel_settings_discard();
     assert!(!ui.get_settings_discard_visible());
     assert!(ui.get_settings_dirty());
-    assert_eq!(ui.get_settings_name(), "Draft printer");
+    assert_eq!(ui.get_settings_ip(), "192.0.2.99");
     checks.push("stay-preserves-draft".into());
     ui.invoke_request_settings_role("boxPrinter".into());
     ui.invoke_confirm_settings_discard();
@@ -94,7 +94,7 @@ pub fn verify() -> Result<Vec<String>, slint::PlatformError> {
     checks.push("diagnostics-selects-role-before-async-load".into());
     ui.invoke_request_settings_page(2);
     assert_eq!(ui.get_active_page(), 3);
-    ui.invoke_open_settings_input("printer-name".into(), "Name".into(), "x".into(), 0);
+    ui.invoke_open_settings_input("printer-ip".into(), "Address".into(), "x".into(), 0);
     assert!(!ui.get_settings_input_keyboard_visible());
     checks.push("busy-state-blocks-navigation-and-input".into());
     ui.set_settings_busy(false);
@@ -103,12 +103,6 @@ pub fn verify() -> Result<Vec<String>, slint::PlatformError> {
         ("printer-ip", WeighingPrototype::get_settings_ip),
         ("printer-port", WeighingPrototype::get_settings_port),
         ("printer-baud", WeighingPrototype::get_settings_baud_rate),
-        ("printer-name", WeighingPrototype::get_settings_name),
-        ("printer-width", WeighingPrototype::get_settings_width_mm),
-        ("printer-height", WeighingPrototype::get_settings_height_mm),
-        ("printer-gap", WeighingPrototype::get_settings_gap_mm),
-        ("printer-darkness", WeighingPrototype::get_settings_darkness),
-        ("printer-speed", WeighingPrototype::get_settings_print_speed),
         ("scale-host", WeighingPrototype::get_scale_settings_host),
         ("scale-port", WeighingPrototype::get_scale_settings_port),
         (
@@ -128,11 +122,7 @@ pub fn verify() -> Result<Vec<String>, slint::PlatformError> {
         ui.set_settings_dirty(false);
         ui.set_scale_settings_dirty(false);
         let before = fields.iter().map(|(_, get)| get(&ui)).collect::<Vec<_>>();
-        let draft = if *target == "printer-name" {
-            "Принтер № 3".to_owned()
-        } else {
-            format!("{}", 101 + i)
-        };
+        let draft = format!("{}", 101 + i);
         ui.invoke_open_settings_input((*target).into(), "Field".into(), getter(&ui), 2);
         assert!(ui.get_settings_input_keyboard_visible());
         ui.set_settings_input_draft(draft.clone().into());
@@ -151,28 +141,28 @@ pub fn verify() -> Result<Vec<String>, slint::PlatformError> {
     ui.set_settings_dirty(false);
     ui.set_scale_settings_dirty(false);
     ui.invoke_open_settings_input(
-        "printer-name".into(),
-        "Name".into(),
-        ui.get_settings_name(),
+        "printer-ip".into(),
+        "Address".into(),
+        ui.get_settings_ip(),
         0,
     );
     ui.invoke_accept_settings_input();
     assert!(!ui.get_settings_dirty());
     checks.push("unchanged-keyboard-value-is-not-dirty".into());
     ui.invoke_open_settings_input(
-        "printer-name".into(),
-        "Name".into(),
-        ui.get_settings_name(),
+        "printer-ip".into(),
+        "Address".into(),
+        ui.get_settings_ip(),
         0,
     );
     ui.set_settings_input_draft("Pending".into());
     ui.set_settings_busy(true);
     ui.invoke_accept_settings_input();
     assert!(ui.get_settings_input_keyboard_visible());
-    assert_ne!(ui.get_settings_name(), "Pending");
+    assert_ne!(ui.get_settings_ip(), "Pending");
     ui.set_settings_busy(false);
     ui.invoke_accept_settings_input();
-    assert_eq!(ui.get_settings_name(), "Pending");
+    assert_eq!(ui.get_settings_ip(), "Pending");
     checks.push("pending-keyboard-accept-waits-for-load".into());
     ui.set_settings_dirty(false);
     ui.set_scale_settings_dirty(false);
