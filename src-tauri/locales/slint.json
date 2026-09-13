@@ -1,0 +1,5522 @@
+{
+  "Весовой товар": [
+    "Weighted Goods",
+    "Wiegeware",
+    "Ваговий товар"
+  ],
+  "Диагностика принтеров": [
+    "Printer diagnostics",
+    "Druckerdiagnose",
+    "Діагностика принтерів"
+  ],
+  "Разовая проверка подключения, маршрута печати и точного физического размера": [
+    "On-demand connection, print route and exact physical-size verification",
+    "Bedarfsgesteuerte Prüfung von Verbindung, Druckweg und exakter physischer Größe",
+    "Разова перевірка підключення, маршруту друку й точного фізичного розміру"
+  ],
+  "Проверить все": [
+    "Check all",
+    "Alle prüfen",
+    "Перевірити всі"
+  ],
+  "Настроено": [
+    "Configured",
+    "Konfiguriert",
+    "Налаштовано"
+  ],
+  "Проверено": [
+    "Checked",
+    "Geprüft",
+    "Перевірено"
+  ],
+  "Доступно": [
+    "Reachable",
+    "Erreichbar",
+    "Доступно"
+  ],
+  "Готово к печати": [
+    "Print ready",
+    "Druckbereit",
+    "Готово до друку"
+  ],
+  "Диагностика принтеров доступна в Tauri-сборке.": [
+    "Printer diagnostics are available in the Tauri build.",
+    "Die Druckerdiagnose ist in der Tauri-Version verfügbar.",
+    "Діагностика принтерів доступна у збірці Tauri."
+  ],
+  "Не настроен": [
+    "Not configured",
+    "Nicht konfiguriert",
+    "Не налаштовано"
+  ],
+  "Подключение": [
+    "Connection",
+    "Verbindung",
+    "Підключення"
+  ],
+  "Протокол": [
+    "Protocol",
+    "Protokoll",
+    "Протокол"
+  ],
+  "Состояние": [
+    "Status",
+    "Status",
+    "Стан"
+  ],
+  "Маршрут": [
+    "Backend",
+    "Druckweg",
+    "Маршрут"
+  ],
+  "Опрос / план": [
+    "Query / plan",
+    "Abfrage / Plan",
+    "Опитування / план"
+  ],
+  "Не проверен": [
+    "Not checked",
+    "Nicht geprüft",
+    "Не перевірено"
+  ],
+  "Физический размер": [
+    "Physical size",
+    "Physische Größe",
+    "Фізичний розмір"
+  ],
+  "Ширина": [
+    "Width",
+    "Breite",
+    "Ширина"
+  ],
+  "Высота": [
+    "Height",
+    "Höhe",
+    "Висота"
+  ],
+  "Проверить": [
+    "Check",
+    "Prüfen",
+    "Перевірити"
+  ],
+  "Калибровка": [
+    "Calibrate",
+    "Kalibrieren",
+    "Калібрування"
+  ],
+  "Опрос выполняется только вручную: фоновой нагрузки и постоянного подключения к принтерам нет.": [
+    "Checks run only on demand: no background printer polling or persistent diagnostic connections.",
+    "Prüfungen laufen nur auf Abruf: keine Hintergrundabfrage und keine dauerhafte Diagnoseverbindung.",
+    "Перевірка виконується лише вручну: фонового опитування та постійного діагностичного з’єднання немає."
+  ],
+  "Напечатать калибровочный образец?": [
+    "Print a calibration sample?",
+    "Kalibriermuster drucken?",
+    "Надрукувати калібрувальний зразок?"
+  ],
+  "Будет отправлена ровно одна этикетка или один лист с рамкой, шкалой, текстом, Code 128 и QR-кодом.": [
+    "Exactly one label or page with border, scale, text, Code 128 and QR code will be sent.",
+    "Genau ein Etikett oder Blatt mit Rahmen, Skala, Text, Code 128 und QR-Code wird gesendet.",
+    "Буде надіслано рівно одну етикетку або один аркуш із рамкою, шкалою, текстом, Code 128 і QR-кодом."
+  ],
+  "Назад": [
+    "Back",
+    "Zurück",
+    "Назад"
+  ],
+  "Печатать 1 экземпляр": [
+    "Print 1 copy",
+    "1 Exemplar drucken",
+    "Друкувати 1 примірник"
+  ],
+  "Калибровочный образец передан в печать.": [
+    "Calibration sample was submitted for printing.",
+    "Kalibriermuster wurde zum Drucken übermittelt.",
+    "Калібрувальний зразок передано до друку."
+  ],
+  "Калибровочная печать завершилась ошибкой.": [
+    "Calibration printing failed.",
+    "Kalibrierdruck fehlgeschlagen.",
+    "Калібрувальний друк завершився помилкою."
+  ],
+  "Отчёт сохранён": [
+    "Report saved",
+    "Bericht gespeichert",
+    "Звіт збережено"
+  ],
+  "Очередь печати": [
+    "Print queue",
+    "Druckwarteschlange",
+    "Черга друку"
+  ],
+  "Контроль доставки, повтор проблемных заданий и состояние принтеров": [
+    "Delivery control, failed-job recovery, and printer status",
+    "Zustellung, Wiederholung fehlerhafter Aufträge und Druckerstatus",
+    "Контроль доставки, повтор проблемних завдань і стан принтерів"
+  ],
+  "Обновить": [
+    "Refresh",
+    "Aktualisieren",
+    "Оновити"
+  ],
+  "Проверить принтеры": [
+    "Check printers",
+    "Drucker prüfen",
+    "Перевірити принтери"
+  ],
+  "Монитор надёжной очереди работает в Tauri-сборке.": [
+    "The durable queue monitor runs in the Tauri build.",
+    "Der dauerhafte Warteschlangenmonitor läuft in der Tauri-Version.",
+    "Монітор надійної черги працює у збірці Tauri."
+  ],
+  "Всего": [
+    "Total",
+    "Gesamt",
+    "Усього"
+  ],
+  "В работе": [
+    "In progress",
+    "In Arbeit",
+    "У роботі"
+  ],
+  "Принято": [
+    "Accepted",
+    "Angenommen",
+    "Прийнято"
+  ],
+  "Неизвестно": [
+    "Uncertain",
+    "Ungewiss",
+    "Невідомо"
+  ],
+  "Ошибки": [
+    "Failed",
+    "Fehler",
+    "Помилки"
+  ],
+  "Отменено": [
+    "Cancelled",
+    "Abgebrochen",
+    "Скасовано"
+  ],
+  "Требуют внимания": [
+    "Needs attention",
+    "Prüfung nötig",
+    "Потребують уваги"
+  ],
+  "Активные": [
+    "Active",
+    "Aktiv",
+    "Активні"
+  ],
+  "Принятые": [
+    "Accepted",
+    "Angenommen",
+    "Прийняті"
+  ],
+  "Все": [
+    "All",
+    "Alle",
+    "Усі"
+  ],
+  "Загрузка очереди…": [
+    "Loading queue…",
+    "Warteschlange wird geladen…",
+    "Завантаження черги…"
+  ],
+  "Заданий в этом разделе нет": [
+    "No jobs in this section",
+    "Keine Aufträge in diesem Bereich",
+    "Завдань у цьому розділі немає"
+  ],
+  "Состояние обновляется автоматически при событиях печати.": [
+    "The view updates automatically when print events arrive.",
+    "Die Ansicht wird bei Druckereignissen automatisch aktualisiert.",
+    "Стан оновлюється автоматично за подіями друку."
+  ],
+  "Попыток": [
+    "Attempts",
+    "Versuche",
+    "Спроб"
+  ],
+  "Обновлено": [
+    "Updated",
+    "Aktualisiert",
+    "Оновлено"
+  ],
+  "Повторить": [
+    "Retry",
+    "Wiederholen",
+    "Повторити"
+  ],
+  "Отменить": [
+    "Cancel",
+    "Abbrechen",
+    "Скасувати"
+  ],
+  "Состояние принтеров": [
+    "Printer status",
+    "Druckerstatus",
+    "Стан принтерів"
+  ],
+  "Запрос выполняется только вручную и не расходует ресурсы в фоне.": [
+    "Queried manually only; no background resource usage.",
+    "Nur manuelle Abfrage; keine Hintergrundlast.",
+    "Запит виконується лише вручну без фонового навантаження."
+  ],
+  "Недоступен": [
+    "Unreachable",
+    "Nicht erreichbar",
+    "Недоступний"
+  ],
+  "Нажмите «Проверить принтеры» для разового опроса.": [
+    "Select “Check printers” for a one-time query.",
+    "„Drucker prüfen“ startet eine einmalige Abfrage.",
+    "Натисніть «Перевірити принтери» для разового опитування."
+  ],
+  "Повторить задание с неизвестным результатом?": [
+    "Retry a job with an uncertain result?",
+    "Auftrag mit ungewissem Ergebnis wiederholen?",
+    "Повторити завдання з невідомим результатом?"
+  ],
+  "Принтер мог уже принять это задание. Повтор может напечатать дубликат.": [
+    "The printer may already have accepted this job. A retry can print a duplicate.",
+    "Der Drucker könnte den Auftrag bereits angenommen haben. Eine Wiederholung kann ein Duplikat drucken.",
+    "Принтер міг уже прийняти це завдання. Повтор може надрукувати дублікат."
+  ],
+  "Всё равно повторить": [
+    "Retry anyway",
+    "Trotzdem wiederholen",
+    "Усе одно повторити"
+  ],
+  "В очереди": [
+    "Queued",
+    "Eingereiht",
+    "У черзі"
+  ],
+  "Подготовка": [
+    "Rendering",
+    "Aufbereitung",
+    "Підготовка"
+  ],
+  "Отправка": [
+    "Sending",
+    "Wird gesendet",
+    "Надсилання"
+  ],
+  "Результат неизвестен": [
+    "Uncertain result",
+    "Ergebnis ungewiss",
+    "Результат невідомий"
+  ],
+  "Ошибка": [
+    "Error",
+    "Fehler",
+    "Помилка"
+  ],
+  "Номенклатура": [
+    "Products",
+    "Produkte",
+    "Номенклатура"
+  ],
+  "Настройки": [
+    "Settings",
+    "Einstellungen",
+    "Налаштування"
+  ],
+  "Статус сервера": [
+    "Server Status",
+    "Serverstatus",
+    "Статус сервера"
+  ],
+  "Подключено": [
+    "Connected",
+    "Verbunden",
+    "Підключено"
+  ],
+  "Выход": [
+    "Exit",
+    "Beenden",
+    "Вихід"
+  ],
+  "Версия": [
+    "Version",
+    "Version",
+    "Версія"
+  ],
+  "Лицензия": [
+    "License",
+    "Lizenz",
+    "Ліцензія"
+  ],
+  "Демо-режим": [
+    "Demo mode",
+    "Demo-Modus",
+    "Демо-режим"
+  ],
+  "Демо": [
+    "Demo",
+    "Demo",
+    "Демо"
+  ],
+  "Редакция": [
+    "Edition",
+    "Edition",
+    "Редакція"
+  ],
+  "Клиент": [
+    "Customer",
+    "Kunde",
+    "Клієнт"
+  ],
+  "Действует до": [
+    "Valid until",
+    "Gültig bis",
+    "Дійсна до"
+  ],
+  "Срок действия истёк": [
+    "License expired",
+    "Lizenz abgelaufen",
+    "Термін дії ліцензії минув"
+  ],
+  "Станции": [
+    "Stations",
+    "Stationen",
+    "Станції"
+  ],
+  "Лимит станций": [
+    "Station limit",
+    "Stationslimit",
+    "Ліміт станцій"
+  ],
+  "Продукт работает в демо-режиме (не лицензирован). Весь локальный функционал доступен. Активируйте лицензию, чтобы отправлять реальные данные на станции.": [
+    "The product is running in demo mode (unlicensed). All local features work. Activate a license to send real data to stations.",
+    "Das Produkt läuft im Demo-Modus (nicht lizenziert). Alle lokalen Funktionen sind verfügbar. Aktivieren Sie eine Lizenz, um echte Daten an Stationen zu senden.",
+    "Продукт працює в демо-режимі (не ліцензований). Весь локальний функціонал доступний. Активуйте ліцензію, щоб надсилати реальні дані на станції."
+  ],
+  "Активировать": [
+    "Activate",
+    "Aktivieren",
+    "Активувати"
+  ],
+  "Статус лицензии недоступен": [
+    "License status unavailable",
+    "Lizenzstatus nicht verfügbar",
+    "Статус ліцензії недоступний"
+  ],
+  "Состояние лицензии подключённого сервера": [
+    "License status of the connected server",
+    "Lizenzstatus des verbundenen Servers",
+    "Стан ліцензії підключеного сервера"
+  ],
+  "Активна": [
+    "Active",
+    "Aktiv",
+    "Активна"
+  ],
+  "Истекла": [
+    "Expired",
+    "Abgelaufen",
+    "Прострочена"
+  ],
+  "Недоступно": [
+    "Unavailable",
+    "Nicht verfügbar",
+    "Недоступно"
+  ],
+  "Обновить статус": [
+    "Refresh status",
+    "Status aktualisieren",
+    "Оновити статус"
+  ],
+  "Сервер недоступен — статус лицензии получить не удалось.": [
+    "Server unreachable — could not fetch license status.",
+    "Server nicht erreichbar — Lizenzstatus konnte nicht abgerufen werden.",
+    "Сервер недоступний — не вдалося отримати статус ліцензії."
+  ],
+  "Данные лицензии": [
+    "License details",
+    "Lizenzdetails",
+    "Дані ліцензії"
+  ],
+  "Возможности": [
+    "Features",
+    "Funktionen",
+    "Можливості"
+  ],
+  "Базовый набор": [
+    "Base set",
+    "Basispaket",
+    "Базовий набір"
+  ],
+  "Привязка к серверу": [
+    "Server binding",
+    "Serverbindung",
+    "Прив’язка до сервера"
+  ],
+  "ID сервера (machine_id)": [
+    "Server ID (machine_id)",
+    "Server-ID (machine_id)",
+    "ID сервера (machine_id)"
+  ],
+  "Копировать": [
+    "Copy",
+    "Kopieren",
+    "Копіювати"
+  ],
+  "Скопировано": [
+    "Copied",
+    "Kopiert",
+    "Скопійовано"
+  ],
+  "Подпись действительна": [
+    "Signature valid",
+    "Signatur gültig",
+    "Підпис дійсний"
+  ],
+  "Подпись недействительна": [
+    "Signature invalid",
+    "Signatur ungültig",
+    "Підпис недійсний"
+  ],
+  "Привязка совпадает": [
+    "Binding matches",
+    "Bindung stimmt überein",
+    "Прив’язка збігається"
+  ],
+  "Привязка не совпадает": [
+    "Binding mismatch",
+    "Bindung stimmt nicht überein",
+    "Прив’язка не збігається"
+  ],
+  "Строгая проверка включена": [
+    "Strict verification enabled",
+    "Strenge Prüfung aktiviert",
+    "Сувора перевірка увімкнена"
+  ],
+  "Как получить или продлить лицензию": [
+    "How to obtain or renew a license",
+    "Lizenz erwerben oder verlängern",
+    "Як отримати або продовжити ліцензію"
+  ],
+  "Скопируйте ID сервера (machine_id) ниже.": [
+    "Copy the Server ID (machine_id) below.",
+    "Kopieren Sie die Server-ID (machine_id) unten.",
+    "Скопіюйте ID сервера (machine_id) нижче."
+  ],
+  "Передайте его при покупке или продлении лицензии.": [
+    "Provide it when buying or renewing a license.",
+    "Geben Sie sie beim Kauf oder bei der Verlängerung der Lizenz an.",
+    "Передайте його під час купівлі або продовження ліцензії."
+  ],
+  "Получите файл лицензии (.lpl), привязанный к этому серверу, и установите его на сервере.": [
+    "Receive a license file (.lpl) bound to this server and install it on the server.",
+    "Erhalten Sie eine an diesen Server gebundene Lizenzdatei (.lpl) und installieren Sie sie auf dem Server.",
+    "Отримайте файл ліцензії (.lpl), прив’язаний до цього сервера, та встановіть його на сервері."
+  ],
+  "Открыть панель лицензий": [
+    "Open license panel",
+    "Lizenzpanel öffnen",
+    "Відкрити панель ліцензій"
+  ],
+  "Загружает образцы шаблонов и товаров для теста без сервера и лицензии.": [
+    "Loads sample templates and products so you can test without a server or license.",
+    "Lädt Beispielvorlagen und -produkte, um ohne Server oder Lizenz zu testen.",
+    "Завантажує зразки шаблонів і товарів для тесту без сервера та ліцензії."
+  ],
+  "Кнопка «Демо-режим» загрузит образцы товаров и шаблонов — попробуйте печать без сервера и лицензии (заменит локальные данные).": [
+    "The \"Demo mode\" button loads sample products and templates — try printing without a server or license (this replaces local data).",
+    "Die Schaltfläche „Demo-Modus\" lädt Beispielprodukte und -vorlagen — testen Sie das Drucken ohne Server oder Lizenz (ersetzt lokale Daten).",
+    "Кнопка «Демо-режим» завантажить зразки товарів і шаблонів — спробуйте друк без сервера та ліцензії (замінить локальні дані)."
+  ],
+  "Включить демо-режим? Это ЗАМЕНИТ все локальные данные (товары, шаблоны, ШК) образцами.": [
+    "Enable demo mode? This REPLACES all local data (products, templates, barcodes) with samples.",
+    "Demo-Modus aktivieren? Dies ERSETZT alle lokalen Daten (Produkte, Vorlagen, Barcodes) durch Beispiele.",
+    "Увімкнути демо-режим? Це ЗАМІНИТЬ усі локальні дані (товари, шаблони, ШК) зразками."
+  ],
+  "Внимание: станция уже настроена. Включение демо-режима УДАЛИТ все текущие локальные данные и заменит их образцами.": [
+    "Warning: this station is already provisioned. Enabling demo mode will DELETE all current local data and replace it with samples.",
+    "Achtung: Diese Station ist bereits eingerichtet. Das Aktivieren des Demo-Modus LÖSCHT alle aktuellen lokalen Daten und ersetzt sie durch Beispiele.",
+    "Увага: станцію вже налаштовано. Увімкнення демо-режиму ВИДАЛИТЬ усі поточні локальні дані та замінить їх зразками."
+  ],
+  "Не удалось загрузить демо-данные": [
+    "Failed to load demo data",
+    "Demo-Daten konnten nicht geladen werden",
+    "Не вдалося завантажити демо-дані"
+  ],
+  "Выйти из демо": [
+    "Exit demo",
+    "Demo verlassen",
+    "Вийти з демо"
+  ],
+  "Выйти из демо-режима? Демо-данные будут удалены, а реальная привязка станции к серверу восстановится.": [
+    "Exit demo mode? Demo data will be removed and the station reconnects to the server as before.",
+    "Demo-Modus verlassen? Die Demo-Daten werden entfernt und die Station verbindet sich wie zuvor mit dem Server.",
+    "Вийти з демо-режиму? Демо-дані буде видалено, а станцію буде повторно підключено до сервера, як раніше."
+  ],
+  "Не удалось выйти из демо-режима": [
+    "Failed to exit demo mode",
+    "Demo-Modus konnte nicht verlassen werden",
+    "Не вдалося вийти з демо-режиму"
+  ],
+  "Синхронизация завершена": [
+    "Sync complete",
+    "Synchronisierung abgeschlossen",
+    "Синхронізація завершена"
+  ],
+  "Внешний вид": [
+    "Appearance",
+    "Erscheinungsbild",
+    "Зовнішній вигляд"
+  ],
+  "Настройки принтера": [
+    "Printer Settings",
+    "Druckereinstellungen",
+    "Налаштування принтера"
+  ],
+  "Принтер для этикетки на упаковку": [
+    "Pack label printer",
+    "Drucker für Packungsetikett",
+    "Принтер для етикетки на упаковку"
+  ],
+  "Принтер для этикетки на короб": [
+    "Box label printer",
+    "Drucker für Karton-Etikett",
+    "Принтер для етикетки на короб"
+  ],
+  "Принтер для паллетного листа": [
+    "Pallet sheet printer",
+    "Drucker für Palettenschein",
+    "Принтер для палетного листа"
+  ],
+  "Печать паллетного листа": [
+    "Print pallet sheet",
+    "Palettenschein drucken",
+    "Друк палетного листа"
+  ],
+  "Печать паллетного листа…": [
+    "Printing pallet sheet…",
+    "Palettenschein wird gedruckt…",
+    "Друк палетного листа…"
+  ],
+  "Паллетный лист отправлен на печать": [
+    "Pallet sheet sent to printer",
+    "Palettenschein an Drucker gesendet",
+    "Палетний лист надіслано на друк"
+  ],
+  "Принтер для паллетного листа не настроен.\nУкажите его в Настройках → Принтер.": [
+    "Pallet sheet printer is not configured.\nSet it in Settings → Printer.",
+    "Drucker für Palettenschein ist nicht konfiguriert.\nLegen Sie ihn unter Einstellungen → Drucker fest.",
+    "Принтер для палетного листа не налаштований.\nВкажіть його в Налаштування → Принтер."
+  ],
+  "Шаблон паллетного листа не найден.\nСоздайте шаблон с типом «Паллета» на сервере и синхронизируйте.": [
+    "Pallet sheet template not found.\nCreate a template of type “Pallet” on the server and sync.",
+    "Palettenschein-Vorlage nicht gefunden.\nErstellen Sie eine Vorlage vom Typ „Palette“ auf dem Server und synchronisieren Sie.",
+    "Шаблон палетного листа не знайдено.\nСтворіть шаблон із типом «Палета» на сервері та синхронізуйте."
+  ],
+  "Нет открытой паллеты.\nЗакройте хотя бы один короб, чтобы начать паллету.": [
+    "No open pallet.\nClose at least one box to start a pallet.",
+    "Keine offene Palette.\nSchließen Sie mindestens einen Karton, um eine Palette zu beginnen.",
+    "Немає відкритої палети.\nЗакрийте хоча б один короб, щоб почати палету."
+  ],
+  "Паллета пуста — нет коробов для печати.": [
+    "The pallet is empty — no boxes to print.",
+    "Die Palette ist leer — keine Kartons zum Drucken.",
+    "Палета порожня — немає коробів для друку."
+  ],
+  "Нельзя закрыть паллету: есть открытый короб.\nСначала закройте короб.": [
+    "Cannot close the pallet: a box is still open.\nClose the box first.",
+    "Palette kann nicht geschlossen werden: ein Karton ist noch offen.\nSchließen Sie zuerst den Karton.",
+    "Не можна закрити палету: є відкритий короб.\nСпершу закрийте короб."
+  ],
+  "Не удалось напечатать паллетный лист. Паллета не закрыта.": [
+    "Failed to print the pallet sheet. The pallet was not closed.",
+    "Palettenschein konnte nicht gedruckt werden. Die Palette wurde nicht geschlossen.",
+    "Не вдалося надрукувати палетний лист. Палету не закрито."
+  ],
+  "Системный по умолчанию": [
+    "System default",
+    "Systemstandard",
+    "Системний за замовчуванням"
+  ],
+  "TSC, Zebra, Honeywell, CAB и др.": [
+    "TSC, Zebra, Honeywell, CAB, etc.",
+    "TSC, Zebra, Honeywell, CAB usw.",
+    "TSC, Zebra, Honeywell, CAB та ін."
+  ],
+  "Обновить список принтеров": [
+    "Refresh printer list",
+    "Druckerliste aktualisieren",
+    "Оновити список принтерів"
+  ],
+  "Авто-печать по стабилизации": [
+    "Auto-print on stabilization",
+    "Automatischer Druck bei Stabilisierung",
+    "Авто-друк за стабілізацією"
+  ],
+  "Автоматическая печать этикетки при стабилизации показаний весов": [
+    "Automatically print label when scale reading stabilizes",
+    "Etikett automatisch drucken, wenn das Waagengewicht stabil ist",
+    "Автоматичний друк етикетки при стабілізації показань ваг"
+  ],
+  "Настройки весов": [
+    "Scale Settings",
+    "Waagen-Einstellungen",
+    "Налаштування ваг"
+  ],
+  "Тип интерфейса": [
+    "Interface type",
+    "Schnittstellentyp",
+    "Тип інтерфейсу"
+  ],
+  "Serial Port (USB/COM)": [
+    "Serial Port (USB/COM)",
+    "Serial Port (USB/COM)",
+    "Serial Port (USB/COM)"
+  ],
+  "Ethernet (TCP/IP)": [
+    "Ethernet (TCP/IP)",
+    "Ethernet (TCP/IP)",
+    "Ethernet (TCP/IP)"
+  ],
+  "Симулятор": [
+    "Simulator",
+    "Simulator",
+    "Симулятор"
+  ],
+  "Порт": [
+    "Port",
+    "Port",
+    "Порт"
+  ],
+  "Укажите или выберите порт (USB, COM1)": [
+    "Select or type port (e.g. USB, COM1)",
+    "Port auswählen oder eingeben (z.B. USB, COM1)",
+    "Укажіть або виберіть порт (USB, COM1)"
+  ],
+  "Скорость (Baud)": [
+    "Baud Rate",
+    "Baudrate",
+    "Швидкість (Baud)"
+  ],
+  "IP Адрес": [
+    "IP Address",
+    "IP-Adresse",
+    "IP-адреса"
+  ],
+  "Протокол весов": [
+    "Scale protocol",
+    "Waagenprotokoll",
+    "Протокол ваг"
+  ],
+  "Интерфейс подключения": [
+    "Connection Interface",
+    "Verbindungsschnittstelle",
+    "Інтерфейс підключення"
+  ],
+  "Протокол и настройка": [
+    "Protocol & Configuration",
+    "Protokoll & Konfiguration",
+    "Протокол і налаштування"
+  ],
+  "Опрос (мс)": [
+    "Polling (ms)",
+    "Abfrage (ms)",
+    "Опитування (мс)"
+  ],
+  "Стабильность (измерений)": [
+    "Stability (readings)",
+    "Stabilität (Messungen)",
+    "Стабільність (вимірювань)"
+  ],
+  "Скорость стабилизации": [
+    "Stabilization speed",
+    "Stabilisierungsgeschwindigkeit",
+    "Швидкість стабілізації"
+  ],
+  "Быстро": [
+    "Fast",
+    "Schnell",
+    "Швидко"
+  ],
+  "Сбалансированно": [
+    "Balanced",
+    "Ausgewogen",
+    "Збалансовано"
+  ],
+  "Точно": [
+    "Accurate",
+    "Genau",
+    "Точно"
+  ],
+  "Сохранить настройки": [
+    "Save settings",
+    "Einstellungen speichern",
+    "Зберегти налаштування"
+  ],
+  "Настройки сохранены": [
+    "Settings saved",
+    "Einstellungen gespeichert",
+    "Налаштування збережено"
+  ],
+  "Язык интерфейса": [
+    "Interface language",
+    "Sprache der Oberfläche",
+    "Мова інтерфейсу"
+  ],
+  "Порты не найдены": [
+    "No ports found",
+    "Keine Ports gefunden",
+    "Порти не знайдено"
+  ],
+  "по умолч.": [
+    "default",
+    "Standard",
+    "за замовч."
+  ],
+  "IP-адрес сервера": [
+    "Server IP Address",
+    "Server-IP-Adresse",
+    "IP-адреса сервера"
+  ],
+  "Например: 192.168.1.100": [
+    "Example: 192.168.1.100",
+    "Beispiel: 192.168.1.100",
+    "Наприклад: 192.168.1.100"
+  ],
+  "Синхронизация": [
+    "Sync Data",
+    "Synchronisieren",
+    "Синхронізація"
+  ],
+  "Загрузка...": [
+    "Loading...",
+    "Laden...",
+    "Завантаження..."
+  ],
+  "Проверка...": [
+    "Testing...",
+    "Prüfen...",
+    "Перевірка..."
+  ],
+  "Проверить соединение": [
+    "Test Connection",
+    "Verbindung testen",
+    "Перевірити з'єднання"
+  ],
+  "Соединение успешно!": [
+    "Connection Successful!",
+    "Verbindung erfolgreich!",
+    "З'єднання успішне!"
+  ],
+  "Ошибка соединения": [
+    "Connection Failed",
+    "Verbindungsfehler",
+    "Помилка з'єднання"
+  ],
+  "Укажите IP сервера": [
+    "Server IP required",
+    "Server-IP erforderlich",
+    "Укажіть IP сервера"
+  ],
+  "Оффлайн синхронизация": [
+    "Offline Synchronization",
+    "Offline-Synchronisierung",
+    "Офлайн-синхронізація"
+  ],
+  "Импорт идентификатора (.lpi)": [
+    "Import Identity (.lpi)",
+    "Identität importieren (.lpi)",
+    "Імпорт ідентифікатора (.lpi)"
+  ],
+  "Импорт обновления (.lps)": [
+    "Import Update (.lps)",
+    "Update importieren (.lps)",
+    "Імпорт оновлення (.lps)"
+  ],
+  "Экспорт данных (.lpr)": [
+    "Export Data (.lpr)",
+    "Daten exportieren (.lpr)",
+    "Експорт даних (.lpr)"
+  ],
+  "Идентификатор успешно импортирован": [
+    "Identity imported successfully",
+    "Identität erfolgreich importiert",
+    "Ідентифікатор успішно імпортовано"
+  ],
+  "Опасная зона": [
+    "Danger Zone",
+    "Gefahrenzone",
+    "Небезпечна зона"
+  ],
+  "Сброс базы данных": [
+    "Reset Database",
+    "Datenbank zurücksetzen",
+    "Скидання бази даних"
+  ],
+  "Показать логи": [
+    "Show Logs",
+    "Logs anzeigen",
+    "Показати логи"
+  ],
+  "Сброс базы данных приведет к безвозвратному удалению всех локальных данных, включая этикетки, товары и логи. Это действие необратимо.": [
+    "Resetting the database will permanently delete all local data, including labels, products, and logs. This action cannot be undone.",
+    "Das Zurücksetzen der Datenbank löscht dauerhaft alle lokalen Daten, einschließlich Etiketten, Produkte und Logs. Diese Aktion kann nicht rückgängig gemacht werden.",
+    "Скидання бази даних призведе до безповоротного видалення всіх локальних даних, включно з етикетками, товарами та логами."
+  ],
+  "Вы абсолютно уверены?": [
+    "Are you absolutely sure?",
+    "Sind Sie absolut sicher?",
+    "Ви цілком упевнені?"
+  ],
+  "Это очистит все локальные данные и сбросит идентификатор станции. Вам потребуется повторно импортировать файл идентификации.": [
+    "This will wipe all local data and reset the station identity. You will need to re-import the identity file to use the application.",
+    "Dies löscht alle lokalen Daten und setzt die Identität der Station zurück. Sie müssen die Identitätsdatei erneut importieren.",
+    "Це очистить усі локальні дані та скине ідентифікатор станції. Вам потрібно буде повторно імпортувати файл ідентифікації."
+  ],
+  "Очистить всё": [
+    "Reset Everything",
+    "Alles löschen",
+    "Очистити все"
+  ],
+  "База данных успешно очищена": [
+    "Database reset successfully",
+    "Datenbank erfolgreich zurückgesetzt",
+    "Базу даних успішно очищено"
+  ],
+  "Настройка принтера": [
+    "Printer Setup",
+    "Druckereinrichtung",
+    "Налаштування принтера"
+  ],
+  "Тип подключения": [
+    "Connection Type",
+    "Verbindungstyp",
+    "Тип підключення"
+  ],
+  "Имя принтера в системе": [
+    "System Printer Name",
+    "Systemdruckername",
+    "Ім'я принтера в системі"
+  ],
+  "Например: Zebra_ZD420": [
+    "e.g. Zebra_ZD420",
+    "z.B. Zebra_ZD420",
+    "Наприклад: Zebra_ZD420"
+  ],
+  "Целевой принтер": [
+    "Target Printer",
+    "Zieldrucker",
+    "Цільовий принтер"
+  ],
+  "Плотность печати (0-30)": [
+    "Darkness (0-30)",
+    "Schwärzung (0-30)",
+    "Щільність друку (0-30)"
+  ],
+  "Скорость (2-12)": [
+    "Speed (2-12)",
+    "Geschwindigkeit (2-12)",
+    "Швидкість (2-12)"
+  ],
+  "Тестовая печать": [
+    "Test Print",
+    "Testdruck",
+    "Тестовий друк"
+  ],
+  "Определить принтер": [
+    "Detect printer",
+    "Drucker erkennen",
+    "Визначити принтер"
+  ],
+  "Определение...": [
+    "Detecting...",
+    "Erkennung...",
+    "Визначення..."
+  ],
+  "Определено": [
+    "Detected",
+    "Erkannt",
+    "Визначено"
+  ],
+  "Принтер не распознан": [
+    "Printer not identified",
+    "Drucker nicht erkannt",
+    "Принтер не розпізнано"
+  ],
+  "Автоопределение работает через Ethernet или Serial": [
+    "Auto-detection works over Ethernet or Serial",
+    "Auto-Erkennung funktioniert über Ethernet oder Seriell",
+    "Автовизначення працює через Ethernet або Serial"
+  ],
+  "из кэша": [
+    "cached",
+    "Cache",
+    "з кешу"
+  ],
+  "опрос": [
+    "live query",
+    "Live-Abfrage",
+    "опитування"
+  ],
+  "Прошивка": [
+    "Firmware",
+    "Firmware",
+    "Прошивка"
+  ],
+  "готов": [
+    "ready",
+    "bereit",
+    "готовий"
+  ],
+  "печатает": [
+    "printing",
+    "druckt",
+    "друкує"
+  ],
+  "пауза": [
+    "paused",
+    "pausiert",
+    "пауза"
+  ],
+  "головка открыта": [
+    "head open",
+    "Druckkopf offen",
+    "головка відкрита"
+  ],
+  "нет бумаги": [
+    "paper out",
+    "Papier leer",
+    "немає паперу"
+  ],
+  "нет риббона": [
+    "ribbon out",
+    "Farbband leer",
+    "немає ріббона"
+  ],
+  "замятие бумаги": [
+    "paper jam",
+    "Papierstau",
+    "зминання паперу"
+  ],
+  "ошибка": [
+    "error",
+    "Fehler",
+    "помилка"
+  ],
+  "состояние не определено": [
+    "status unknown",
+    "Status unbekannt",
+    "стан не визначено"
+  ],
+  "Протокол печати": [
+    "Print protocol",
+    "Druckprotokoll",
+    "Протокол друку"
+  ],
+  "Профиль совместимости": [
+    "Compatibility profile",
+    "Kompatibilitätsprofil",
+    "Профіль сумісності"
+  ],
+  "Авто": [
+    "Auto",
+    "Auto",
+    "Авто"
+  ],
+  "Совместимый": [
+    "Compatible",
+    "Kompatibel",
+    "Сумісний"
+  ],
+  "Расширенный": [
+    "Advanced",
+    "Erweitert",
+    "Розширений"
+  ],
+  "Активный профиль": [
+    "Active profile",
+    "Aktives Profil",
+    "Активний профіль"
+  ],
+  "Показать": [
+    "Show",
+    "Anzeigen",
+    "Показати"
+  ],
+  "Скрыть": [
+    "Hide",
+    "Ausblenden",
+    "Сховати"
+  ],
+  "Язык и совместимость": [
+    "Print language and compatibility",
+    "Drucksprache und Kompatibilität",
+    "Мова друку та сумісність"
+  ],
+  "Параметры печати": [
+    "Print parameters",
+    "Druckparameter",
+    "Параметри друку"
+  ],
+  "Графика и кэш": [
+    "Graphics and cache",
+    "Grafik und Cache",
+    "Графіка та кеш"
+  ],
+  "ZPL (Классика)": [
+    "ZPL (Classic)",
+    "ZPL (Klassisch)",
+    "ZPL (Класика)"
+  ],
+  "Шрифты принтера": [
+    "Printer fonts",
+    "Druckerschriften",
+    "Шрифти принтера"
+  ],
+  "TSPL / TSPL2": [
+    "TSPL / TSPL2",
+    "TSPL / TSPL2",
+    "TSPL / TSPL2"
+  ],
+  "TSC и совместимые принтеры": [
+    "TSC and compatible printers",
+    "TSC und kompatible Drucker",
+    "TSC і сумісні принтери"
+  ],
+  "Зазор между этикетками, мм (0 — непрерывная лента)": [
+    "Label gap, mm (0 = continuous stock)",
+    "Etikettenabstand, mm (0 = Endlosmaterial)",
+    "Зазор між етикетками, мм (0 — безперервна стрічка)"
+  ],
+  "ZPL (Точный)": [
+    "ZPL (Accurate)",
+    "ZPL (Genau)",
+    "ZPL (Точний)"
+  ],
+  "Текст в векторе": [
+    "Vector text",
+    "Vektortext",
+    "Текст у векторі"
+  ],
+  "Windows (Любой)": [
+    "Windows (Any)",
+    "Windows (Beliebig)",
+    "Windows (Будь-який)"
+  ],
+  "Без ZPL": [
+    "No ZPL",
+    "Ohne ZPL",
+    "Без ZPL"
+  ],
+  "Качество печати (DPI)": [
+    "Print quality (DPI)",
+    "Druckqualität (DPI)",
+    "Якість друку (DPI)"
+  ],
+  "203 DPI (Стандарт)": [
+    "203 DPI (Standard)",
+    "203 DPI (Standard)",
+    "203 DPI (Стандарт)"
+  ],
+  "300 DPI (Высокое)": [
+    "300 DPI (High)",
+    "300 DPI (Hoch)",
+    "300 DPI (Високе)"
+  ],
+  "600 DPI (Промышленное)": [
+    "600 DPI (Industrial)",
+    "600 DPI (Industrie)",
+    "600 DPI (Промислове)"
+  ],
+  "Кэш фона в принтере (RAM)": [
+    "Printer RAM background cache",
+    "Drucker-RAM-Hintergrundcache",
+    "Кеш фону в принтері (RAM)"
+  ],
+  "Вкл (Zebra)": [
+    "On (Zebra)",
+    "Ein (Zebra)",
+    "Увімк (Zebra)"
+  ],
+  "Выкл": [
+    "Off",
+    "Aus",
+    "Вимк"
+  ],
+  "Кодирование графики": [
+    "Graphic encoding",
+    "Grafik-Kodierung",
+    "Кодування графіки"
+  ],
+  "RLE (совместимо)": [
+    "RLE (compatible)",
+    "RLE (kompatibel)",
+    "RLE (сумісно)"
+  ],
+  "Z64 (компактно)": [
+    "Z64 (compact)",
+    "Z64 (kompakt)",
+    "Z64 (компактно)"
+  ],
+  "Соединение настраивается автоматически": [
+    "Connection is configured automatically",
+    "Verbindung wird automatisch konfiguriert",
+    "З'єднання налаштовується автоматично"
+  ],
+  "Общий принтер получает задания по порядку, разные принтеры работают параллельно": [
+    "Shared printers use one ordered queue; separate printers work in parallel",
+    "Gemeinsame Drucker nutzen eine Warteschlange; getrennte arbeiten parallel",
+    "Спільний принтер отримує завдання по черзі, окремі працюють паралельно"
+  ],
+  "Выберите порт": [
+    "Select port",
+    "Port wählen",
+    "Виберіть порт"
+  ],
+  "Не удалось выполнить сброс": [
+    "Reset failed",
+    "Zurücksetzen fehlgeschlagen",
+    "Не вдалося виконати скидання"
+  ],
+  "Настройте весовое устройство (Serial, Ethernet или симулятор) и параметры стабилизации для печати.": [
+    "Configure the weight device (Serial, Ethernet or simulator) and stability parameters for printing.",
+    "Konfigurieren Sie das Waagengerät (Seriell, Ethernet oder Simulator) und die Stabilitätsparameter für den Druck.",
+    "Налаштуйте ваговий пристрій (Serial, Ethernet або симулятор) та параметри стабілізації для друку."
+  ],
+  "Этикетка на отдельную упаковку": [
+    "Label for an individual pack",
+    "Etikett für eine einzelne Packung",
+    "Етикетка на окрему упаковку"
+  ],
+  "Этикетка на короб": [
+    "Label for a box",
+    "Etikett für einen Karton",
+    "Етикетка на короб"
+  ],
+  "Паллетный лист": [
+    "Pallet sheet",
+    "Palettenblatt",
+    "Палетний лист"
+  ],
+  "Есть несохранённые изменения": [
+    "Unsaved changes",
+    "Ungespeicherte Änderungen",
+    "Є незбережені зміни"
+  ],
+  "Введите RESET для подтверждения": [
+    "Type RESET to confirm",
+    "Geben Sie RESET ein, um zu bestätigen",
+    "Введіть RESET для підтвердження"
+  ],
+  "Проверьте настройки: неверный IP или порт": [
+    "Check settings: invalid IP or port",
+    "Einstellungen prüfen: ungültige IP oder ungültiger Port",
+    "Перевірте налаштування: неправильний IP або порт"
+  ],
+  "Обновления приложения": [
+    "Application updates",
+    "Anwendungsupdates",
+    "Оновлення застосунку"
+  ],
+  "Текущая версия": [
+    "Current version",
+    "Aktuelle Version",
+    "Поточна версія"
+  ],
+  "Нажмите «Проверить» для поиска обновлений": [
+    "Click “Check” to look for updates",
+    "Klicken Sie auf „Prüfen“, um nach Updates zu suchen",
+    "Натисніть «Перевірити» для пошуку оновлень"
+  ],
+  "Проверка обновлений...": [
+    "Checking for updates...",
+    "Suche nach Updates...",
+    "Перевірка оновлень..."
+  ],
+  "Установлена последняя версия": [
+    "The latest version is installed",
+    "Die neueste Version ist installiert",
+    "Встановлено останню версію"
+  ],
+  "Доступна версия": [
+    "Version available",
+    "Version verfügbar",
+    "Доступна версія"
+  ],
+  "Версия несовместима с текущим сервером": [
+    "Version incompatible with the current server",
+    "Version mit dem aktuellen Server nicht kompatibel",
+    "Версія несумісна з поточним сервером"
+  ],
+  "Загружено. Готово к установке.": [
+    "Downloaded. Ready to install.",
+    "Heruntergeladen. Bereit zur Installation.",
+    "Завантажено. Готово до встановлення."
+  ],
+  "Проверить обновления": [
+    "Check for updates",
+    "Nach Updates suchen",
+    "Перевірити оновлення"
+  ],
+  "Скачать": [
+    "Download",
+    "Herunterladen",
+    "Завантажити"
+  ],
+  "Установить и перезапустить": [
+    "Install and restart",
+    "Installieren und neu starten",
+    "Встановити та перезапустити"
+  ],
+  "Установить с USB (.exe)": [
+    "Install from USB (.exe)",
+    "Von USB installieren (.exe)",
+    "Встановити з USB (.exe)"
+  ],
+  "Резервные копии (откат)": [
+    "Backups (rollback)",
+    "Sicherungen (Rollback)",
+    "Резервні копії (відкат)"
+  ],
+  "Резервных копий нет": [
+    "No backups",
+    "Keine Sicherungen",
+    "Резервних копій немає"
+  ],
+  "Откатить на выбранную копию": [
+    "Roll back to selected backup",
+    "Auf ausgewählte Sicherung zurücksetzen",
+    "Відкотити до вибраної копії"
+  ],
+  "Ошибка проверки обновлений": [
+    "Update check failed",
+    "Updateprüfung fehlgeschlagen",
+    "Помилка перевірки оновлень"
+  ],
+  "Ошибка загрузки": [
+    "Download failed",
+    "Download fehlgeschlagen",
+    "Помилка завантаження"
+  ],
+  "Команда печати отправлена": [
+    "Print command sent",
+    "Druckbefehl gesendet",
+    "Команду друку надіслано"
+  ],
+  "Ошибка печати": [
+    "Print failed",
+    "Druck fehlgeschlagen",
+    "Помилка друку"
+  ],
+  "Разрешение (DPI)": [
+    "Resolution (DPI)",
+    "Auflösung (DPI)",
+    "Роздільна здатність (DPI)"
+  ],
+  "Ширина (мм)": [
+    "Width (mm)",
+    "Breite (mm)",
+    "Ширина (мм)"
+  ],
+  "Высота (мм)": [
+    "Height (mm)",
+    "Höhe (mm)",
+    "Висота (мм)"
+  ],
+  "Отмена": [
+    "Cancel",
+    "Abbrechen",
+    "Скасувати"
+  ],
+  "Станция маркировки": [
+    "Labeling Station",
+    "Etikettierstation",
+    "Станція маркування"
+  ],
+  "Выберите продукт...": [
+    "Select product...",
+    "Produkt auswählen...",
+    "Виберіть товар..."
+  ],
+  "Поиск продукта...": [
+    "Search product...",
+    "Produkt suchen...",
+    "Пошук товару..."
+  ],
+  "Товары не найдены": [
+    "No products found",
+    "Keine Produkte gefunden",
+    "Товари не знайдено"
+  ],
+  "Нетто": [
+    "Net",
+    "Netto",
+    "Нетто"
+  ],
+  "Брутто": [
+    "Gross",
+    "Brutto",
+    "Брутто"
+  ],
+  "кг": [
+    "kg",
+    "kg",
+    "кг"
+  ],
+  "Стабильно": [
+    "Stable",
+    "Stabil",
+    "Стабільно"
+  ],
+  "Нестабильно": [
+    "Unstable",
+    "Instabil",
+    "Нестабільно"
+  ],
+  "ПЕЧАТЬ ЭТИКЕТКИ": [
+    "PRINT LABEL",
+    "ETIKETT DRUCKEN",
+    "ДРУК ЕТИКЕТКИ"
+  ],
+  "ЗАКРЫТЬ КОРОБ": [
+    "CLOSE BOX",
+    "KARTON SCHLIESSEN",
+    "ЗАКРИТИ КОРОБ"
+  ],
+  "Закрыть короб": [
+    "Close Box",
+    "Karton schließen",
+    "Закрити короб"
+  ],
+  "Смена": [
+    "Session",
+    "Schicht",
+    "Зміна"
+  ],
+  "Упаковок в коробе": [
+    "Packages per box",
+    "Packungen pro Karton",
+    "Упаковок у коробі"
+  ],
+  "Вес короба": [
+    "Box weight",
+    "Kartongewicht",
+    "Вага короба"
+  ],
+  "Коробов": [
+    "Boxes",
+    "Kartons",
+    "Коробів"
+  ],
+  "Всего упаковок": [
+    "Total units",
+    "Packungen gesamt",
+    "Усього упаковок"
+  ],
+  "Последняя этикетка": [
+    "Last printed",
+    "Zuletzt gedruckt",
+    "Остання етикетка"
+  ],
+  "Повторная печать": [
+    "Reprint",
+    "Nachdruck",
+    "Повторний друк"
+  ],
+  "Шаблон этикетки не найден": [
+    "Label template not found",
+    "Etikettenvorlage nicht gefunden",
+    "Шаблон етикетки не знайдено"
+  ],
+  "Шаблон этикетки короба не найден!": [
+    "Box label template not found!",
+    "Karton-Etikettenvorlage nicht gefunden!",
+    "Шаблон етикетки короба не знайдено!"
+  ],
+  "Авто-печать": [
+    "Auto-print",
+    "Auto-Druck",
+    "Авто-друк"
+  ],
+  "Напечатано": [
+    "Printed",
+    "Gedruckt",
+    "Надруковано"
+  ],
+  "Пожалуйста, закройте текущий короб перед сменой товара.": [
+    "Please close the current box before changing product.",
+    "Bitte schließen Sie den aktuellen Karton, bevor Sie das Produkt wechseln.",
+    "Будь ласка, закрийте поточний короб перед зміною товару."
+  ],
+  "Отключено": [
+    "Disconnected",
+    "Getrennt",
+    "Відключено"
+  ],
+  "Подключение...": [
+    "Connecting...",
+    "Verbindung wird hergestellt...",
+    "Підключення..."
+  ],
+  "Статус весов": [
+    "Scale Status",
+    "Waagenstatus",
+    "Статус ваг"
+  ],
+  "Весы": [
+    "Scales",
+    "Waagen",
+    "Ваги"
+  ],
+  "Статистика смены": [
+    "Session Statistics",
+    "Schichtstatistik",
+    "Статистика зміни"
+  ],
+  "Упаковка №:": [
+    "Current Pack #:",
+    "Packung Nr.:",
+    "Упаковка №:"
+  ],
+  "Короб №:": [
+    "Current Box #:",
+    "Karton Nr.:",
+    "Короб №:"
+  ],
+  "В коробе:": [
+    "In This Box:",
+    "Im Karton:",
+    "У коробі:"
+  ],
+  "Коробов на паллете:": [
+    "Boxes on Pallet:",
+    "Kartons auf Palette:",
+    "Коробів на палеті:"
+  ],
+  "Всего упаковок:": [
+    "Total Packs:",
+    "Packungen gesamt:",
+    "Усього упаковок:"
+  ],
+  "Повтор": [
+    "Reprint",
+    "Nachdr.",
+    "Повтор"
+  ],
+  "Внимание": [
+    "Attention",
+    "Achtung",
+    "Увага"
+  ],
+  "ПОНЯТНО": [
+    "OK",
+    "VERSTANDEN",
+    "ЗРОЗУМІЛО"
+  ],
+  "Номер станции": [
+    "Station Number",
+    "Stationsnummer",
+    "Номер станції"
+  ],
+  "Удалить": [
+    "Delete",
+    "Löschen",
+    "Видалити"
+  ],
+  "Нет данных для повторной печати.": [
+    "No label printed yet.",
+    "Noch kein Etikett gedruckt.",
+    "Немає даних для повторного друку."
+  ],
+  "Нельзя закрыть пустой короб!": [
+    "Cannot close an empty box!",
+    "Leerer Karton kann nicht geschlossen werden!",
+    "Не можна закрити порожній короб!"
+  ],
+  "Партия": [
+    "Batch",
+    "Charge",
+    "Партія"
+  ],
+  "Дата марк.": [
+    "Label date",
+    "Etik.-Datum",
+    "Дата марк."
+  ],
+  "Номер партии": [
+    "Batch number",
+    "Chargennummer",
+    "Номер партії"
+  ],
+  "Дата маркировки": [
+    "Marking date",
+    "Markierungsdatum",
+    "Дата маркування"
+  ],
+  "Ввести...": [
+    "Enter...",
+    "Eingeben...",
+    "Ввести..."
+  ],
+  "Этикетка отправлена на печать": [
+    "Label sent to printer",
+    "Etikett an Drucker gesendet",
+    "Етикетку надіслано на друк"
+  ],
+  "Статус принтера": [
+    "Printer status",
+    "Druckerstatus",
+    "Статус принтера"
+  ],
+  "Принтер готов": [
+    "Printer ready",
+    "Drucker bereit",
+    "Принтер готовий"
+  ],
+  "Принтер недоступен": [
+    "Printer offline",
+    "Drucker offline",
+    "Принтер недоступний"
+  ],
+  "Принтер не настроен": [
+    "Printer not set",
+    "Drucker nicht konfiguriert",
+    "Принтер не налаштований"
+  ],
+  "Принтер (драйвер)": [
+    "Printer (driver)",
+    "Drucker (Treiber)",
+    "Принтер (драйвер)"
+  ],
+  "Поиск по названию или артикулу...": [
+    "Search by name or article...",
+    "Suche nach Name oder Artikel...",
+    "Пошук за назвою або артикулом..."
+  ],
+  "Наименование": [
+    "Name",
+    "Bezeichnung",
+    "Найменування"
+  ],
+  "Артикул": [
+    "Article",
+    "Artikel",
+    "Артикул"
+  ],
+  "Срок годности (дней)": [
+    "Shelf life (days)",
+    "Haltbarkeit (Tage)",
+    "Термін придатності (днів)"
+  ],
+  "Тара упаковки": [
+    "Package container",
+    "Verpackung",
+    "Тара упаковки"
+  ],
+  "Тара короба": [
+    "Box container",
+    "Karton",
+    "Тара короба"
+  ],
+  "Этикетка (упак.)": [
+    "Label (pack)",
+    "Etikett (Verp.)",
+    "Етикетка (упак.)"
+  ],
+  "Этикетка (короб)": [
+    "Label (box)",
+    "Etikett (Karton)",
+    "Етикетка (короб)"
+  ],
+  "Лимит короба": [
+    "Box limit",
+    "Kartonlimit",
+    "Ліміт короба"
+  ],
+  "Доп. данные": [
+    "Extra data",
+    "Zusatzdaten",
+    "Дод. дані"
+  ],
+  "Всего позиций": [
+    "Total items",
+    "Positionen gesamt",
+    "Усього позицій"
+  ],
+  "г": [
+    "g",
+    "g",
+    "г"
+  ],
+  "Да": [
+    "Yes",
+    "Ja",
+    "Так"
+  ],
+  "Нет": [
+    "No",
+    "Nein",
+    "Ні"
+  ],
+  "Станция заблокирована (UUID: {0}, №: {1}). Невозможно перезаписать идентификатором другой станции {2} / {3}. Пожалуйста, используйте \"Сброс базы данных\" в настройках, если вам нужно переинициализировать эту станцию.": [
+    "Station identity is locked (UUID: {0}, No: {1}). Cannot overwrite with different station identity {2} / {3}. Please use \"Reset Database\" in settings if you need to re-initialize this station.",
+    "Stationsidentität ist gesperrt (UUID: {0}, Nr.: {1}). Kann nicht mit einer anderen Stationsidentität {2} / {3} überschrieben werden. Bitte verwenden Sie \"Datenbank zurücksetzen\" in den Einstellungen, wenn Sie diese Station neu initialisieren müssen.",
+    "Станцію заблоковано (UUID: {0}, №: {1}). Неможливо перезаписати ідентифікатором іншої станції {2} / {3}. Будь ласка, скористайтеся «Скидання бази даних» у налаштуваннях, якщо вам потрібно повторно ініціалізувати цю станцію."
+  ],
+  "Порт {0} занят другой программой или фоновым процессом. Пожалуйста, закройте другие программы или проверьте Диспетчер задач.": [
+    "Port {0} is in use by another program or a background process. Please close other programs or check Task Manager.",
+    "Port {0} wird von einem anderen Programm oder einem Hintergrundprozess verwendet. Bitte schließen Sie andere Programme oder prüfen Sie den Task-Manager.",
+    "Порт {0} зайнятий іншою програмою або фоновим процесом. Будь ласка, закрийте інші програми або перевірте Диспетчер завдань."
+  ],
+  "Порт {0} не найден.": [
+    "Port {0} not found.",
+    "Port {0} wurde nicht gefunden.",
+    "Порт {0} не знайдено."
+  ],
+  "Управление весами": [
+    "Manage Weights",
+    "Gewichte verwalten",
+    "Керування вагами"
+  ],
+  "Упаковки (в текущем коробе)": [
+    "Current Box (Packs)",
+    "Aktueller Karton (Packungen)",
+    "Упаковки (у поточному коробі)"
+  ],
+  "Короба (на текущей паллете)": [
+    "Current Pallet (Boxes)",
+    "Aktuelle Palette (Kartons)",
+    "Короби (на поточній палеті)"
+  ],
+  "Вы уверены, что хотите удалить эту упаковку?": [
+    "Are you sure you want to delete this pack?",
+    "Sind Sie sicher, dass Sie diese Packung löschen möchten?",
+    "Ви впевнені, що хочете видалити цю упаковку?"
+  ],
+  "Вы уверены, что хотите удалить этот короб? Все упаковки внутри также будут помечены удаленными.": [
+    "Are you sure you want to delete this box? This will also mark all packs inside as deleted.",
+    "Sind Sie sicher, dass Sie diesen Karton löschen möchten? Dadurch werden auch alle darin enthaltenen Packungen als gelöscht markiert.",
+    "Ви впевнені, що хочете видалити цей короб? Усі упаковки всередині також буде позначено видаленими."
+  ],
+  "Ошибка загрузки данных": [
+    "Failed to load data",
+    "Fehler beim Laden der Daten",
+    "Помилка завантаження даних"
+  ],
+  "Ошибка удаления упаковки:": [
+    "Failed to delete pack:",
+    "Fehler beim Löschen der Packung:",
+    "Помилка видалення упаковки:"
+  ],
+  "Ошибка удаления короба:": [
+    "Failed to delete box:",
+    "Fehler beim Löschen des Kartons:",
+    "Помилка видалення короба:"
+  ],
+  "Текущий короб:": [
+    "Current Box:",
+    "Aktueller Karton:",
+    "Поточний короб:"
+  ],
+  "Текущая паллета:": [
+    "Current Pallet:",
+    "Aktuelle Palette:",
+    "Поточна палета:"
+  ],
+  "Всего коробов:": [
+    "Total Boxes:",
+    "Kartons gesamt:",
+    "Усього коробів:"
+  ],
+  "Вес:": [
+    "Weight:",
+    "Gewicht:",
+    "Вага:"
+  ],
+  "УДАЛЕНО": [
+    "DELETED",
+    "GELÖSCHT",
+    "ВИДАЛЕНО"
+  ],
+  "ОТКРЫТ": [
+    "OPEN",
+    "OFFEN",
+    "ВІДКРИТО"
+  ],
+  "ЗАКРЫТ": [
+    "CLOSED",
+    "GESCHLOSSEN",
+    "ЗАКРИТО"
+  ],
+  "Нет открытого короба": [
+    "No open box currently. Start weighing to create one.",
+    "Derzeit kein offener Karton. Beginnen Sie mit dem Wiegen, um einen zu erstellen.",
+    "Немає відкритого короба"
+  ],
+  "Нет открытой паллеты": [
+    "No open pallet currently.",
+    "Derzeit keine offene Palette.",
+    "Немає відкритої палети"
+  ],
+  "Фикс. вес": [
+    "Fixed Weight",
+    "Festgewicht",
+    "Фікс. вага"
+  ],
+  "Маркировка фикс. веса": [
+    "Fixed Weight Labeling",
+    "Festgewicht-Etikettierung",
+    "Маркування фікс. ваги"
+  ],
+  "Проход через весы": [
+    "Scale Passage",
+    "Waagendurchlauf",
+    "Прохід через ваги"
+  ],
+  "Ввод по количеству": [
+    "Count Entry",
+    "Mengeneingabe",
+    "Введення за кількістю"
+  ],
+  "Мин. вес (г)": [
+    "Min weight (g)",
+    "Min. Gewicht (g)",
+    "Мін. вага (г)"
+  ],
+  "Макс. вес (г)": [
+    "Max weight (g)",
+    "Max. Gewicht (g)",
+    "Макс. вага (г)"
+  ],
+  "Фикс. вес (г)": [
+    "Fixed weight (g)",
+    "Festgewicht (g)",
+    "Фікс. вага (г)"
+  ],
+  "Вес в допуске": [
+    "Weight in range",
+    "Gewicht im Bereich",
+    "Вага в межах допуску"
+  ],
+  "Вес за пределами допуска!": [
+    "Weight out of range!",
+    "Gewicht außerhalb des Bereichs!",
+    "Вага поза межами допуску!"
+  ],
+  "Количество коробов": [
+    "Number of boxes",
+    "Anzahl Kartons",
+    "Кількість коробів"
+  ],
+  "СТАРТ": [
+    "START",
+    "START",
+    "СТАРТ"
+  ],
+  "СТОП": [
+    "STOP",
+    "STOPP",
+    "СТОП"
+  ],
+  "Прогресс": [
+    "Progress",
+    "Fortschritt",
+    "Прогрес"
+  ],
+  "Короб": [
+    "Box",
+    "Karton",
+    "Короб"
+  ],
+  "Упаковка": [
+    "Package",
+    "Verpackung",
+    "Упаковка"
+  ],
+  "Печать завершена!": [
+    "Printing complete!",
+    "Druck abgeschlossen!",
+    "Друк завершено!"
+  ],
+  "Нет товаров с признаком «фикс. вес»": [
+    "No fixed weight products found",
+    "Keine Festgewicht-Produkte gefunden",
+    "Немає товарів з ознакою «фікс. вага»"
+  ],
+  "Вес не в допуске. Печать невозможна.": [
+    "Weight out of range. Cannot print.",
+    "Gewicht außerhalb des Bereichs. Druck nicht möglich.",
+    "Вага поза межами допуску. Друк неможливий."
+  ],
+  "Сначала выберите товар": [
+    "Select a product first",
+    "Bitte wählen Sie zuerst ein Produkt aus",
+    "Спочатку виберіть товар"
+  ],
+  "Введите кол-во упаковок в коробе": [
+    "Enter packs per box",
+    "Packungen pro Karton eingeben",
+    "Введіть к-сть упаковок у коробі"
+  ],
+  "Введите кол-во коробов": [
+    "Enter number of boxes",
+    "Anzahl Kartons eingeben",
+    "Введіть к-сть коробів"
+  ],
+  "Печать...": [
+    "Printing...",
+    "Drucken...",
+    "Друк..."
+  ],
+  "По заданию": [
+    "Print Jobs",
+    "Druckaufträge",
+    "За завданням"
+  ],
+  "Маркировка по заданию": [
+    "Task marking",
+    "Auftragskennzeichnung",
+    "Маркування за завданням"
+  ],
+  "Нет активных заданий": [
+    "No active jobs",
+    "Keine aktiven Aufträge",
+    "Немає активних завдань"
+  ],
+  "Задания поступают от сервера или через импорт файла .lpj": [
+    "Jobs arrive from the server or via .lpj file import",
+    "Aufträge kommen vom Server oder per .lpj-Datei-Import",
+    "Завдання надходять від сервера або через імпорт файлу .lpj"
+  ],
+  "Импорт задания (.lpj)": [
+    "Import Job (.lpj)",
+    "Auftrag importieren (.lpj)",
+    "Імпорт завдання (.lpj)"
+  ],
+  "Импортировано {0} заданий": [
+    "Imported {0} job(s)",
+    "{0} Auftrag/Aufträge importiert",
+    "Імпортовано {0} завдань"
+  ],
+  "ПАУЗА": [
+    "PAUSE",
+    "PAUSE",
+    "ПАУЗА"
+  ],
+  "Завершить": [
+    "Complete",
+    "Abschließen",
+    "Завершити"
+  ],
+  "Завершить задание?": [
+    "Complete this job?",
+    "Auftrag abschließen?",
+    "Завершити завдання?"
+  ],
+  "К заданиям": [
+    "Back to jobs",
+    "Zu Aufträgen",
+    "До завдань"
+  ],
+  "Количество": [
+    "Quantity",
+    "Menge",
+    "Кількість"
+  ],
+  "Активное задание": [
+    "Active Job",
+    "Aktiver Auftrag",
+    "Активне завдання"
+  ],
+  "Выберите задание из списка для начала маркировки": [
+    "Select a job from the list to start labeling",
+    "Wählen Sie einen Auftrag aus der Liste, um die Etikettierung zu starten",
+    "Виберіть завдання зі списку, щоб почати маркування"
+  ],
+  "Ожидает": [
+    "Pending",
+    "Wartend",
+    "Очікує"
+  ],
+  "Завершено": [
+    "Completed",
+    "Abgeschlossen",
+    "Завершено"
+  ],
+  "шт": [
+    "pcs",
+    "Stk.",
+    "шт"
+  ],
+  "Положите товар на весы": [
+    "Place product on the scale",
+    "Produkt auf die Waage legen",
+    "Покладіть товар на ваги"
+  ],
+  "Нет данных для повторной печати": [
+    "No data for reprint",
+    "Keine Daten für Nachdruck",
+    "Немає даних для повторного друку"
+  ],
+  "Получено новое задание": [
+    "New job received",
+    "Neuer Auftrag empfangen",
+    "Отримано нове завдання"
+  ],
+  "Все задания выполнены!": [
+    "All jobs completed!",
+    "Alle Aufträge abgeschlossen!",
+    "Усі завдання виконані!"
+  ],
+  "Открытые": [
+    "Active",
+    "Offen",
+    "Відкриті"
+  ],
+  "Выполненные": [
+    "Completed",
+    "Abgeschlossen",
+    "Виконані"
+  ],
+  "Нет выполненных заданий": [
+    "No completed jobs",
+    "Keine abgeschlossenen Aufträge",
+    "Немає виконаних завдань"
+  ],
+  "Выберите оператора": [
+    "Choose an operator",
+    "Bediener auswählen",
+    "Оберіть оператора"
+  ],
+  "Введите PIN": [
+    "Enter PIN",
+    "PIN eingeben",
+    "Введіть PIN"
+  ],
+  "Войти": [
+    "Log in",
+    "Anmelden",
+    "Увійти"
+  ],
+  "Сменить оператора": [
+    "Switch operator",
+    "Bediener wechseln",
+    "Змінити оператора"
+  ],
+  "Смена оператора недоступна": [
+    "Operator switch unavailable",
+    "Bedienerwechsel nicht möglich",
+    "Зміна оператора недоступна"
+  ],
+  "Закройте открытый короб №{0} (или удалите его в разделе удаления).": [
+    "Close the open box №{0} first (or delete it in the delete section).",
+    "Schließen Sie zuerst den offenen Karton №{0} (oder löschen Sie ihn).",
+    "Закрийте відкритий короб №{0} (або видаліть його в розділі видалення)."
+  ],
+  "Закройте открытую паллету — напечатайте паллетный лист.": [
+    "Close the open pallet — print the pallet sheet.",
+    "Schließen Sie die offene Palette — drucken Sie das Palettenblatt.",
+    "Закрийте відкриту палету — надрукуйте палетний лист."
+  ],
+  "Сначала закройте открытые короба и паллеты.": [
+    "Close the open boxes and pallets first.",
+    "Schließen Sie zuerst offene Kartons und Paletten.",
+    "Спочатку закрийте відкриті короби та палети."
+  ],
+  "Понятно": [
+    "Got it",
+    "Verstanden",
+    "Зрозуміло"
+  ],
+  "Неверный PIN": [
+    "Wrong PIN",
+    "Falsche PIN",
+    "Неправильний PIN"
+  ],
+  "Не удалось войти": [
+    "Login failed",
+    "Anmeldung fehlgeschlagen",
+    "Не вдалося увійти"
+  ],
+  "Операторы ещё не загружены. Синхронизируйте данные или продолжите без оператора.": [
+    "No operators loaded yet. Sync data or continue without an operator.",
+    "Noch keine Bediener geladen. Daten synchronisieren oder ohne Bediener fortfahren.",
+    "Оператори ще не завантажені. Синхронізуйте дані або продовжіть без оператора."
+  ],
+  "Синхронизировать": [
+    "Synchronize",
+    "Synchronisieren",
+    "Синхронізувати"
+  ],
+  "Продолжить без оператора": [
+    "Continue without operator",
+    "Ohne Bediener fortfahren",
+    "Продовжити без оператора"
+  ],
+  "Демо-оператор": [
+    "Demo operator",
+    "Demo-Bediener",
+    "Демо-оператор"
+  ],
+  "Язык и тема": [
+    "Language and theme",
+    "Sprache und Design",
+    "Мова й тема"
+  ],
+  "Оформление": [
+    "Appearance",
+    "Darstellung",
+    "Оформлення"
+  ],
+  "Светлая": [
+    "Light",
+    "Hell",
+    "Світла"
+  ],
+  "Тёмная": [
+    "Dark",
+    "Dunkel",
+    "Темна"
+  ],
+  "Изменения применяются сразу и сохраняются на этой станции.": [
+    "Changes apply immediately and are saved on this station.",
+    "Änderungen werden sofort angewendet und auf dieser Station gespeichert.",
+    "Зміни застосовуються одразу й зберігаються на цій станції."
+  ],
+  "Выйти": [
+    "Exit",
+    "Beenden",
+    "Вийти"
+  ],
+  "КЛАВИАТУРА": [
+    "KEYPAD",
+    "ZIFFERNBLOCK",
+    "КЛАВІАТУРА"
+  ],
+  "СКРЫТЬ": [
+    "HIDE",
+    "AUSBLENDEN",
+    "СХОВАТИ"
+  ],
+  "ПРОБЕЛ": [
+    "SPACE",
+    "LEERTASTE",
+    "ПРОБІЛ"
+  ],
+  "ОЧИСТИТЬ": [
+    "CLEAR",
+    "LÖSCHEN",
+    "ОЧИСТИТИ"
+  ],
+  "ГОТОВО": [
+    "READY",
+    "BEREIT",
+    "ГОТОВО"
+  ],
+  "СЕРВЕР": [
+    "SERVER",
+    "SERVER",
+    "СЕРВЕР"
+  ],
+  "ОНЛАЙН": [
+    "ONLINE",
+    "ONLINE",
+    "ОНЛАЙН"
+  ],
+  "ОФЛАЙН": [
+    "OFFLINE",
+    "OFFLINE",
+    "ОФЛАЙН"
+  ],
+  "СТАНЦИЯ": [
+    "STATION",
+    "STATION",
+    "СТАНЦІЯ"
+  ],
+  "ВЕРСИЯ КЛИЕНТА": [
+    "CLIENT VERSION",
+    "CLIENT-VERSION",
+    "ВЕРСІЯ КЛІЄНТА"
+  ],
+  "ОПЕРАТОР": [
+    "OPERATOR",
+    "BEDIENER",
+    "ОПЕРАТОР"
+  ],
+  "Принтеры": [
+    "Printers",
+    "Drucker",
+    "Принтери"
+  ],
+  "Диагностика": [
+    "Diagnostics",
+    "Diagnose",
+    "Діагностика"
+  ],
+  "Этикетки": [
+    "Labels",
+    "Etiketten",
+    "Етикетки"
+  ],
+  "Очередь": [
+    "Queue",
+    "Warteschlange",
+    "Черга"
+  ],
+  "Настройка печати": [
+    "Print setup",
+    "Druck einrichten",
+    "Налаштування друку"
+  ],
+  "Выберите тип этикетки, подключите принтер и проверьте печать": [
+    "Choose a label type, connect its printer and run a test",
+    "Etikettentyp wählen, Drucker verbinden und testen",
+    "Виберіть тип етикетки, підключіть принтер і перевірте друк"
+  ],
+  "ОБНОВИТЬ": [
+    "REFRESH",
+    "AKTUALISIEREN",
+    "ОНОВИТИ"
+  ],
+  "НЕ СОХРАНЕНО": [
+    "NOT SAVED",
+    "NICHT GESPEICHERT",
+    "НЕ ЗБЕРЕЖЕНО"
+  ],
+  "Этикетка упаковки": [
+    "Package label",
+    "Verpackungsetikett",
+    "Етикетка упаковки"
+  ],
+  "Этикетка короба": [
+    "Box label",
+    "Kartonetikett",
+    "Етикетка короба"
+  ],
+  "Для каждой упаковки": [
+    "For each package",
+    "Für jede Verpackung",
+    "Для кожної упаковки"
+  ],
+  "Итоговая для короба": [
+    "Summary for a box",
+    "Summe für einen Karton",
+    "Підсумок для короба"
+  ],
+  "Итоговый для паллеты": [
+    "Summary for a pallet",
+    "Summe für eine Palette",
+    "Підсумок для палети"
+  ],
+  "ГОТОВ К РАБОТЕ": [
+    "READY TO USE",
+    "EINSATZBEREIT",
+    "ГОТОВИЙ ДО РОБОТИ"
+  ],
+  "ОТКЛЮЧЕН": [
+    "DISABLED",
+    "AUSGESCHALTET",
+    "ВИМКНЕНО"
+  ],
+  "Настраивается": [
+    "Configuring",
+    "Einstellung",
+    "Налаштовується"
+  ],
+  "Название принтера": [
+    "Printer name",
+    "Druckername",
+    "Назва принтера"
+  ],
+  "АВТОПЕЧАТЬ УПАКОВОК": [
+    "PACKAGE AUTO PRINT",
+    "VERPACKUNGS-AUTODRUCK",
+    "АВТОДРУК УПАКОВОК"
+  ],
+  "ВКЛ.": [
+    "ON",
+    "EIN",
+    "УВІМК."
+  ],
+  "ВЫКЛ.": [
+    "OFF",
+    "AUS",
+    "ВИМК."
+  ],
+  "Печатать этикетку упаковки после стабилизации веса в пределах допуска": [
+    "Print a package label when weight is stable and within tolerance",
+    "Verpackungsetikett bei stabilem Gewicht im Toleranzbereich drucken",
+    "Друкувати етикетку упаковки після стабілізації ваги в межах допуску"
+  ],
+  "Подключение принтера": [
+    "Printer connection",
+    "Druckeranschluss",
+    "Підключення принтера"
+  ],
+  "Выберите, как подключён этот принтер": [
+    "Select how this printer is connected",
+    "Anschlussart dieses Druckers wählen",
+    "Виберіть спосіб підключення цього принтера"
+  ],
+  "Принтер Windows": [
+    "Windows printer",
+    "Windows-Drucker",
+    "Принтер Windows"
+  ],
+  "Установлен в системе": [
+    "Installed in the system",
+    "Im System installiert",
+    "Встановлений у системі"
+  ],
+  "Сетевой принтер": [
+    "Network printer",
+    "Netzwerkdrucker",
+    "Мережевий принтер"
+  ],
+  "По IP-адресу": [
+    "By IP address",
+    "Über IP-Adresse",
+    "За IP-адресою"
+  ],
+  "COM-порт": [
+    "COM port",
+    "COM-Anschluss",
+    "COM-порт"
+  ],
+  "Подключение кабелем": [
+    "Cable connection",
+    "Kabelverbindung",
+    "Підключення кабелем"
+  ],
+  "Адрес принтера, например 192.168.1.50": [
+    "Printer address, e.g. 192.168.1.50",
+    "Druckeradresse, z. B. 192.168.1.50",
+    "Адреса принтера, наприклад 192.168.1.50"
+  ],
+  "СОЕДИНЕНИЕ: АВТОМАТИЧЕСКИ": [
+    "CONNECTION: AUTOMATIC",
+    "VERBINDUNG: AUTOMATISCH",
+    "З’ЄДНАННЯ: АВТОМАТИЧНО"
+  ],
+  "Общий принтер — единая очередь, разные принтеры работают параллельно": [
+    "Shared printer: ordered queue; separate printers: parallel work",
+    "Gemeinsamer Drucker: geordnet; getrennte Drucker: parallel",
+    "Спільний принтер: черга; окремі принтери: паралельно"
+  ],
+  "Имя принтера Windows (пусто = по умолчанию)": [
+    "Windows printer name (empty = default)",
+    "Windows-Druckername (leer = Standard)",
+    "Назва принтера Windows (порожньо = типовий)"
+  ],
+  "Принтеры Windows не найдены": [
+    "No Windows printers found",
+    "Keine Windows-Drucker gefunden",
+    "Принтери Windows не знайдено"
+  ],
+  "Скорость": [
+    "Speed",
+    "Geschwindigkeit",
+    "Швидкість"
+  ],
+  "COM-порты не найдены": [
+    "No COM ports found",
+    "Keine COM-Anschlüsse gefunden",
+    "COM-порти не знайдено"
+  ],
+  "Расширенные настройки": [
+    "Advanced settings",
+    "Erweiterte Einstellungen",
+    "Розширені налаштування"
+  ],
+  "Язык принтера и совместимость": [
+    "Printer language and compatibility",
+    "Druckersprache und Kompatibilität",
+    "Мова принтера та сумісність"
+  ],
+  "ПОКАЗАТЬ": [
+    "SHOW",
+    "ANZEIGEN",
+    "ПОКАЗАТИ"
+  ],
+  "ЯЗЫК ПРИНТЕРА": [
+    "PRINTER LANGUAGE",
+    "DRUCKERSPRACHE",
+    "МОВА ПРИНТЕРА"
+  ],
+  "СОВМЕСТИМОСТЬ": [
+    "COMPATIBILITY",
+    "KOMPATIBILITÄT",
+    "СУМІСНІСТЬ"
+  ],
+  "Язык команд, который понимает принтер. Сначала используйте «Найти и настроить»; меняйте вручную только когда в инструкции указаны ZPL, TSPL, EPL, CPCL, DPL или SBPL.": [
+    "The command language understood by the printer. Use “Find and set up” first; change it manually only when the printer manual specifies ZPL, TSPL, EPL, CPCL, DPL or SBPL.",
+    "Die Befehlssprache des Druckers. Zuerst „Finden und einrichten“ verwenden; nur manuell ändern, wenn im Druckerhandbuch ZPL, TSPL, EPL, CPCL, DPL oder SBPL angegeben ist.",
+    "Мова команд, яку розуміє принтер. Спочатку скористайтеся «Знайти й налаштувати»; змінюйте вручну лише коли в інструкції вказано ZPL, TSPL, EPL, CPCL, DPL або SBPL."
+  ],
+  "Рекомендуется «Авто». «Совместимый» использует базовые команды для старых моделей. «Полный» включает расширенные команды выбранного языка принтера.": [
+    "Auto is recommended. Compatible uses basic commands for older models. Full enables extended commands supported by the selected printer language.",
+    "Auto wird empfohlen. Kompatibel nutzt Basisbefehle für ältere Modelle. Voll aktiviert erweiterte Befehle der gewählten Druckersprache.",
+    "Рекомендовано «Авто». «Сумісний» використовує базові команди для старих моделей. «Повний» вмикає розширені команди обраної мови принтера."
+  ],
+  "ВЫБРАННОЕ УСТРОЙСТВО": [
+    "SELECTED DEVICE",
+    "AUSGEWÄHLTES GERÄT",
+    "ВИБРАНИЙ ПРИСТРІЙ"
+  ],
+  "Выберите из списка ниже": [
+    "Select from the list below",
+    "Aus der Liste unten auswählen",
+    "Виберіть зі списку нижче"
+  ],
+  "Ввод с экранной клавиатуры": [
+    "On-screen input",
+    "Bildschirmeingabe",
+    "Екранне введення"
+  ],
+  "Введите значение и нажмите «Готово»": [
+    "Enter the value and press Done",
+    "Wert eingeben und Fertig drücken",
+    "Введіть значення та натисніть «Готово»"
+  ],
+  "ОТМЕНИТЬ": [
+    "CANCEL",
+    "ABBRECHEN",
+    "СКАСУВАТИ"
+  ],
+  "Адрес принтера": [
+    "Printer address",
+    "Druckeradresse",
+    "Адреса принтера"
+  ],
+  "Порт принтера": [
+    "Printer port",
+    "Druckerport",
+    "Порт принтера"
+  ],
+  "Адрес весов": [
+    "Scale address",
+    "Waagenadresse",
+    "Адреса ваг"
+  ],
+  "Порт весов": [
+    "Scale port",
+    "Waagenport",
+    "Порт ваг"
+  ],
+  "Скорость COM": [
+    "COM speed",
+    "COM-Geschwindigkeit",
+    "Швидкість COM"
+  ],
+  "Настройка весов": [
+    "Scale setup",
+    "Waage einrichten",
+    "Налаштування ваг"
+  ],
+  "1. ПОДКЛЮЧЕНИЕ ВЕСОВ": [
+    "1. SCALE CONNECTION",
+    "1. WAAGENVERBINDUNG",
+    "1. ПІДКЛЮЧЕННЯ ВАГ"
+  ],
+  "COM-ПОРТ": [
+    "COM PORT",
+    "COM-ANSCHLUSS",
+    "COM-ПОРТ"
+  ],
+  "ПО СЕТИ": [
+    "NETWORK",
+    "NETZWERK",
+    "МЕРЕЖА"
+  ],
+  "БЕЗ ОБОРУДОВАНИЯ": [
+    "NO HARDWARE",
+    "OHNE GERÄT",
+    "БЕЗ ОБЛАДНАННЯ"
+  ],
+  "Встроенный симулятор для проверки станции и интерфейса": [
+    "Built-in simulator for checking the station and interface",
+    "Integrierter Simulator zur Prüfung von Station und Oberfläche",
+    "Вбудований симулятор для перевірки станції та інтерфейсу"
+  ],
+  "2. СТАБИЛЬНОСТЬ ПОКАЗАНИЙ": [
+    "2. READING STABILITY",
+    "2. MESSWERTSTABILITÄT",
+    "2. СТАБІЛЬНІСТЬ ПОКАЗАНЬ"
+  ],
+  "БЫСТРО": [
+    "FAST",
+    "SCHNELL",
+    "ШВИДКО"
+  ],
+  "БАЛАНС": [
+    "BALANCED",
+    "AUSGEWOGEN",
+    "БАЛАНС"
+  ],
+  "ТОЧНО": [
+    "PRECISE",
+    "GENAU",
+    "ТОЧНО"
+  ],
+  "3. ПРОТОКОЛ ВЕСОВ": [
+    "3. SCALE PROTOCOL",
+    "3. WAAGENPROTOKOLL",
+    "3. ПРОТОКОЛ ВАГ"
+  ],
+  "Выбранный COM-порт": [
+    "Selected COM port",
+    "Gewählter COM-Anschluss",
+    "Вибраний COM-порт"
+  ],
+  "ПРОВЕРИТЬ ВЕСЫ": [
+    "TEST SCALES",
+    "WAAGE PRÜFEN",
+    "ПЕРЕВІРИТИ ВАГИ"
+  ],
+  "СОХРАНИТЬ И ПОДКЛЮЧИТЬ": [
+    "SAVE AND CONNECT",
+    "SPEICHERN UND VERBINDEN",
+    "ЗБЕРЕГТИ Й ПІДКЛЮЧИТИ"
+  ],
+  "ПРИМЕНЕНИЕ…": [
+    "APPLYING…",
+    "ANWENDEN…",
+    "ЗАСТОСУВАННЯ…"
+  ],
+  "Сохранение перезапускает только подключение весов": [
+    "Saving restarts only the scale connection",
+    "Speichern startet nur die Waagenverbindung neu",
+    "Збереження перезапускає лише підключення ваг"
+  ],
+  "ИЗМЕНЕНИЯ НЕ СОХРАНЕНЫ": [
+    "CHANGES NOT SAVED",
+    "ÄNDERUNGEN NICHT GESPEICHERT",
+    "ЗМІНИ НЕ ЗБЕРЕЖЕНО"
+  ],
+  "ПОДКЛЮЧЕНЫ": [
+    "CONNECTED",
+    "VERBUNDEN",
+    "ПІДКЛЮЧЕНО"
+  ],
+  "ПОДКЛЮЧЕНИЕ": [
+    "CONNECTING",
+    "VERBINDUNG",
+    "ПІДКЛЮЧЕННЯ"
+  ],
+  "ОТКЛЮЧЕНЫ": [
+    "DISCONNECTED",
+    "GETRENNT",
+    "ВІДКЛЮЧЕНО"
+  ],
+  "АВТО": [
+    "AUTO",
+    "AUTO",
+    "АВТО"
+  ],
+  "СОВМЕСТИМЫЙ": [
+    "COMPATIBLE",
+    "KOMPATIBEL",
+    "СУМІСНИЙ"
+  ],
+  "ПОЛНЫЙ": [
+    "FULL",
+    "VOLL",
+    "ПОВНИЙ"
+  ],
+  "КАЧЕСТВО ПЕЧАТИ": [
+    "PRINT QUALITY",
+    "DRUCKQUALITÄT",
+    "ЯКІСТЬ ДРУКУ"
+  ],
+  "ПАМЯТЬ ИЗОБРАЖЕНИЙ": [
+    "IMAGE MEMORY",
+    "BILDSPEICHER",
+    "ПАМ’ЯТЬ ЗОБРАЖЕНЬ"
+  ],
+  "Изменяйте эти значения только по инструкции к принтеру.": [
+    "Change these values only when required by the printer manual.",
+    "Diese Werte nur ändern, wenn das Druckerhandbuch es verlangt.",
+    "Змінюйте ці значення лише за вимогою інструкції принтера."
+  ],
+  "Операция выполняется…": [
+    "Operation in progress…",
+    "Vorgang läuft…",
+    "Операція виконується…"
+  ],
+  "Изменения применятся после сохранения": [
+    "Changes take effect after saving",
+    "Änderungen gelten nach dem Speichern",
+    "Зміни застосуються після збереження"
+  ],
+  "ПРОБНАЯ ПЕЧАТЬ": [
+    "TEST PRINT",
+    "TESTDRUCK",
+    "ТЕСТОВИЙ ДРУК"
+  ],
+  "НАЙТИ И НАСТРОИТЬ": [
+    "FIND AND SET UP",
+    "FINDEN UND EINRICHTEN",
+    "ЗНАЙТИ Й НАЛАШТУВАТИ"
+  ],
+  "СОХРАНИТЬ": [
+    "SAVE",
+    "SPEICHERN",
+    "ЗБЕРЕГТИ"
+  ],
+  "СОХРАНЕНИЕ…": [
+    "SAVING…",
+    "SPEICHERN…",
+    "ЗБЕРЕЖЕННЯ…"
+  ],
+  "Темнота 0–30": [
+    "Darkness 0–30",
+    "Dunkelheit 0–30",
+    "Темрява 0–30"
+  ],
+  "Скорость 1–14": [
+    "Speed 1–14",
+    "Geschwindigkeit 1–14",
+    "Швидкість 1–14"
+  ],
+  "Зазор, мм": [
+    "Gap, mm",
+    "Lücke, mm",
+    "Зазор, мм"
+  ],
+  "Ширина, мм": [
+    "Width, mm",
+    "Breite, mm",
+    "Ширина, мм"
+  ],
+  "Высота, мм": [
+    "Height, mm",
+    "Höhe, mm",
+    "Висота, мм"
+  ],
+  "Дата производства": [
+    "Production date",
+    "Produktionsdatum",
+    "Дата виробництва"
+  ],
+  "Выберите дату для следующей упаковки": [
+    "Select the date for the next package",
+    "Datum für die nächste Verpackung wählen",
+    "Виберіть дату для наступної упаковки"
+  ],
+  "СЕГОДНЯ": [
+    "TODAY",
+    "HEUTE",
+    "СЬОГОДНІ"
+  ],
+  "ЗАКРЫТЬ": [
+    "CLOSE",
+    "SCHLIESSEN",
+    "ЗАКРИТИ"
+  ],
+  "Перед сменой товара закройте текущий короб.": [
+    "Close the current box before changing the product.",
+    "Schließen Sie vor dem Produktwechsel den aktuellen Karton.",
+    "Перед зміною товару закрийте поточний короб."
+  ],
+  "Дождитесь завершения текущей операции.": [
+    "Wait for the current operation to finish.",
+    "Warten Sie, bis der aktuelle Vorgang abgeschlossen ist.",
+    "Дочекайтеся завершення поточної операції."
+  ],
+  "Выбор товара": [
+    "Select product",
+    "Produkt auswählen",
+    "Вибір товару"
+  ],
+  "Коснитесь строки для выбора": [
+    "Tap a row to select",
+    "Zeile zum Auswählen antippen",
+    "Торкніться рядка для вибору"
+  ],
+  "Название или артикул": [
+    "Name or article",
+    "Name oder Artikelnummer",
+    "Назва або артикул"
+  ],
+  "НАЙТИ": [
+    "SEARCH",
+    "SUCHEN",
+    "ЗНАЙТИ"
+  ],
+  "Совместимость": [
+    "Compatibility",
+    "Kompatibilität",
+    "Сумісність"
+  ],
+  "Стабильность": [
+    "Stability",
+    "Stabilität",
+    "Стабільність"
+  ],
+  "Принтер Windows по умолчанию": [
+    "Default Windows printer",
+    "Windows-Standarddrucker",
+    "Типовий принтер Windows"
+  ],
+  "Выберите COM-порт": [
+    "Select a COM port",
+    "COM-Anschluss wählen",
+    "Виберіть COM-порт"
+  ],
+  "Выбор устройства": [
+    "Select device",
+    "Gerät auswählen",
+    "Вибір пристрою"
+  ],
+  "Поиск по названию или порту": [
+    "Search name or port",
+    "Name oder Anschluss suchen",
+    "Пошук за назвою чи портом"
+  ],
+  "Совпадений нет. Измените поиск или обновите список устройств.": [
+    "No matches. Change the search or refresh the device list.",
+    "Keine Treffer. Suche ändern oder Geräteliste aktualisieren.",
+    "Збігів немає. Змініть пошук або оновіть список пристроїв."
+  ],
+  "По умолчанию": [
+    "Default",
+    "Standard",
+    "Типово"
+  ],
+  "Интервал опроса, мс": [
+    "Polling interval, ms",
+    "Abfrageintervall, ms",
+    "Інтервал опитування, мс"
+  ],
+  "Отсчёты стабильности": [
+    "Stable readings",
+    "Stabile Messwerte",
+    "Відліки стабільності"
+  ],
+  "Готовый режим или свои значения. Применяются после сохранения.": [
+    "Choose a preset or enter values. Applied after saving.",
+    "Voreinstellung oder eigene Werte. Gilt nach dem Speichern.",
+    "Готовий режим або власні значення. Діють після збереження."
+  ],
+  "Изменений нет": [
+    "No changes",
+    "Keine Änderungen",
+    "Змін немає"
+  ],
+  "Сбросить изменения?": [
+    "Discard changes?",
+    "Änderungen verwerfen?",
+    "Скинути зміни?"
+  ],
+  "В этой карточке есть несохранённые правки. Останьтесь и сохраните их или подтвердите сброс.": [
+    "This form has unsaved changes. Stay to save them or confirm discard.",
+    "Dieses Formular enthält ungespeicherte Änderungen. Bleiben und speichern oder verwerfen.",
+    "У цій картці є незбережені зміни. Залишіться й збережіть їх або підтвердьте скидання."
+  ],
+  "Остаться": [
+    "Stay",
+    "Bleiben",
+    "Залишитися"
+  ],
+  "Сбросить и продолжить": [
+    "Discard and continue",
+    "Verwerfen und weiter",
+    "Скинути й продовжити"
+  ],
+  "Требуют решения": [
+    "Need attention",
+    "Handlungsbedarf",
+    "Потребують уваги"
+  ],
+  "В этой группе нет заданий": [
+    "No jobs in this group",
+    "Keine Aufträge in dieser Gruppe",
+    "У цій групі немає завдань"
+  ],
+  "Выберите другую группу или обновите очередь.": [
+    "Select another group or refresh the queue.",
+    "Andere Gruppe wählen oder Warteschlange aktualisieren.",
+    "Виберіть іншу групу або оновіть чергу."
+  ],
+  "Попытка": [
+    "Attempt",
+    "Versuch",
+    "Спроба"
+  ],
+  "Проверка принтеров": [
+    "Printer check",
+    "Druckerprüfung",
+    "Перевірка принтерів"
+  ],
+  "Проверка подключения по TCP, COM или через Windows. Подробности — в карточке устройства.": [
+    "Connection check via TCP, COM or Windows. See device details below.",
+    "Verbindung über TCP, COM oder Windows prüfen. Details in der Gerätekarte.",
+    "Перевірка з’єднання через TCP, COM або Windows. Деталі — у картці пристрою."
+  ],
+  "Настроить": [
+    "Configure",
+    "Einrichten",
+    "Налаштувати"
+  ],
+  "Запустите проверку устройств": [
+    "Run a device check",
+    "Geräteprüfung starten",
+    "Запустіть перевірку пристроїв"
+  ],
+  "Выполняется…": [
+    "Working…",
+    "Wird ausgeführt…",
+    "Виконується…"
+  ],
+  "Память и сжатие": [
+    "Memory and compression",
+    "Speicher und Komprimierung",
+    "Пам’ять і стиснення"
+  ],
+  "Сжатие Z64": [
+    "Z64 compression",
+    "Z64-Komprimierung",
+    "Стиснення Z64"
+  ],
+  "Фиксированный вес": [
+    "Fixed weight",
+    "Festgewicht",
+    "Фіксована вага"
+  ],
+  "ТОВАР И КОНТРОЛЬ ВЕСА": [
+    "PRODUCT AND WEIGHT CONTROL",
+    "PRODUKT UND GEWICHTSKONTROLLE",
+    "ТОВАР І КОНТРОЛЬ ВАГИ"
+  ],
+  "Нажмите, чтобы выбрать товар": [
+    "Tap to select a product",
+    "Zum Auswählen antippen",
+    "Торкніться, щоб вибрати товар"
+  ],
+  "АРТИКУЛ": [
+    "ARTICLE",
+    "ARTIKEL",
+    "АРТИКУЛ"
+  ],
+  "КОНТРОЛЬНЫЙ ВЕС": [
+    "CONTROL WEIGHT",
+    "KONTROLLGEWICHT",
+    "КОНТРОЛЬНА ВАГА"
+  ],
+  "ВЕС НА ЭТИКЕТКЕ": [
+    "LABEL WEIGHT",
+    "ETIKETTENGEWICHT",
+    "ВАГА НА ЕТИКЕТЦІ"
+  ],
+  "В ДОПУСКЕ": [
+    "WITHIN TOLERANCE",
+    "INNERHALB TOLERANZ",
+    "У МЕЖАХ ДОПУСКУ"
+  ],
+  "ВНЕ ДОПУСКА": [
+    "OUT OF TOLERANCE",
+    "AUSSERHALB TOLERANZ",
+    "ПОЗА ДОПУСКОМ"
+  ],
+  "ОЖИДАНИЕ СТАБИЛЬНОГО ВЕСА": [
+    "WAITING FOR STABLE WEIGHT",
+    "AUF STABILES GEWICHT WARTEN",
+    "ОЧІКУВАННЯ СТАБІЛЬНОЇ ВАГИ"
+  ],
+  "ДОПУСК": [
+    "TOLERANCE",
+    "TOLERANZ",
+    "ДОПУСК"
+  ],
+  "КОНТРОЛЬ + 1 ЭТИКЕТКА": [
+    "CONTROL + 1 LABEL",
+    "PRÜFUNG + 1 ETIKETT",
+    "КОНТРОЛЬ + 1 ЕТИКЕТКА"
+  ],
+  "ПАРТИЯ ПО КОЛИЧЕСТВУ": [
+    "BATCH BY QUANTITY",
+    "SERIE NACH MENGE",
+    "ПАРТІЯ ЗА КІЛЬКІСТЮ"
+  ],
+  "Выберите товар": [
+    "Select a product",
+    "Produkt auswählen",
+    "Виберіть товар"
+  ],
+  "Дождитесь стабильного веса": [
+    "Wait for a stable weight",
+    "Auf stabiles Gewicht warten",
+    "Дочекайтеся стабільної ваги"
+  ],
+  "Контрольный вес вне диапазона товара": [
+    "Control weight is outside the product range",
+    "Kontrollgewicht liegt außerhalb der Toleranz",
+    "Контрольна вага поза діапазоном товару"
+  ],
+  "Контроль пройден — будет напечатан фиксированный вес": [
+    "Control passed — the fixed weight will be printed",
+    "Prüfung bestanden — Festgewicht wird gedruckt",
+    "Контроль пройдено — буде надруковано фіксовану вагу"
+  ],
+  "НАПЕЧАТАТЬ ЭТИКЕТКУ": [
+    "PRINT LABEL",
+    "ETIKETT DRUCKEN",
+    "ДРУК ЕТИКЕТКИ"
+  ],
+  "КОЛИЧЕСТВО ЭТИКЕТОК": [
+    "LABEL QUANTITY",
+    "ETIKETTENANZAHL",
+    "КІЛЬКІСТЬ ЕТИКЕТОК"
+  ],
+  "БЫСТРЫЙ ВЫБОР": [
+    "QUICK VALUES",
+    "SCHNELLAUSWAHL",
+    "ШВИДКИЙ ВИБІР"
+  ],
+  "ЗАПУСТИТЬ ПАРТИЮ": [
+    "START BATCH",
+    "SERIE STARTEN",
+    "ЗАПУСТИТИ ПАРТІЮ"
+  ],
+  "ПЕЧАТЬ ПАРТИИ…": [
+    "PRINTING BATCH…",
+    "SERIE WIRD GEDRUCKT…",
+    "ДРУК ПАРТІЇ…"
+  ],
+  "из": [
+    "of",
+    "von",
+    "з"
+  ],
+  "Печать идёт через общую надёжную очередь принтера": [
+    "Printing uses the shared reliable printer queue",
+    "Der Druck läuft über die gemeinsame zuverlässige Warteschlange",
+    "Друк виконується через спільну надійну чергу принтера"
+  ],
+  "Товар фиксированного веса": [
+    "Fixed-weight product",
+    "Festgewichtsprodukt",
+    "Товар фіксованої ваги"
+  ],
+  "Показаны только товары с заданным фиксированным весом": [
+    "Only products with a configured fixed weight are shown",
+    "Nur Produkte mit festgelegtem Gewicht werden angezeigt",
+    "Показано лише товари із заданою фіксованою вагою"
+  ],
+  "Товары фиксированного веса не найдены": [
+    "No fixed-weight products found",
+    "Keine Festgewichtsartikel gefunden",
+    "Товари фіксованої ваги не знайдено"
+  ],
+  "Количество этикеток": [
+    "Label quantity",
+    "Etikettenanzahl",
+    "Кількість етикеток"
+  ],
+  "Введите значение от 1 до 5000": [
+    "Enter a value from 1 to 5000",
+    "Wert von 1 bis 5000 eingeben",
+    "Введіть значення від 1 до 5000"
+  ],
+  "ПРИМЕНИТЬ": [
+    "APPLY",
+    "ÜBERNEHMEN",
+    "ЗАСТОСУВАТИ"
+  ],
+  "Задания на печать": [
+    "Print jobs",
+    "Druckaufträge",
+    "Завдання друку"
+  ],
+  "К ЗАДАНИЯМ": [
+    "BACK TO TASKS",
+    "ZURÜCK ZU AUFTRÄGEN",
+    "ДО ЗАВДАНЬ"
+  ],
+  "Весы: подключены": [
+    "Scales: connected",
+    "Waage: verbunden",
+    "Ваги: підключені"
+  ],
+  "Весы: отключены": [
+    "Scales: offline",
+    "Waage: offline",
+    "Ваги: офлайн"
+  ],
+  "Принтер: готов": [
+    "Printer: ready",
+    "Drucker: bereit",
+    "Принтер: готовий"
+  ],
+  "Принтер: недоступен": [
+    "Printer: unavailable",
+    "Drucker: nicht verfügbar",
+    "Принтер: недоступний"
+  ],
+  "Автопечать по весу: вкл.": [
+    "Weight auto print: on",
+    "Gewichts-Autodruck: an",
+    "Автодрук за вагою: увімк."
+  ],
+  "Автопечать по весу: выкл.": [
+    "Weight auto print: off",
+    "Gewichts-Autodruck: aus",
+    "Автодрук за вагою: вимк."
+  ],
+  "АКТИВНЫЕ": [
+    "ACTIVE",
+    "AKTIV",
+    "АКТИВНІ"
+  ],
+  "ЗАВЕРШЁННЫЕ": [
+    "COMPLETED",
+    "ABGESCHLOSSEN",
+    "ЗАВЕРШЕНІ"
+  ],
+  "ЗАДАНИЯ": [
+    "TASKS",
+    "AUFTRÄGE",
+    "ЗАВДАННЯ"
+  ],
+  "ОБНОВЛЕНИЕ…": [
+    "UPDATING…",
+    "AKTUALISIERUNG…",
+    "ОНОВЛЕННЯ…"
+  ],
+  "Загружено": [
+    "Loaded",
+    "Geladen",
+    "Завантажено"
+  ],
+  "Активных заданий нет": [
+    "No active tasks",
+    "Keine aktiven Aufträge",
+    "Активних завдань немає"
+  ],
+  "Завершённых заданий нет": [
+    "No completed tasks",
+    "Keine abgeschlossenen Aufträge",
+    "Завершених завдань немає"
+  ],
+  "ВЫБРАННОЕ ЗАДАНИЕ": [
+    "SELECTED TASK",
+    "AUSGEWÄHLTER AUFTRAG",
+    "ВИБРАНЕ ЗАВДАННЯ"
+  ],
+  "Выберите задание из списка": [
+    "Select a task from the list",
+    "Auftrag aus der Liste auswählen",
+    "Виберіть завдання зі списку"
+  ],
+  "ПЛАН": [
+    "PLAN",
+    "PLAN",
+    "ПЛАН"
+  ],
+  "ФАКТ": [
+    "ACTUAL",
+    "IST",
+    "ФАКТ"
+  ],
+  "ОСТАЛОСЬ": [
+    "REMAINING",
+    "REST",
+    "ЗАЛИШИЛОСЯ"
+  ],
+  "ПАРТИЯ": [
+    "BATCH",
+    "CHARGE",
+    "ПАРТІЯ"
+  ],
+  "ДАТА МАРКИРОВКИ": [
+    "MARKING DATE",
+    "KENNZEICHNUNGSDATUM",
+    "ДАТА МАРКУВАННЯ"
+  ],
+  "РЕЖИМ": [
+    "MODE",
+    "MODUS",
+    "РЕЖИМ"
+  ],
+  "ПО ВЕСУ, КГ": [
+    "BY WEIGHT, KG",
+    "NACH GEWICHT, KG",
+    "ЗА ВАГОЮ, КГ"
+  ],
+  "ПОШТУЧНО": [
+    "BY QUANTITY",
+    "NACH STÜCKZAHL",
+    "ПОШТУЧНО"
+  ],
+  "ТЕКУЩИЙ ВЕС": [
+    "CURRENT WEIGHT",
+    "AKTUELLES GEWICHT",
+    "ПОТОЧНА ВАГА"
+  ],
+  "УПАКОВКА": [
+    "PACKAGE",
+    "PACKUNG",
+    "УПАКОВКА"
+  ],
+  "КОРОБ": [
+    "BOX",
+    "KARTON",
+    "КОРОБ"
+  ],
+  "ПАЛЛЕТА": [
+    "PALLET",
+    "PALETTE",
+    "ПАЛЕТА"
+  ],
+  "упаковок": [
+    "packages",
+    "Packungen",
+    "упаковок"
+  ],
+  "коробов": [
+    "boxes",
+    "Kartons",
+    "коробів"
+  ],
+  "СЕССИЯ": [
+    "SESSION",
+    "SITZUNG",
+    "СЕСІЯ"
+  ],
+  "ВЕС УПАКОВКИ": [
+    "PACKAGE WEIGHT",
+    "PACKUNGSGEWICHT",
+    "ВАГА УПАКОВКИ"
+  ],
+  "ГОТОВО К ПЕЧАТИ": [
+    "READY TO PRINT",
+    "DRUCKBEREIT",
+    "ГОТОВО ДО ДРУКУ"
+  ],
+  "ПРОВЕРЬТЕ ВЕС": [
+    "CHECK WEIGHT",
+    "GEWICHT PRÜFEN",
+    "ПЕРЕВІРТЕ ВАГУ"
+  ],
+  "ОЖИДАНИЕ СТАБИЛЬНОСТИ": [
+    "WAIT FOR STABILITY",
+    "STABILITÄT ABWARTEN",
+    "ОЧІКУВАННЯ СТАБІЛЬНОСТІ"
+  ],
+  "ПРИНТЕР НЕДОСТУПЕН": [
+    "PRINTER UNAVAILABLE",
+    "DRUCKER NICHT VERFÜGBAR",
+    "ПРИНТЕР НЕДОСТУПНИЙ"
+  ],
+  "ВЫПОЛНЕНО": [
+    "COMPLETED",
+    "ERLEDIGT",
+    "ВИКОНАНО"
+  ],
+  "НАПЕЧАТАТЬ УПАКОВКУ": [
+    "PRINT PACKAGE",
+    "PACKUNG DRUCKEN",
+    "НАДРУКУВАТИ УПАКОВКУ"
+  ],
+  "ЭТИКЕТКА КОРОБА": [
+    "BOX SUMMARY",
+    "KARTONETIKETT",
+    "ЕТИКЕТКА КОРОБА"
+  ],
+  "ПАЛЛЕТНЫЙ ЛИСТ": [
+    "PALLET SHEET",
+    "PALETTENBLATT",
+    "ПАЛЕТНИЙ ЛИСТ"
+  ],
+  "ПЕЧАТЬ…": [
+    "PRINTING…",
+    "DRUCK…",
+    "ДРУК…"
+  ],
+  "ЗАВЕРШИТЬ": [
+    "COMPLETE",
+    "ABSCHLIESSEN",
+    "ЗАВЕРШИТИ"
+  ],
+  "Перед завершением задания закройте открытый короб.": [
+    "Close the open box before completing the task.",
+    "Schließen Sie den offenen Karton, bevor Sie den Auftrag abschließen.",
+    "Закрийте відкритий короб перед завершенням завдання."
+  ],
+  "упаковок в коробе": [
+    "packages in box",
+    "Packungen im Karton",
+    "упаковок у коробі"
+  ],
+  "УДАЛИТЬ": [
+    "DELETE",
+    "LÖSCHEN",
+    "ВИДАЛИТИ"
+  ],
+  "ОЖИДАЕТ": [
+    "WAITING",
+    "WARTET",
+    "ОЧІКУЄ"
+  ],
+  "В РАБОТЕ": [
+    "IN PROGRESS",
+    "IN ARBEIT",
+    "В РОБОТІ"
+  ],
+  "ЗАВЕРШЕНО": [
+    "COMPLETED",
+    "ABGESCHLOSSEN",
+    "ЗАВЕРШЕНО"
+  ],
+  "Каталог товаров": [
+    "Product catalog",
+    "Produktkatalog",
+    "Каталог товарів"
+  ],
+  "Показано": [
+    "Shown",
+    "Angezeigt",
+    "Показано"
+  ],
+  "товаров": [
+    "products",
+    "Produkte",
+    "товарів"
+  ],
+  "Загрузка локального каталога…": [
+    "Loading local catalog…",
+    "Lokaler Katalog wird geladen…",
+    "Завантаження локального каталогу…"
+  ],
+  "СПИСОК ТОВАРОВ": [
+    "PRODUCT LIST",
+    "PRODUKTLISTE",
+    "СПИСОК ТОВАРІВ"
+  ],
+  "ЗАГРУЗИТЬ ЕЩЁ": [
+    "LOAD MORE",
+    "MEHR LADEN",
+    "ЗАВАНТАЖИТИ ЩЕ"
+  ],
+  "КАРТОЧКА ТОВАРА": [
+    "PRODUCT CARD",
+    "PRODUKTKARTE",
+    "КАРТКА ТОВАРУ"
+  ],
+  "Срок годности": [
+    "Shelf life",
+    "Haltbarkeit",
+    "Термін придатності"
+  ],
+  "ВЕСОВОЙ": [
+    "WEIGHT",
+    "GEWICHT",
+    "ВАГОВИЙ"
+  ],
+  "ФИКСИРОВАННЫЙ": [
+    "FIXED",
+    "FEST",
+    "ФІКСОВАНИЙ"
+  ],
+  "ТАРА И КОРОБ": [
+    "PACKAGING AND BOX",
+    "VERPACKUNG UND KARTON",
+    "ТАРА ТА КОРОБ"
+  ],
+  "Вес тары упаковки": [
+    "Package tare",
+    "Verpackungstara",
+    "Вага тари упаковки"
+  ],
+  "Вес тары короба": [
+    "Box tare",
+    "Kartontara",
+    "Вага тари короба"
+  ],
+  "ШАБЛОНЫ ПЕЧАТИ": [
+    "PRINT TEMPLATES",
+    "DRUCKVORLAGEN",
+    "ШАБЛОНИ ДРУКУ"
+  ],
+  "Паллета": [
+    "Pallet",
+    "Palette",
+    "Палета"
+  ],
+  "ДОПОЛНИТЕЛЬНЫЕ ДАННЫЕ": [
+    "ADDITIONAL DATA",
+    "ZUSATZDATEN",
+    "ДОДАТКОВІ ДАНІ"
+  ],
+  "Листайте список или используйте стрелки": [
+    "Drag the list or use the arrows",
+    "Liste ziehen oder Pfeile verwenden",
+    "Гортайте список або натискайте стрілки"
+  ],
+  "К СПИСКУ": [
+    "BACK TO LIST",
+    "ZUR LISTE",
+    "ДО СПИСКУ"
+  ],
+  "Обновление": [
+    "Update",
+    "Aktualisierung",
+    "Оновлення"
+  ],
+  "ТЕКУЩАЯ ВЕРСИЯ": [
+    "CURRENT VERSION",
+    "AKTUELLE VERSION",
+    "ПОТОЧНА ВЕРСІЯ"
+  ],
+  "АКТУАЛЬНО": [
+    "UP TO DATE",
+    "AKTUELL",
+    "АКТУАЛЬНО"
+  ],
+  "ДОСТУПНО": [
+    "AVAILABLE",
+    "VERFÜGBAR",
+    "ДОСТУПНО"
+  ],
+  "ЧТО НОВОГО": [
+    "WHAT'S NEW",
+    "NEUERUNGEN",
+    "ЩО НОВОГО"
+  ],
+  "ПРОВЕРИТЬ ОБНОВЛЕНИЯ": [
+    "CHECK FOR UPDATES",
+    "NACH UPDATES SUCHEN",
+    "ПЕРЕВІРИТИ ОНОВЛЕННЯ"
+  ],
+  "ПРОВЕРКА…": [
+    "CHECKING…",
+    "PRÜFUNG…",
+    "ПЕРЕВІРКА…"
+  ],
+  "СКАЧАТЬ": [
+    "DOWNLOAD",
+    "HERUNTERLADEN",
+    "ЗАВАНТАЖИТИ"
+  ],
+  "УСТАНОВИТЬ И ПЕРЕЗАПУСТИТЬ": [
+    "INSTALL AND RESTART",
+    "INSTALLIEREN UND NEUSTARTEN",
+    "ВСТАНОВИТИ Й ПЕРЕЗАПУСТИТИ"
+  ],
+  "ОБНОВИТЬ С USB": [
+    "UPDATE FROM USB",
+    "VON USB AKTUALISIEREN",
+    "ОНОВИТИ З USB"
+  ],
+  "СКРЫТЬ USB-ОБНОВЛЕНИЕ": [
+    "HIDE USB UPDATE",
+    "USB-AKTUALISIERUNG AUSBLENDEN",
+    "СХОВАТИ USB-ОНОВЛЕННЯ"
+  ],
+  "Путь к файлу обновления": [
+    "Path to update file",
+    "Pfad zur Aktualisierungsdatei",
+    "Шлях до файлу оновлення"
+  ],
+  "ПРОВЕРИТЬ ФАЙЛ": [
+    "CHECK FILE",
+    "DATEI PRÜFEN",
+    "ПЕРЕВІРИТИ ФАЙЛ"
+  ],
+  "ЗАЩИТА ОБНОВЛЕНИЯ": [
+    "UPDATE PROTECTION",
+    "UPDATE-SCHUTZ",
+    "ЗАХИСТ ОНОВЛЕННЯ"
+  ],
+  "Предыдущая версия сохранена": [
+    "Previous version saved",
+    "Vorherige Version gespeichert",
+    "Попередню версію збережено"
+  ],
+  "Резервная копия будет создана перед установкой": [
+    "Backup will be created before installation",
+    "Sicherung wird vor der Installation erstellt",
+    "Резервну копію буде створено перед установленням"
+  ],
+  "Если проверка запуска не пройдёт, рабочая версия восстановится автоматически.": [
+    "If startup verification fails, the working version is restored automatically.",
+    "Wenn die Startprüfung fehlschlägt, wird die funktionierende Version automatisch wiederhergestellt.",
+    "Якщо перевірка запуску не пройде, робочу версію буде відновлено автоматично."
+  ],
+  "ВОССТАНОВИТЬ ПРЕДЫДУЩУЮ ВЕРСИЮ": [
+    "RESTORE PREVIOUS VERSION",
+    "VORHERIGE VERSION WIEDERHERSTELLEN",
+    "ВІДНОВИТИ ПОПЕРЕДНЮ ВЕРСІЮ"
+  ],
+  "Восстановить предыдущую версию?": [
+    "Restore previous version?",
+    "Vorherige Version wiederherstellen?",
+    "Відновити попередню версію?"
+  ],
+  "Программа, база данных, настройки и очередь печати вернутся к состоянию перед последним обновлением. Текущее состояние будет сохранено как аварийная копия.": [
+    "The application, database, settings and print queue will return to their state before the last update. The current state will be saved as an emergency backup.",
+    "Anwendung, Datenbank, Einstellungen und Druckwarteschlange werden auf den Stand vor dem letzten Update zurückgesetzt. Der aktuelle Stand wird als Notfallkopie gespeichert.",
+    "Програма, база даних, налаштування та черга друку повернуться до стану перед останнім оновленням. Поточний стан буде збережено як аварійну копію."
+  ],
+  "Приложение перезапустится автоматически.": [
+    "The application will restart automatically.",
+    "Die Anwendung wird automatisch neu gestartet.",
+    "Програма перезапуститься автоматично."
+  ],
+  "НАЗАД": [
+    "BACK",
+    "ZURÜCK",
+    "НАЗАД"
+  ],
+  "ВОССТАНОВИТЬ": [
+    "RESTORE",
+    "WIEDERHERSTELLEN",
+    "ВІДНОВИТИ"
+  ],
+  "Весовая станция": [
+    "Weighing station",
+    "Wiegestation",
+    "Вагова станція"
+  ],
+  "Товары": [
+    "Products",
+    "Artikel",
+    "Товари"
+  ],
+  "RU / ◐": [
+    "EN / ◐",
+    "DE / ◐",
+    "UK / ◐"
+  ],
+  "Коснитесь имени для входа": [
+    "Tap a name to sign in",
+    "Zum Anmelden einen Namen antippen",
+    "Торкніться імені для входу"
+  ],
+  "Товары не загружены": [
+    "Products not loaded",
+    "Artikel nicht geladen",
+    "Товари не завантажено"
+  ],
+  "Оператор не выбран": [
+    "No operator selected",
+    "Kein Bediener ausgewählt",
+    "Оператора не обрано"
+  ],
+  "Локальные данные": [
+    "Local data",
+    "Lokale Daten",
+    "Локальні дані"
+  ],
+  "Принтер: не настроен": [
+    "Printer: not configured",
+    "Drucker: nicht eingerichtet",
+    "Принтер: не налаштовано"
+  ],
+  "Очередь ещё не загружена": [
+    "Queue not loaded yet",
+    "Warteschlange noch nicht geladen",
+    "Чергу ще не завантажено"
+  ],
+  "Проверка ещё не запускалась": [
+    "Check not started yet",
+    "Prüfung noch nicht gestartet",
+    "Перевірку ще не запущено"
+  ],
+  "Настройки ещё не загружены": [
+    "Settings not loaded yet",
+    "Einstellungen noch nicht geladen",
+    "Налаштування ще не завантажено"
+  ],
+  "Встроенные виртуальные весы": [
+    "Built-in virtual scale",
+    "Integrierte virtuelle Waage",
+    "Вбудовані віртуальні ваги"
+  ],
+  "Встроенный симулятор": [
+    "Built-in simulator",
+    "Integrierter Simulator",
+    "Вбудований симулятор"
+  ],
+  "Настройки весов ещё не загружены": [
+    "Scale settings not loaded yet",
+    "Waageneinstellungen noch nicht geladen",
+    "Налаштування ваг ще не завантажено"
+  ],
+  "Товары фиксированного веса не загружены": [
+    "Fixed-weight products not loaded",
+    "Festgewichtsartikel nicht geladen",
+    "Товари фіксованої ваги не завантажено"
+  ],
+  "Выберите товар фиксированного веса": [
+    "Select a fixed-weight product",
+    "Festgewichtsartikel auswählen",
+    "Оберіть товар фіксованої ваги"
+  ],
+  "Выберите задание": [
+    "Select a job",
+    "Auftrag auswählen",
+    "Оберіть завдання"
+  ],
+  "Задания ещё не загружены": [
+    "Jobs not loaded yet",
+    "Aufträge noch nicht geladen",
+    "Завдання ще не завантажено"
+  ],
+  "Не назначена": [
+    "Not assigned",
+    "Nicht zugewiesen",
+    "Не призначено"
+  ],
+  "Не назначен": [
+    "Not assigned",
+    "Nicht zugewiesen",
+    "Не призначено"
+  ],
+  "0 г": [
+    "0 g",
+    "0 g",
+    "0 г"
+  ],
+  "Нет дополнительных данных": [
+    "No additional data",
+    "Keine zusätzlichen Daten",
+    "Немає додаткових даних"
+  ],
+  "Статус ещё не проверен": [
+    "Status not checked yet",
+    "Status noch nicht geprüft",
+    "Стан ще не перевірено"
+  ],
+  "Станция не настроена": [
+    "Station not configured",
+    "Station nicht eingerichtet",
+    "Станцію не налаштовано"
+  ],
+  "Нет синхронизации": [
+    "Not synchronized",
+    "Nicht synchronisiert",
+    "Не синхронізовано"
+  ],
+  "Функции не получены": [
+    "Features not received",
+    "Funktionen nicht abgerufen",
+    "Функції не отримано"
+  ],
+  "Не проверена": [
+    "Not verified",
+    "Nicht geprüft",
+    "Не перевірено"
+  ],
+  "Готово к проверке обновлений": [
+    "Ready to check for updates",
+    "Bereit zur Update-Prüfung",
+    "Готово до перевірки оновлень"
+  ],
+  "Канал обновлений ещё не проверен": [
+    "Update channel not checked yet",
+    "Update-Kanal noch nicht geprüft",
+    "Канал оновлень ще не перевірено"
+  ],
+  "Поиск товара": [
+    "Product search",
+    "Artikelsuche",
+    "Пошук товару"
+  ],
+  "АРТИКУЛ:": [
+    "ARTICLE:",
+    "ARTIKEL:",
+    "АРТИКУЛ:"
+  ],
+  "СРОК ГОДНОСТИ:": [
+    "SHELF LIFE:",
+    "HALTBARKEIT:",
+    "ТЕРМІН ПРИДАТНОСТІ:"
+  ],
+  "ВЕС БРУТТО": [
+    "GROSS WEIGHT",
+    "BRUTTOGEWICHT",
+    "ВАГА БРУТТО"
+  ],
+  "ВЕС НЕТТО": [
+    "NET WEIGHT",
+    "NETTOGEWICHT",
+    "ВАГА НЕТТО"
+  ],
+  "СТАТИСТИКА СЕССИИ": [
+    "SESSION STATISTICS",
+    "SITZUNGSSTATISTIK",
+    "СТАТИСТИКА СЕСІЇ"
+  ],
+  "ДАТА ПРОИЗВ.": [
+    "PROD. DATE",
+    "HERSTELLDATUM",
+    "ДАТА ВИРОБН."
+  ],
+  "Упаковка №": [
+    "Package no.",
+    "Packung Nr.",
+    "Упаковка №"
+  ],
+  "Короб №": [
+    "Box no.",
+    "Karton Nr.",
+    "Короб №"
+  ],
+  "В коробе": [
+    "In box",
+    "Im Karton",
+    "У коробі"
+  ],
+  "Коробов на паллете": [
+    "Boxes on pallet",
+    "Kartons auf Palette",
+    "Коробів на палеті"
+  ],
+  "кг ·": [
+    "kg ·",
+    "kg ·",
+    "кг ·"
+  ],
+  "Станция и лицензия": [
+    "Station and license",
+    "Station und Lizenz",
+    "Станція та ліцензія"
+  ],
+  "Сервер доступен": [
+    "Server available",
+    "Server erreichbar",
+    "Сервер доступний"
+  ],
+  "Сервер недоступен": [
+    "Server unavailable",
+    "Server nicht erreichbar",
+    "Сервер недоступний"
+  ],
+  "РАБОЧАЯ СТАНЦИЯ": [
+    "WORKSTATION",
+    "ARBEITSSTATION",
+    "РОБОЧА СТАНЦІЯ"
+  ],
+  "Номер": [
+    "Number",
+    "Nummer",
+    "Номер"
+  ],
+  "Последняя синхронизация": [
+    "Last synchronization",
+    "Letzte Synchronisierung",
+    "Остання синхронізація"
+  ],
+  "IP, host:port или URL": [
+    "IP, host:port or URL",
+    "IP, Host:Port oder URL",
+    "IP, host:port або URL"
+  ],
+  "192.168.1.10 или http://server:8000": [
+    "192.168.1.10 or http://server:8000",
+    "192.168.1.10 oder http://server:8000",
+    "192.168.1.10 або http://server:8000"
+  ],
+  "СЕРВЕР НЕ НАСТРОЕН": [
+    "SERVER NOT CONFIGURED",
+    "SERVER NICHT EINGERICHTET",
+    "СЕРВЕР НЕ НАЛАШТОВАНО"
+  ],
+  "НЕТ СОЕДИНЕНИЯ": [
+    "NO CONNECTION",
+    "KEINE VERBINDUNG",
+    "НЕМАЄ З’ЄДНАННЯ"
+  ],
+  "ТРЕБУЕТСЯ ОБНОВЛЕНИЕ КЛИЕНТА": [
+    "CLIENT UPDATE REQUIRED",
+    "CLIENT-UPDATE ERFORDERLICH",
+    "ПОТРІБНЕ ОНОВЛЕННЯ КЛІЄНТА"
+  ],
+  "СЕРВЕР ГОТОВ": [
+    "SERVER READY",
+    "SERVER BEREIT",
+    "СЕРВЕР ГОТОВИЙ"
+  ],
+  "Версия сервера": [
+    "Server version",
+    "Serverversion",
+    "Версія сервера"
+  ],
+  "· минимум клиента": [
+    "· minimum client version",
+    "· minimale Clientversion",
+    "· мінімальна версія клієнта"
+  ],
+  "Синхронизацию данных инициирует сервер; эта кнопка проверяет связь и лицензию без блокировки рабочего экрана.": [
+    "Data synchronization is initiated by the server; this button checks connectivity and the license without blocking the workstation.",
+    "Die Datensynchronisierung startet der Server; diese Schaltfläche prüft Verbindung und Lizenz, ohne den Arbeitsbildschirm zu sperren.",
+    "Синхронізацію даних ініціює сервер; ця кнопка перевіряє зв’язок і ліцензію без блокування робочого екрана."
+  ],
+  "Статус API": [
+    "API status",
+    "API-Status",
+    "Стан API"
+  ],
+  "Получен": [
+    "Received",
+    "Abgerufen",
+    "Отримано"
+  ],
+  "Подпись": [
+    "Signature",
+    "Signatur",
+    "Підпис"
+  ],
+  "ДОСТУПНЫЕ ФУНКЦИИ": [
+    "AVAILABLE FEATURES",
+    "VERFÜGBARE FUNKTIONEN",
+    "ДОСТУПНІ ФУНКЦІЇ"
+  ],
+  "ЛИЦЕНЗИЯ АКТИВНА": [
+    "LICENSE ACTIVE",
+    "LIZENZ AKTIV",
+    "ЛІЦЕНЗІЯ АКТИВНА"
+  ],
+  "СРОК ЛИЦЕНЗИИ ИСТЁК": [
+    "LICENSE EXPIRED",
+    "LIZENZ ABGELAUFEN",
+    "ТЕРМІН ЛІЦЕНЗІЇ МИНУВ"
+  ],
+  "ДЕМОНСТРАЦИОННЫЙ РЕЖИМ": [
+    "DEMO MODE",
+    "DEMOMODUS",
+    "ДЕМОНСТРАЦІЙНИЙ РЕЖИМ"
+  ],
+  "Статус получен с настроенного сервера.": [
+    "Status received from the configured server.",
+    "Status vom eingerichteten Server abgerufen.",
+    "Стан отримано з налаштованого сервера."
+  ],
+  "Показан последний доступный локальный статус интерфейса.": [
+    "Showing the last available local interface status.",
+    "Der zuletzt verfügbare lokale Status wird angezeigt.",
+    "Показано останній доступний локальний стан інтерфейсу."
+  ],
+  "Отменить задание?": [
+    "Cancel this job?",
+    "Auftrag abbrechen?",
+    "Скасувати завдання?"
+  ],
+  "Повторить печать?": [
+    "Print again?",
+    "Erneut drucken?",
+    "Повторити друк?"
+  ],
+  "Задание #": [
+    "Job #",
+    "Auftrag #",
+    "Завдання №"
+  ],
+  "будет удалено из активной очереди.": [
+    "will be removed from the active queue.",
+    "wird aus der aktiven Warteschlange entfernt.",
+    "буде видалено з активної черги."
+  ],
+  "Принтер мог уже принять задание #": [
+    "The printer may already have accepted job #",
+    "Der Drucker könnte diesen Auftrag bereits angenommen haben: #",
+    "Принтер міг уже прийняти завдання №"
+  ],
+  ". Повтор может создать дубликат этикетки.": [
+    ". Retrying may create a duplicate label.",
+    ". Ein erneuter Druck kann ein Duplikat erzeugen.",
+    ". Повтор може створити дублікат етикетки."
+  ],
+  "будет поставлено в очередь повторно.": [
+    "will be queued again.",
+    "wird erneut eingereiht.",
+    "буде знову поставлено в чергу."
+  ],
+  "Удалить последнюю упаковку?": [
+    "Delete the last package?",
+    "Letzte Packung löschen?",
+    "Видалити останню упаковку?"
+  ],
+  "Счётчик текущего короба и общий счётчик упаковок будут уменьшены на один.": [
+    "The current box count and total package count will each decrease by one.",
+    "Die Anzahl im aktuellen Karton und die Gesamtzahl der Packungen werden jeweils um eins verringert.",
+    "Лічильник поточного короба й загальний лічильник упаковок зменшаться на один."
+  ],
+  "Операторы ещё не загружены": [
+    "Operators not loaded yet",
+    "Bediener noch nicht geladen",
+    "Операторів ще не завантажено"
+  ],
+  "Рабочий экран доступен без блокировки": [
+    "The workstation remains available",
+    "Der Arbeitsbildschirm bleibt verfügbar",
+    "Робочий екран доступний без блокування"
+  ],
+  "Без кода": [
+    "No code",
+    "Ohne Code",
+    "Без коду"
+  ],
+  "Код": [
+    "Code",
+    "Code",
+    "Код"
+  ],
+  "ВХОД": [
+    "SIGN IN",
+    "ANMELDEN",
+    "ВХІД"
+  ],
+  "Проверка PIN…": [
+    "Checking PIN…",
+    "PIN wird geprüft…",
+    "Перевірка PIN…"
+  ],
+  "Коснитесь цифровой клавиши": [
+    "Tap a number key",
+    "Zifferntaste antippen",
+    "Торкніться цифрової клавіші"
+  ],
+  "Введено цифр:": [
+    "Digits entered:",
+    "Eingegebene Ziffern:",
+    "Введено цифр:"
+  ],
+  "ПОВТОР": [
+    "REPEAT",
+    "WIEDERHOLEN",
+    "ПОВТОР"
+  ],
+  "НАИМЕНОВАНИЕ": [
+    "PRODUCT NAME",
+    "BEZEICHNUNG",
+    "НАЙМЕНУВАННЯ"
+  ],
+  "• СТАБИЛЬНО": [
+    "• STABLE",
+    "• STABIL",
+    "• СТАБІЛЬНО"
+  ],
+  "#{0} · из базы": [
+    "#{0} · from database",
+    "#{0} · aus Datenbank",
+    "#{0} · з бази"
+  ],
+  "{0} КБ": [
+    "{0} KB",
+    "{0} KB",
+    "{0} КБ"
+  ],
+  "{0} г": [
+    "{0} g",
+    "{0} g",
+    "{0} г"
+  ],
+  "{0} шт.": [
+    "{0} pcs",
+    "{0} Stk.",
+    "{0} шт."
+  ],
+  "{0} МБ": [
+    "{0} MB",
+    "{0} MB",
+    "{0} МБ"
+  ],
+  "{0} кг": [
+    "{0} kg",
+    "{0} kg",
+    "{0} кг"
+  ],
+  "{0} · срок {1} дн.": [
+    "{0} · shelf life {1} days",
+    "{0} · Haltbarkeit {1} Tage",
+    "{0} · термін {1} дн."
+  ],
+  "{0}: требуется целое число": [
+    "{0}: an integer is required",
+    "{0}: Ganzzahl erforderlich",
+    "{0}: потрібне ціле число"
+  ],
+  "{0}: требуется число": [
+    "{0}: a number is required",
+    "{0}: Zahl erforderlich",
+    "{0}: потрібне число"
+  ],
+  "{0} завершилось с ошибкой": [
+    "{0} failed",
+    "{0} fehlgeschlagen",
+    "{0} завершилося помилкою"
+  ],
+  "{0} сек назад": [
+    "{0} sec ago",
+    "vor {0} Sek.",
+    "{0} с тому"
+  ],
+  "{0} · {1} · {2} мс": [
+    "{0} · {1} · {2} ms",
+    "{0} · {1} · {2} ms",
+    "{0} · {1} · {2} мс"
+  ],
+  "{0} · без лимита": [
+    "{0} · unlimited",
+    "{0} · unbegrenzt",
+    "{0} · без ліміту"
+  ],
+  "{0} · проверено {1}": [
+    "{0} · checked {1}",
+    "{0} · geprüft {1}",
+    "{0} · перевірено {1}"
+  ],
+  "{0} · фикс. {1} кг · допуск {2}–{3} г": [
+    "{0} · fixed {1} kg · tolerance {2}–{3} g",
+    "{0} · fest {1} kg · Toleranz {2}–{3} g",
+    "{0} · фікс. {1} кг · допуск {2}–{3} г"
+  ],
+  "{0} дн назад": [
+    "{0} days ago",
+    "vor {0} Tagen",
+    "{0} дн. тому"
+  ],
+  "{0} дн.": [
+    "{0} days",
+    "{0} Tage",
+    "{0} дн."
+  ],
+  "{0} заданий · обновлено {1}": [
+    "{0} jobs · updated {1}",
+    "{0} Aufträge · aktualisiert {1}",
+    "{0} завдань · оновлено {1}"
+  ],
+  "{0} из {1}": [
+    "{0} of {1}",
+    "{0} von {1}",
+    "{0} із {1}"
+  ],
+  "{0} мин назад": [
+    "{0} min ago",
+    "vor {0} Min.",
+    "{0} хв тому"
+  ],
+  "{0} ч назад": [
+    "{0} hours ago",
+    "vor {0} Std.",
+    "{0} год тому"
+  ],
+  "АВТОПЕЧАТЬ: ВНЕ ДОПУСКА": [
+    "AUTO-PRINT: OUT OF TOLERANCE",
+    "AUTODRUCK: AUSSERHALB DER TOLERANZ",
+    "АВТОДРУК: ПОЗА ДОПУСКОМ"
+  ],
+  "АВТОПЕЧАТЬ: ВЫБЕРИТЕ ТОВАР": [
+    "AUTO-PRINT: SELECT PRODUCT",
+    "AUTODRUCK: ARTIKEL WÄHLEN",
+    "АВТОДРУК: ВИБЕРІТЬ ТОВАР"
+  ],
+  "АВТОПЕЧАТЬ: ГОТОВА": [
+    "AUTO-PRINT: READY",
+    "AUTODRUCK: BEREIT",
+    "АВТОДРУК: ГОТОВИЙ"
+  ],
+  "АВТОПЕЧАТЬ: НЕТ ШАБЛОНА": [
+    "AUTO-PRINT: NO TEMPLATE",
+    "AUTODRUCK: KEINE VORLAGE",
+    "АВТОДРУК: НЕМАЄ ШАБЛОНУ"
+  ],
+  "АВТОПЕЧАТЬ: ОЖИДАНИЕ": [
+    "AUTO-PRINT: WAITING",
+    "AUTODRUCK: WARTEN",
+    "АВТОДРУК: ОЧІКУВАННЯ"
+  ],
+  "АВТОПЕЧАТЬ: ПОДГОТОВКА": [
+    "AUTO-PRINT: PREPARING",
+    "AUTODRUCK: VORBEREITUNG",
+    "АВТОДРУК: ПІДГОТОВКА"
+  ],
+  "АВТОПЕЧАТЬ: ПРИНТЕР НЕДОСТУПЕН": [
+    "AUTO-PRINT: PRINTER UNAVAILABLE",
+    "AUTODRUCK: DRUCKER NICHT VERFÜGBAR",
+    "АВТОДРУК: ПРИНТЕР НЕДОСТУПНИЙ"
+  ],
+  "АВТОПЕЧАТЬ: РЕЖИМ ПАРТИИ": [
+    "AUTO-PRINT: BATCH MODE",
+    "AUTODRUCK: SERIENMODUS",
+    "АВТОДРУК: РЕЖИМ ПАРТІЇ"
+  ],
+  "АВТОПЕЧАТЬ…": [
+    "AUTO-PRINTING…",
+    "AUTODRUCK…",
+    "АВТОДРУК…"
+  ],
+  "Автопечать выполнена · короб автоматически закрыт": [
+    "Auto-print complete · box closed automatically",
+    "Autodruck abgeschlossen · Karton automatisch geschlossen",
+    "Автодрук виконано · короб автоматично закрито"
+  ],
+  "Автопечать выполнена, короб автоматически закрыт": [
+    "Auto-print complete, box closed automatically",
+    "Autodruck abgeschlossen, Karton automatisch geschlossen",
+    "Автодрук виконано, короб автоматично закрито"
+  ],
+  "Автопечать фиксированного веса": [
+    "Fixed-weight auto-print",
+    "Festgewicht-Autodruck",
+    "Автодрук фіксованої ваги"
+  ],
+  "Автопечать фиксированного веса выполнена": [
+    "Fixed-weight auto-print complete",
+    "Festgewicht-Autodruck abgeschlossen",
+    "Автодрук фіксованої ваги виконано"
+  ],
+  "Автопечать: этикетка принята принтером": [
+    "Auto-print: label accepted by printer",
+    "Autodruck: Etikett vom Drucker angenommen",
+    "Автодрук: етикетку прийнято принтером"
+  ],
+  "Адрес сервера отклонён": [
+    "Server address rejected",
+    "Serveradresse abgelehnt",
+    "Адресу сервера відхилено"
+  ],
+  "Адрес сервера сохранён": [
+    "Server address saved",
+    "Serveradresse gespeichert",
+    "Адресу сервера збережено"
+  ],
+  "Адрес сервера: {0}": [
+    "Server address: {0}",
+    "Serveradresse: {0}",
+    "Адреса сервера: {0}"
+  ],
+  "БУФЕР ЗАПОЛНЕН": [
+    "BUFFER FULL",
+    "PUFFER VOLL",
+    "БУФЕР ЗАПОВНЕНИЙ"
+  ],
+  "Без оператора": [
+    "No operator",
+    "Ohne Bediener",
+    "Без оператора"
+  ],
+  "Бессрочно": [
+    "Unlimited",
+    "Unbefristet",
+    "Безстроково"
+  ],
+  "В текущем коробе ещё нет упаковок": [
+    "The current box is still empty",
+    "Der aktuelle Karton ist noch leer",
+    "У поточному коробі ще немає упаковок"
+  ],
+  "В текущем коробе нет упаковок для удаления": [
+    "No packages to delete in the current box",
+    "Keine Verpackungen zum Löschen im aktuellen Karton",
+    "У поточному коробі немає упаковок для видалення"
+  ],
+  "Вес стабилен · этикетка автоматически напечатана": [
+    "Weight stable · label printed automatically",
+    "Gewicht stabil · Etikett automatisch gedruckt",
+    "Вага стабільна · етикетку надруковано автоматично"
+  ],
+  "Вес стабилен и в допуске · автопечать…": [
+    "Weight stable and within tolerance · auto-printing…",
+    "Gewicht stabil und innerhalb der Toleranz · Autodruck…",
+    "Вага стабільна та в допуску · автодрук…"
+  ],
+  "Весы недоступны": [
+    "Scale unavailable",
+    "Waage nicht verfügbar",
+    "Ваги недоступні"
+  ],
+  "Весы: ошибка": [
+    "Scale: error",
+    "Waage: Fehler",
+    "Ваги: помилка"
+  ],
+  "Весы: подключение": [
+    "Scale: connecting",
+    "Waage: Verbindung wird hergestellt",
+    "Ваги: підключення"
+  ],
+  "Восстановление": [
+    "Recovery",
+    "Wiederherstellung",
+    "Відновлення"
+  ],
+  "Вход не выполнен": [
+    "Login failed",
+    "Anmeldung fehlgeschlagen",
+    "Вхід не виконано"
+  ],
+  "Выберите задание на печать": [
+    "Select a print job",
+    "Druckauftrag wählen",
+    "Виберіть завдання друку"
+  ],
+  "Выберите следующего оператора": [
+    "Select the next operator",
+    "Nächsten Bediener wählen",
+    "Виберіть наступного оператора"
+  ],
+  "Выберите товар перед закрытием короба": [
+    "Select a product before closing the box",
+    "Vor dem Schließen des Kartons einen Artikel wählen",
+    "Виберіть товар перед закриттям короба"
+  ],
+  "Выберите товар перед печатью": [
+    "Select a product before printing",
+    "Vor dem Drucken einen Artikel wählen",
+    "Виберіть товар перед друком"
+  ],
+  "Выберите товар перед удалением упаковки": [
+    "Select a product before deleting a package",
+    "Vor dem Löschen einer Verpackung einen Artikel wählen",
+    "Виберіть товар перед видаленням упаковки"
+  ],
+  "Выбор товара изменился; повторите действие": [
+    "Product selection changed; repeat the action",
+    "Artikelauswahl geändert; Aktion wiederholen",
+    "Вибір товару змінився; повторіть дію"
+  ],
+  "Генерация и отправка тестовой этикетки…": [
+    "Generating and sending test label…",
+    "Testetikett wird erstellt und gesendet…",
+    "Створення та надсилання тестової етикетки…"
+  ],
+  "Данные от сервера применены": [
+    "Server data applied",
+    "Serverdaten übernommen",
+    "Дані сервера застосовано"
+  ],
+  "Диагностика: {0}": [
+    "Diagnostics: {0}",
+    "Diagnose: {0}",
+    "Діагностика: {0}"
+  ],
+  "Дождитесь стабильного допустимого веса": [
+    "Wait for a stable weight within tolerance",
+    "Auf stabiles Gewicht innerhalb der Toleranz warten",
+    "Дочекайтеся стабільної ваги в допуску"
+  ],
+  "Дождитесь стабильного контрольного веса в пределах допуска": [
+    "Wait for a stable control weight within tolerance",
+    "Auf stabiles Kontrollgewicht innerhalb der Toleranz warten",
+    "Дочекайтеся стабільної контрольної ваги в межах допуску"
+  ],
+  "Доступно {0} из {1} настроенных · {2}": [
+    "{0} of {1} configured devices available · {2}",
+    "{0} von {1} eingerichteten Geräten verfügbar · {2}",
+    "Доступно {0} із {1} налаштованих · {2}"
+  ],
+  "ЗАМЯТИЕ": [
+    "PAPER JAM",
+    "PAPIERSTAU",
+    "ЗАМИНАННЯ"
+  ],
+  "Загружено {0} из {1}": [
+    "Loaded {0} of {1}",
+    "{0} von {1} geladen",
+    "Завантажено {0} із {1}"
+  ],
+  "Загружено заданий: {0}": [
+    "Jobs loaded: {0}",
+    "Aufträge geladen: {0}",
+    "Завантажено завдань: {0}"
+  ],
+  "Загрузка обновления прервана по тайм-ауту. Повторите попытку.": [
+    "Update download timed out. Try again.",
+    "Zeitüberschreitung beim Herunterladen. Erneut versuchen.",
+    "Час завантаження оновлення вичерпано. Спробуйте ще раз."
+  ],
+  "Загрузка подписанного пакета…": [
+    "Downloading signed package…",
+    "Signiertes Paket wird heruntergeladen…",
+    "Завантаження підписаного пакета…"
+  ],
+  "Загрузка следующей части каталога…": [
+    "Loading more products…",
+    "Weitere Artikel werden geladen…",
+    "Завантаження наступної частини каталогу…"
+  ],
+  "Загрузка товаров фиксированного веса…": [
+    "Loading fixed-weight products…",
+    "Festgewichtsartikel werden geladen…",
+    "Завантаження товарів фіксованої ваги…"
+  ],
+  "Задание #{0} · выполнено {1} из {2}": [
+    "Job #{0} · completed {1} of {2}",
+    "Auftrag #{0} · {1} von {2} abgeschlossen",
+    "Завдання #{0} · виконано {1} із {2}"
+  ],
+  "Задание завершено": [
+    "Job completed",
+    "Auftrag abgeschlossen",
+    "Завдання завершено"
+  ],
+  "Задание отменено": [
+    "Job cancelled",
+    "Auftrag abgebrochen",
+    "Завдання скасовано"
+  ],
+  "Задание печати": [
+    "Print job",
+    "Druckauftrag",
+    "Завдання друку"
+  ],
+  "Задание печати: {0}": [
+    "Print job: {0}",
+    "Druckauftrag: {0}",
+    "Завдання друку: {0}"
+  ],
+  "Задание повторно отправлено": [
+    "Job sent again",
+    "Auftrag erneut gesendet",
+    "Завдання надіслано повторно"
+  ],
+  "Задание удалено": [
+    "Job deleted",
+    "Auftrag gelöscht",
+    "Завдання видалено"
+  ],
+  "Задания печати: {0}": [
+    "Print jobs: {0}",
+    "Druckaufträge: {0}",
+    "Завдання друку: {0}"
+  ],
+  "Зазор": [
+    "Gap",
+    "Abstand",
+    "Проміжок"
+  ],
+  "Закрытие короба и формирование этикетки…": [
+    "Closing box and generating label…",
+    "Karton wird geschlossen und Etikett erstellt…",
+    "Закриття короба та створення етикетки…"
+  ],
+  "Закрытие короба по заданию #{0}…": [
+    "Closing box for job #{0}…",
+    "Karton für Auftrag #{0} wird geschlossen…",
+    "Закриття короба за завданням #{0}…"
+  ],
+  "Запись упаковки и печать фиксированной этикетки…": [
+    "Saving package and printing fixed-weight label…",
+    "Verpackung wird gespeichert und Festgewichtsetikett gedruckt…",
+    "Збереження упаковки та друк етикетки фіксованої ваги…"
+  ],
+  "Запись упаковки и формирование этикетки…": [
+    "Saving package and generating label…",
+    "Verpackung wird gespeichert und Etikett erstellt…",
+    "Збереження упаковки та створення етикетки…"
+  ],
+  "Интервал опроса": [
+    "Polling interval",
+    "Abfrageintervall",
+    "Інтервал опитування"
+  ],
+  "КРЫШКА ОТКРЫТА": [
+    "COVER OPEN",
+    "DECKEL OFFEN",
+    "КРИШКА ВІДКРИТА"
+  ],
+  "Каталог товаров: {0}": [
+    "Product catalog: {0}",
+    "Artikelkatalog: {0}",
+    "Каталог товарів: {0}"
+  ],
+  "Количество этикеток должно быть от 1 до 5000": [
+    "Label count must be between 1 and 5000",
+    "Etikettenanzahl muss zwischen 1 und 5000 liegen",
+    "Кількість етикеток має бути від 1 до 5000"
+  ],
+  "Контроль пройден · этикетка принята принтером": [
+    "Check passed · label accepted by printer",
+    "Prüfung bestanden · Etikett vom Drucker angenommen",
+    "Контроль пройдено · етикетку прийнято принтером"
+  ],
+  "Конфигурация изменилась извне · нажмите ОБНОВИТЬ или СОХРАНИТЬ": [
+    "Configuration changed externally · press REFRESH or SAVE",
+    "Konfiguration extern geändert · AKTUALISIEREN oder SPEICHERN drücken",
+    "Конфігурацію змінено ззовні · натисніть ОНОВИТИ або ЗБЕРЕГТИ"
+  ],
+  "Короб закрыт, коробная этикетка сформирована": [
+    "Box closed, box label generated",
+    "Karton geschlossen, Kartonetikett erstellt",
+    "Короб закрито, етикетку короба створено"
+  ],
+  "Короб закрыт, этикетка принята принтером": [
+    "Box closed, label accepted by printer",
+    "Karton geschlossen, Etikett vom Drucker angenommen",
+    "Короб закрито, етикетку прийнято принтером"
+  ],
+  "Короб закрыт; коробная этикетка не назначена": [
+    "Box closed; no box label assigned",
+    "Karton geschlossen; kein Kartonetikett zugewiesen",
+    "Короб закрито; етикетку короба не призначено"
+  ],
+  "НЕТ ЛЕНТЫ": [
+    "NO RIBBON",
+    "KEIN FARBBAND",
+    "НЕМАЄ СТРІЧКИ"
+  ],
+  "НЕЯСНО": [
+    "UNCERTAIN",
+    "UNKLAR",
+    "НЕВИЗНАЧЕНО"
+  ],
+  "На сервере пока нет опубликованного обновления.": [
+    "No update has been published on the server yet.",
+    "Auf dem Server ist noch kein Update veröffentlicht.",
+    "На сервері ще немає опублікованого оновлення."
+  ],
+  "Настройки весов сохранены, подключение перезапущено": [
+    "Scale settings saved, connection restarted",
+    "Waageneinstellungen gespeichert, Verbindung neu gestartet",
+    "Налаштування ваг збережено, підключення перезапущено"
+  ],
+  "Настройки весов: {0}": [
+    "Scale settings: {0}",
+    "Waageneinstellungen: {0}",
+    "Налаштування ваг: {0}"
+  ],
+  "Настройки не сохранены": [
+    "Settings not saved",
+    "Einstellungen nicht gespeichert",
+    "Налаштування не збережено"
+  ],
+  "Настройки принтера сохранены": [
+    "Printer settings saved",
+    "Druckereinstellungen gespeichert",
+    "Налаштування принтера збережено"
+  ],
+  "Настройки принтера: {0}": [
+    "Printer settings: {0}",
+    "Druckereinstellungen: {0}",
+    "Налаштування принтера: {0}"
+  ],
+  "Настройки принтеров: {0}": [
+    "Printer settings: {0}",
+    "Druckereinstellungen: {0}",
+    "Налаштування принтерів: {0}"
+  ],
+  "Нативный runtime не подключен": [
+    "Native runtime is not connected",
+    "Native Laufzeit nicht verbunden",
+    "Нативне середовище не підключено"
+  ],
+  "Нативный updater не подключен": [
+    "Native updater is not connected",
+    "Native Update-Komponente nicht verbunden",
+    "Нативний модуль оновлення не підключено"
+  ],
+  "Не удалось загрузить пакет обновления. Проверьте подключение и повторите попытку.": [
+    "Update download failed. Check the connection and try again.",
+    "Update-Paket nicht heruntergeladen. Verbindung prüfen und erneut versuchen.",
+    "Помилка завантаження пакета оновлення. Перевірте підключення та повторіть спробу."
+  ],
+  "Несохранённые изменения сброшены": [
+    "Unsaved changes discarded",
+    "Ungespeicherte Änderungen verworfen",
+    "Незбережені зміни скинуто"
+  ],
+  "Несохранённые настройки весов сброшены": [
+    "Unsaved scale settings discarded",
+    "Ungespeicherte Waageneinstellungen verworfen",
+    "Незбережені налаштування ваг скинуто"
+  ],
+  "Нет связи с сервером обновлений. Проверьте подключение к сети и повторите попытку.": [
+    "No connection to update server. Check the network and try again.",
+    "Keine Verbindung zum Update-Server. Netzwerk prüfen und erneut versuchen.",
+    "Немає зв'язку із сервером оновлень. Перевірте мережу та повторіть спробу."
+  ],
+  "Нет товаров фиксированного веса": [
+    "No fixed-weight products",
+    "Keine Festgewichtsartikel",
+    "Немає товарів фіксованої ваги"
+  ],
+  "Нет товаров — выполните синхронизацию": [
+    "No products — synchronize data",
+    "Keine Artikel — Daten synchronisieren",
+    "Немає товарів — виконайте синхронізацію"
+  ],
+  "ОЖИДАНИЕ": [
+    "WAITING",
+    "WARTEN",
+    "ОЧІКУВАННЯ"
+  ],
+  "ОТВЕТ ПОЛУЧЕН": [
+    "RESPONSE RECEIVED",
+    "ANTWORT ERHALTEN",
+    "ВІДПОВІДЬ ОТРИМАНО"
+  ],
+  "Обновление данных: {0}": [
+    "Data refresh: {0}",
+    "Datenaktualisierung: {0}",
+    "Оновлення даних: {0}"
+  ],
+  "Обычный режим": [
+    "Standard mode",
+    "Standardmodus",
+    "Звичайний режим"
+  ],
+  "Оператор больше не доступен — обновите список": [
+    "Operator no longer available — refresh the list",
+    "Bediener nicht mehr verfügbar — Liste aktualisieren",
+    "Оператор більше недоступний — оновіть список"
+  ],
+  "Оператор выбран": [
+    "Operator selected",
+    "Bediener ausgewählt",
+    "Оператора вибрано"
+  ],
+  "Операция {0}: {1}": [
+    "Operation {0}: {1}",
+    "Vorgang {0}: {1}",
+    "Операція {0}: {1}"
+  ],
+  "Операция с заданием: {0}": [
+    "Job operation: {0}",
+    "Auftragsvorgang: {0}",
+    "Операція із завданням: {0}"
+  ],
+  "Описание изменений не опубликовано": [
+    "Release notes not published",
+    "Änderungsbeschreibung nicht veröffentlicht",
+    "Опис змін не опубліковано"
+  ],
+  "Опрашиваем настроенные устройства…": [
+    "Querying configured devices…",
+    "Eingerichtete Geräte werden abgefragt…",
+    "Опитування налаштованих пристроїв…"
+  ],
+  "Определение завершено без применения": [
+    "Detection finished without applying changes",
+    "Erkennung ohne Übernahme abgeschlossen",
+    "Визначення завершено без застосування"
+  ],
+  "Определение принтера: {0}": [
+    "Printer detection: {0}",
+    "Druckererkennung: {0}",
+    "Визначення принтера: {0}"
+  ],
+  "Определяем транспорт и профиль…": [
+    "Detecting transport and profile…",
+    "Verbindung und Profil werden erkannt…",
+    "Визначення транспорту та профілю…"
+  ],
+  "Остановка после текущей этикетки…": [
+    "Stopping after current label…",
+    "Stopp nach dem aktuellen Etikett…",
+    "Зупинка після поточної етикетки…"
+  ],
+  "Открываем транспорт и ждём реальный кадр…": [
+    "Opening connection and waiting for a data frame…",
+    "Verbindung wird geöffnet und Datenrahmen erwartet…",
+    "Відкриття підключення та очікування кадру даних…"
+  ],
+  "Отмена задания": [
+    "Cancel job",
+    "Auftrag abbrechen",
+    "Скасування завдання"
+  ],
+  "Отмена задания…": [
+    "Cancelling job…",
+    "Auftrag wird abgebrochen…",
+    "Скасування завдання…"
+  ],
+  "Офлайн-пакет проверен": [
+    "Offline package verified",
+    "Offline-Paket geprüft",
+    "Офлайн-пакет перевірено"
+  ],
+  "Очередь печати: {0}": [
+    "Print queue: {0}",
+    "Druckwarteschlange: {0}",
+    "Черга друку: {0}"
+  ],
+  "Ошибка определения": [
+    "Detection error",
+    "Erkennungsfehler",
+    "Помилка визначення"
+  ],
+  "Ошибка пакетной печати": [
+    "Batch printing error",
+    "Seriendruckfehler",
+    "Помилка пакетного друку"
+  ],
+  "Ошибка печати задания": [
+    "Job printing error",
+    "Fehler beim Auftragsdruck",
+    "Помилка друку завдання"
+  ],
+  "Ошибка подключения промышленных весов": [
+    "Industrial scale connection error",
+    "Verbindungsfehler der Industriewaage",
+    "Помилка підключення промислових ваг"
+  ],
+  "Ошибка проверки оборудования": [
+    "Hardware check failed",
+    "Geräteprüfung fehlgeschlagen",
+    "Помилка перевірки обладнання"
+  ],
+  "Ошибка проверки подключения": [
+    "Connection check failed",
+    "Verbindungsprüfung fehlgeschlagen",
+    "Помилка перевірки підключення"
+  ],
+  "Ошибка проверки сервера": [
+    "Server check failed",
+    "Serverprüfung fehlgeschlagen",
+    "Помилка перевірки сервера"
+  ],
+  "Ошибка тестовой печати": [
+    "Test printing error",
+    "Testdruckfehler",
+    "Помилка тестового друку"
+  ],
+  "Ошибка транспорта принтера": [
+    "Printer transport error",
+    "Druckerverbindungsfehler",
+    "Помилка транспорту принтера"
+  ],
+  "Ошибка чтения заданий": [
+    "Failed to read jobs",
+    "Aufträge nicht gelesen",
+    "Помилка читання завдань"
+  ],
+  "Ошибка чтения каталога": [
+    "Failed to read catalog",
+    "Katalog nicht gelesen",
+    "Помилка читання каталогу"
+  ],
+  "Ошибка чтения настроек": [
+    "Failed to read settings",
+    "Einstellungen nicht gelesen",
+    "Помилка читання налаштувань"
+  ],
+  "Ошибка чтения очереди": [
+    "Failed to read queue",
+    "Warteschlange nicht gelesen",
+    "Помилка читання черги"
+  ],
+  "Ошибка чтения товаров": [
+    "Failed to read products",
+    "Artikel nicht gelesen",
+    "Помилка читання товарів"
+  ],
+  "ПЕЧАТЬ": [
+    "PRINTING",
+    "DRUCKEN",
+    "ДРУК"
+  ],
+  "Пакет обновления проверен": [
+    "Update package verified",
+    "Update-Paket geprüft",
+    "Пакет оновлення перевірено"
+  ],
+  "Пакетная печать · 0 из {0}": [
+    "Batch printing · 0 of {0}",
+    "Seriendruck · 0 von {0}",
+    "Пакетний друк · 0 із {0}"
+  ],
+  "Пакетная печать · {0} из {1}": [
+    "Batch printing · {0} of {1}",
+    "Seriendruck · {0} von {1}",
+    "Пакетний друк · {0} із {1}"
+  ],
+  "Пакетная печать: {0}": [
+    "Batch printing: {0}",
+    "Seriendruck: {0}",
+    "Пакетний друк: {0}"
+  ],
+  "Паллетный": [
+    "Pallet",
+    "Palette",
+    "Палетний"
+  ],
+  "Паллетный лист напечатан, паллета закрыта": [
+    "Pallet sheet printed, pallet closed",
+    "Palettenblatt gedruckt, Palette geschlossen",
+    "Палетний лист надруковано, палету закрито"
+  ],
+  "Паллетный лист сформирован": [
+    "Pallet sheet generated",
+    "Palettenblatt erstellt",
+    "Палетний лист створено"
+  ],
+  "Перед завершением задания закройте короб {0} · {1} упаковок": [
+    "Before completing the job, close box {0} · {1} packages",
+    "Vor Auftragsabschluss Karton {0} schließen · {1} Verpackungen",
+    "Перед завершенням завдання закрийте короб {0} · {1} упаковок"
+  ],
+  "Перезапуск для восстановления…": [
+    "Restarting for recovery…",
+    "Neustart zur Wiederherstellung…",
+    "Перезапуск для відновлення…"
+  ],
+  "Перезапуск для установки…": [
+    "Restarting to install…",
+    "Neustart zur Installation…",
+    "Перезапуск для встановлення…"
+  ],
+  "Печать по заданию #{0}…": [
+    "Printing job #{0}…",
+    "Auftrag #{0} wird gedruckt…",
+    "Друк за завданням #{0}…"
+  ],
+  "Печать уже выполняется": [
+    "Printing is already in progress",
+    "Druck läuft bereits",
+    "Друк уже виконується"
+  ],
+  "Повтор печати": [
+    "Repeat print",
+    "Druck wiederholen",
+    "Повторний друк"
+  ],
+  "Повтор последней этикетки…": [
+    "Repeating last label…",
+    "Letztes Etikett wird erneut gedruckt…",
+    "Повторний друк останньої етикетки…"
+  ],
+  "Повторная отправка задания…": [
+    "Resending job…",
+    "Auftrag wird erneut gesendet…",
+    "Повторне надсилання завдання…"
+  ],
+  "Подготовка ручного восстановления…": [
+    "Preparing manual recovery…",
+    "Manuelle Wiederherstellung wird vorbereitet…",
+    "Підготовка ручного відновлення…"
+  ],
+  "Подпись и устройство подтверждены": [
+    "Signature and device verified",
+    "Signatur und Gerät bestätigt",
+    "Підпис і пристрій підтверджено"
+  ],
+  "Поиск в локальном каталоге…": [
+    "Searching local catalog…",
+    "Lokaler Katalog wird durchsucht…",
+    "Пошук у локальному каталозі…"
+  ],
+  "Поиск товаров: {0}": [
+    "Product search: {0}",
+    "Artikelsuche: {0}",
+    "Пошук товарів: {0}"
+  ],
+  "Получен корректный кадр весов": [
+    "Valid scale frame received",
+    "Gültiger Waagendatenrahmen empfangen",
+    "Отримано коректний кадр ваг"
+  ],
+  "Последняя упаковка удалена": [
+    "Last package deleted",
+    "Letzte Verpackung gelöscht",
+    "Останню упаковку видалено"
+  ],
+  "Последняя этикетка задания напечатана": [
+    "Last job label printed",
+    "Letztes Auftragsetikett gedruckt",
+    "Останню етикетку завдання надруковано"
+  ],
+  "Последняя этикетка отправлена повторно": [
+    "Last label sent again",
+    "Letztes Etikett erneut gesendet",
+    "Останню етикетку надіслано повторно"
+  ],
+  "Принтер доступен": [
+    "Printer available",
+    "Drucker verfügbar",
+    "Принтер доступний"
+  ],
+  "Принтер не отвечает": [
+    "Printer not responding",
+    "Drucker antwortet nicht",
+    "Принтер не відповідає"
+  ],
+  "Принтер принял этикетку": [
+    "Printer accepted the label",
+    "Drucker hat das Etikett angenommen",
+    "Принтер прийняв етикетку"
+  ],
+  "Принтер: буфер заполнен": [
+    "Printer: buffer full",
+    "Drucker: Puffer voll",
+    "Принтер: буфер заповнений"
+  ],
+  "Принтер: замятие": [
+    "Printer: paper jam",
+    "Drucker: Papierstau",
+    "Принтер: заминання"
+  ],
+  "Принтер: настроен": [
+    "Printer: configured",
+    "Drucker: eingerichtet",
+    "Принтер: налаштований"
+  ],
+  "Принтер: не готов": [
+    "Printer: not ready",
+    "Drucker: nicht bereit",
+    "Принтер: не готовий"
+  ],
+  "Принтер: нет бумаги": [
+    "Printer: no paper",
+    "Drucker: kein Papier",
+    "Принтер: немає паперу"
+  ],
+  "Принтер: нет ленты": [
+    "Printer: no ribbon",
+    "Drucker: kein Farbband",
+    "Принтер: немає стрічки"
+  ],
+  "Принтер: ожидает завершения операции": [
+    "Printer: waiting for operation to finish",
+    "Drucker: wartet auf Abschluss des Vorgangs",
+    "Принтер: очікування завершення операції"
+  ],
+  "Принтер: открыта крышка": [
+    "Printer: cover open",
+    "Drucker: Deckel offen",
+    "Принтер: кришка відкрита"
+  ],
+  "Принтер: ошибка": [
+    "Printer: error",
+    "Drucker: Fehler",
+    "Принтер: помилка"
+  ],
+  "Принтер: ошибка конфигурации": [
+    "Printer: configuration error",
+    "Drucker: Konfigurationsfehler",
+    "Принтер: помилка конфігурації"
+  ],
+  "Принтер: пауза": [
+    "Printer: paused",
+    "Drucker: pausiert",
+    "Принтер: пауза"
+  ],
+  "Принтер: печатает": [
+    "Printer: printing",
+    "Drucker: druckt",
+    "Принтер: друкує"
+  ],
+  "Принтер: подключение": [
+    "Printer: connecting",
+    "Drucker: Verbindung wird hergestellt",
+    "Принтер: підключення"
+  ],
+  "Принтер: проверка состояния": [
+    "Printer: checking status",
+    "Drucker: Statusprüfung",
+    "Принтер: перевірка стану"
+  ],
+  "Принтер: состояние неизвестно": [
+    "Printer: status unknown",
+    "Drucker: Status unbekannt",
+    "Принтер: стан невідомий"
+  ],
+  "Проверка весов: {0}": [
+    "Scale check: {0}",
+    "Waagenprüfung: {0}",
+    "Перевірка ваг: {0}"
+  ],
+  "Проверка завершена · {0}": [
+    "Check complete · {0}",
+    "Prüfung abgeschlossen · {0}",
+    "Перевірку завершено · {0}"
+  ],
+  "Проверка и атомарное сохранение…": [
+    "Validating and saving atomically…",
+    "Prüfung und atomares Speichern…",
+    "Перевірка та атомарне збереження…"
+  ],
+  "Проверка канала обновлений…": [
+    "Checking update channel…",
+    "Update-Kanal wird geprüft…",
+    "Перевірка каналу оновлень…"
+  ],
+  "Проверка не пройдена": [
+    "Verification failed",
+    "Prüfung fehlgeschlagen",
+    "Перевірку не пройдено"
+  ],
+  "Проверка офлайн-пакета…": [
+    "Checking offline package…",
+    "Offline-Paket wird geprüft…",
+    "Перевірка офлайн-пакета…"
+  ],
+  "Проверка сервера и лицензии…": [
+    "Checking server and license…",
+    "Server und Lizenz werden geprüft…",
+    "Перевірка сервера та ліцензії…"
+  ],
+  "Прогресс задания обновлён": [
+    "Job progress updated",
+    "Auftragsfortschritt aktualisiert",
+    "Прогрес завдання оновлено"
+  ],
+  "Протокол подтверждён": [
+    "Protocol confirmed",
+    "Protokoll bestätigt",
+    "Протокол підтверджено"
+  ],
+  "Профиль {0} определён и сохранён": [
+    "Profile {0} detected and saved",
+    "Profil {0} erkannt und gespeichert",
+    "Профіль {0} визначено та збережено"
+  ],
+  "Профиль принтера применён": [
+    "Printer profile applied",
+    "Druckerprofil übernommen",
+    "Профіль принтера застосовано"
+  ],
+  "РЕНДЕРИНГ": [
+    "RENDERING",
+    "AUFBEREITUNG",
+    "ОБРОБКА"
+  ],
+  "Работа без оператора включена": [
+    "Operation without operator enabled",
+    "Betrieb ohne Bediener aktiviert",
+    "Роботу без оператора ввімкнено"
+  ],
+  "Рабочая база данных не открылась. Доступно ручное восстановление предыдущей версии.": [
+    "The working database did not open. Manual recovery of the previous version is available.",
+    "Die Arbeitsdatenbank wurde nicht geöffnet. Die vorherige Version kann manuell wiederhergestellt werden.",
+    "Робоча база даних не відкрилася. Доступне ручне відновлення попередньої версії."
+  ],
+  "Рабочие данные не открылись. Восстановите предыдущую версию и базу из сохранённой точки.": [
+    "Working data did not open. Restore the previous version and database from the saved restore point.",
+    "Arbeitsdaten wurden nicht geöffnet. Vorherige Version und Datenbank aus dem Sicherungspunkt wiederherstellen.",
+    "Робочі дані не відкрилися. Відновіть попередню версію та базу зі збереженої точки."
+  ],
+  "Размер": [
+    "Size",
+    "Größe",
+    "Розмір"
+  ],
+  "Растровая этикетка": [
+    "Raster label",
+    "Rasteretikett",
+    "Растрова етикетка"
+  ],
+  "Режим восстановления": [
+    "Recovery mode",
+    "Wiederherstellungsmodus",
+    "Режим відновлення"
+  ],
+  "СНИМИТЕ ТОВАР": [
+    "REMOVE PRODUCT",
+    "ARTIKEL ENTFERNEN",
+    "ЗНІМІТЬ ТОВАР"
+  ],
+  "СТАТУС НЕИЗВЕСТЕН": [
+    "STATUS UNKNOWN",
+    "STATUS UNBEKANNT",
+    "СТАН НЕВІДОМИЙ"
+  ],
+  "Связь установлена": [
+    "Connected",
+    "Verbindung hergestellt",
+    "Зв'язок встановлено"
+  ],
+  "Сервер и лицензия: {0}": [
+    "Server and license: {0}",
+    "Server und Lizenz: {0}",
+    "Сервер і ліцензія: {0}"
+  ],
+  "Сервер обновлений не ответил вовремя. Проверьте подключение и повторите попытку.": [
+    "Update server timed out. Check the connection and try again.",
+    "Zeitüberschreitung beim Update-Server. Verbindung prüfen und erneut versuchen.",
+    "Сервер оновлень не відповів вчасно. Перевірте підключення та повторіть спробу."
+  ],
+  "Сервер: недоступен": [
+    "Server: unavailable",
+    "Server: nicht verfügbar",
+    "Сервер: недоступний"
+  ],
+  "Сервер: подключен": [
+    "Server: connected",
+    "Server: verbunden",
+    "Сервер: підключений"
+  ],
+  "Сессия оператора: {0}": [
+    "Operator session: {0}",
+    "Bedienersitzung: {0}",
+    "Сесія оператора: {0}"
+  ],
+  "Синхронизация: резервный режим": [
+    "Synchronization: fallback mode",
+    "Synchronisierung: Ersatzmodus",
+    "Синхронізація: резервний режим"
+  ],
+  "Скорость Serial": [
+    "Serial baud rate",
+    "Serielle Baudrate",
+    "Швидкість Serial"
+  ],
+  "Скорость печати": [
+    "Print speed",
+    "Druckgeschwindigkeit",
+    "Швидкість друку"
+  ],
+  "Смена оператора: {0}": [
+    "Operator change: {0}",
+    "Bedienerwechsel: {0}",
+    "Зміна оператора: {0}"
+  ],
+  "Создание точки восстановления…": [
+    "Creating restore point…",
+    "Wiederherstellungspunkt wird erstellt…",
+    "Створення точки відновлення…"
+  ],
+  "Сохранение адреса и проверка связи…": [
+    "Saving address and checking connection…",
+    "Adresse wird gespeichert und Verbindung geprüft…",
+    "Збереження адреси та перевірка зв'язку…"
+  ],
+  "Сохранение и перезапуск потока весов…": [
+    "Saving and restarting scale stream…",
+    "Waagendatenstrom wird gespeichert und neu gestartet…",
+    "Збереження та перезапуск потоку ваг…"
+  ],
+  "Сохранение отклонено": [
+    "Save rejected",
+    "Speichern abgelehnt",
+    "Збереження відхилено"
+  ],
+  "Сохраните или обновите текущую карточку": [
+    "Save or refresh the current form",
+    "Aktuelles Formular speichern oder aktualisieren",
+    "Збережіть або оновіть поточну картку"
+  ],
+  "Счётчики требуют обновления": [
+    "Counters need refreshing",
+    "Zähler müssen aktualisiert werden",
+    "Лічильники потребують оновлення"
+  ],
+  "Темнота": [
+    "Darkness",
+    "Schwärzung",
+    "Темність"
+  ],
+  "Тестовая печать: {0}": [
+    "Test print: {0}",
+    "Testdruck: {0}",
+    "Тестовий друк: {0}"
+  ],
+  "Тестовая этикетка отправлена": [
+    "Test label sent",
+    "Testetikett gesendet",
+    "Тестову етикетку надіслано"
+  ],
+  "Тестовая этикетка отправлена · {0} байт": [
+    "Test label sent · {0} bytes",
+    "Testetikett gesendet · {0} Bytes",
+    "Тестову етикетку надіслано · {0} байтів"
+  ],
+  "Товар готов · установите упаковку на весы": [
+    "Product ready · place package on scale",
+    "Artikel bereit · Verpackung auf die Waage stellen",
+    "Товар готовий · встановіть упаковку на ваги"
+  ],
+  "Транспорт доступен, кадр не распознан": [
+    "Connection available, frame not recognized",
+    "Verbindung verfügbar, Datenrahmen nicht erkannt",
+    "Транспорт доступний, кадр не розпізнано"
+  ],
+  "Удаление последней упаковки…": [
+    "Deleting last package…",
+    "Letzte Verpackung wird gelöscht…",
+    "Видалення останньої упаковки…"
+  ],
+  "Удаление: {0}": [
+    "Deletion: {0}",
+    "Löschen: {0}",
+    "Видалення: {0}"
+  ],
+  "Укажите путь к native-latest.json": [
+    "Enter the path to native-latest.json",
+    "Pfad zu native-latest.json angeben",
+    "Вкажіть шлях до native-latest.json"
+  ],
+  "Укажите сервер": [
+    "Specify server",
+    "Server angeben",
+    "Вкажіть сервер"
+  ],
+  "Упаковка #{0} удалена": [
+    "Package #{0} deleted",
+    "Verpackung #{0} gelöscht",
+    "Упаковку #{0} видалено"
+  ],
+  "Упаковка напечатана, короб автоматически закрыт": [
+    "Package printed, box closed automatically",
+    "Verpackung gedruckt, Karton automatisch geschlossen",
+    "Упаковку надруковано, короб автоматично закрито"
+  ],
+  "Фиксированный вес: {0}": [
+    "Fixed weight: {0}",
+    "Festgewicht: {0}",
+    "Фіксована вага: {0}"
+  ],
+  "Формирование паллетного листа…": [
+    "Generating pallet sheet…",
+    "Palettenblatt wird erstellt…",
+    "Створення палетного листа…"
+  ],
+  "Функции не указаны": [
+    "No features specified",
+    "Keine Funktionen angegeben",
+    "Функції не вказано"
+  ],
+  "Чтение заданий сервера…": [
+    "Reading server jobs…",
+    "Serveraufträge werden gelesen…",
+    "Читання завдань сервера…"
+  ],
+  "Чтение конфигурации и Serial-портов…": [
+    "Reading configuration and serial ports…",
+    "Konfiguration und serielle Anschlüsse werden gelesen…",
+    "Читання конфігурації та Serial-портів…"
+  ],
+  "Чтение локального каталога…": [
+    "Reading local catalog…",
+    "Lokaler Katalog wird gelesen…",
+    "Читання локального каталогу…"
+  ],
+  "Чтение локальной очереди…": [
+    "Reading local queue…",
+    "Lokale Warteschlange wird gelesen…",
+    "Читання локальної черги…"
+  ],
+  "Чтение настроек и системных устройств…": [
+    "Reading settings and system devices…",
+    "Einstellungen und Systemgeräte werden gelesen…",
+    "Читання налаштувань і системних пристроїв…"
+  ],
+  "Этикетка": [
+    "Label",
+    "Etikett",
+    "Етикетка"
+  ],
+  "Этикетка напечатана · короб автоматически закрыт": [
+    "Label printed · box closed automatically",
+    "Etikett gedruckt · Karton automatisch geschlossen",
+    "Етикетку надруковано · короб автоматично закрито"
+  ],
+  "Этикетка отправлена в очередь": [
+    "Label queued",
+    "Etikett eingereiht",
+    "Етикетку додано до черги"
+  ],
+  "Этикетка повторно принята принтером": [
+    "Label accepted again by printer",
+    "Etikett erneut vom Drucker angenommen",
+    "Етикетку повторно прийнято принтером"
+  ],
+  "Этикетка фиксированного веса напечатана": [
+    "Fixed-weight label printed",
+    "Festgewichtsetikett gedruckt",
+    "Етикетку фіксованої ваги надруковано"
+  ],
+  "арт. {0}": [
+    "Art. {0}",
+    "Art. {0}",
+    "арт. {0}"
+  ],
+  "без артикула": [
+    "no article number",
+    "ohne Artikelnummer",
+    "без артикула"
+  ],
+  "закройте активные производственные сущности": [
+    "close active production records",
+    "aktive Produktionsvorgänge abschließen",
+    "закрийте активні виробничі записи"
+  ],
+  "закройте короб {0}": [
+    "close box {0}",
+    "Karton {0} schließen",
+    "закрийте короб {0}"
+  ],
+  "напечатайте и закройте паллету": [
+    "print and close the pallet",
+    "Palette drucken und schließen",
+    "надрукуйте та закрийте палету"
+  ],
+  "не проверялся": [
+    "not checked",
+    "nicht geprüft",
+    "не перевірявся"
+  ],
+  "нет данных": [
+    "no data",
+    "keine Daten",
+    "немає даних"
+  ],
+  "повторно": [
+    "again",
+    "erneut",
+    "повторно"
+  ],
+  "текущая дата": [
+    "current date",
+    "aktuelles Datum",
+    "поточна дата"
+  ],
+  "только что": [
+    "just now",
+    "gerade eben",
+    "щойно"
+  ],
+  "Системные устройства обновлены": [
+    "System devices refreshed",
+    "Systemgeräte aktualisiert",
+    "Системні пристрої оновлено"
+  ],
+  "Настройки загружены": [
+    "Settings loaded",
+    "Einstellungen geladen",
+    "Налаштування завантажено"
+  ],
+  "Установлена актуальная версия": [
+    "The latest version is installed",
+    "Die aktuelle Version ist installiert",
+    "Встановлено актуальну версію"
+  ],
+  "Личная лицензия": [
+    "Personal license",
+    "Persönliche Lizenz",
+    "Особиста ліцензія"
+  ],
+  "Не подтверждено": [
+    "Unconfirmed",
+    "Unbestätigt",
+    "Не підтверджено"
+  ],
+  "Доступен": [
+    "Available",
+    "Verfügbar",
+    "Доступний"
+  ],
+  "Последнее обновление": [
+    "Last updated",
+    "Zuletzt aktualisiert",
+    "Останнє оновлення"
+  ],
+  "Повторное подключение": [
+    "Reconnecting",
+    "Erneute Verbindung",
+    "Повторне підключення"
+  ],
+  "Соединение отклонено": [
+    "Connection refused",
+    "Verbindung abgelehnt",
+    "З'єднання відхилено"
+  ],
+  "Время ожидания соединения истекло": [
+    "Connection timed out",
+    "Zeitüberschreitung der Verbindung",
+    "Час очікування з'єднання вичерпано"
+  ],
+  "Соединение сброшено": [
+    "Connection reset",
+    "Verbindung zurückgesetzt",
+    "З'єднання скинуто"
+  ],
+  "Доступ запрещён": [
+    "Access denied",
+    "Zugriff verweigert",
+    "Доступ заборонено"
+  ],
+  "Файл не найден": [
+    "File not found",
+    "Datei nicht gefunden",
+    "Файл не знайдено"
+  ],
+  "TCP-порт": [
+    "TCP port",
+    "TCP-Port",
+    "TCP-порт"
+  ],
+  "Serial-порты обновлены": [
+    "Serial ports refreshed",
+    "Serielle Anschlüsse aktualisiert",
+    "Serial-порти оновлено"
+  ],
+  "Последовательный порт": [
+    "Serial port",
+    "Serieller Anschluss",
+    "Послідовний порт"
+  ],
+  "Универсальный текстовый протокол": [
+    "Universal text protocol",
+    "Universelles Textprotokoll",
+    "Універсальний текстовий протокол"
+  ],
+  "Транспорт доступен": [
+    "Connection available",
+    "Verbindung verfügbar",
+    "Транспорт доступний"
+  ],
+  "Клиент {0} ниже минимальной версии {1}": [
+    "Client {0} is below the minimum version {1}",
+    "Client {0} ist älter als die Mindestversion {1}",
+    "Клієнт {0} старіший за мінімальну версію {1}"
+  ],
+  "Адрес сервера должен быть HTTP(S) URL, IP или host:port": [
+    "Server address must be an HTTP(S) URL, IP or host:port",
+    "Serveradresse muss eine HTTP(S)-URL, IP oder host:port sein",
+    "Адреса сервера має бути HTTP(S) URL, IP або host:port"
+  ],
+  "Товар больше не существует; обновите список номенклатуры": [
+    "Product no longer exists; refresh the product list",
+    "Artikel existiert nicht mehr; Artikelliste aktualisieren",
+    "Товар більше не існує; оновіть список товарів"
+  ],
+  "Перед сменой товара закройте короб {0} (упаковок: {1})": [
+    "Before changing product, close box {0} (packages: {1})",
+    "Vor Artikelwechsel Karton {0} schließen (Verpackungen: {1})",
+    "Перед зміною товару закрийте короб {0} (упаковок: {1})"
+  ],
+  "Номенклатура обновилась; выберите товар повторно": [
+    "Product list updated; select the product again",
+    "Artikelliste aktualisiert; Artikel erneut wählen",
+    "Список товарів оновлено; виберіть товар повторно"
+  ],
+  "задание #{0} не найдено": [
+    "Job #{0} not found",
+    "Auftrag #{0} nicht gefunden",
+    "Завдання #{0} не знайдено"
+  ],
+  "задание #{0} уже завершено": [
+    "Job #{0} is already completed",
+    "Auftrag #{0} bereits abgeschlossen",
+    "Завдання #{0} вже завершено"
+  ],
+  "контрольный вес": [
+    "Control weight",
+    "Kontrollgewicht",
+    "Контрольна вага"
+  ],
+  "чистый вес упаковки равен нулю": [
+    "Net package weight is zero",
+    "Nettoverpackungsgewicht ist null",
+    "Чиста вага упаковки дорівнює нулю"
+  ],
+  "товар #{0} не найден": [
+    "Product #{0} not found",
+    "Artikel #{0} nicht gefunden",
+    "Товар #{0} не знайдено"
+  ],
+  "{0} должен быть больше 0.010 кг": [
+    "{0} must exceed 0.010 kg",
+    "{0} muss größer als 0.010 kg sein",
+    "{0} має бути більше 0.010 кг"
+  ],
+  "выбранный товар не относится к фиксированному весу": [
+    "Selected product is not a fixed-weight product",
+    "Ausgewählter Artikel hat kein Festgewicht",
+    "Вибраний товар не має фіксованої ваги"
+  ],
+  "для товара не задан корректный фиксированный вес": [
+    "Product has no valid fixed weight",
+    "Kein gültiges Festgewicht für den Artikel festgelegt",
+    "Для товару не задано коректної фіксованої ваги"
+  ],
+  "контрольный вес {0} г вне диапазона {1}–{2} г": [
+    "Control weight {0} g is outside the range {1}–{2} g",
+    "Kontrollgewicht {0} g außerhalb des Bereichs {1}–{2} g",
+    "Контрольна вага {0} г поза діапазоном {1}–{2} г"
+  ],
+  "выберите Serial, TCP или симулятор": [
+    "Select Serial, TCP or simulator",
+    "Serial, TCP oder Simulator wählen",
+    "Виберіть Serial, TCP або симулятор"
+  ],
+  "выберите поддерживаемый протокол весов": [
+    "Select a supported scale protocol",
+    "Unterstütztes Waagenprotokoll wählen",
+    "Виберіть підтримуваний протокол ваг"
+  ],
+  "скорость Serial должна быть в диапазоне 300–3000000": [
+    "Serial baud rate must be 300–3000000",
+    "Serielle Baudrate muss 300–3000000 betragen",
+    "Швидкість Serial має бути 300–3000000"
+  ],
+  "TCP-порт должен быть в диапазоне 1–65535": [
+    "TCP port must be 1–65535",
+    "TCP-Port muss zwischen 1 und 65535 liegen",
+    "TCP-порт має бути від 1 до 65535"
+  ],
+  "интервал опроса должен быть в диапазоне 50–60000 мс": [
+    "Polling interval must be 50–60000 ms",
+    "Abfrageintervall muss 50–60000 ms betragen",
+    "Інтервал опитування має бути 50–60000 мс"
+  ],
+  "число отсчётов стабильности должно быть в диапазоне 2–32": [
+    "Stability sample count must be 2–32",
+    "Anzahl der Stabilitätsmessungen muss 2–32 betragen",
+    "Кількість відліків стабільності має бути 2–32"
+  ],
+  "выберите последовательный порт весов": [
+    "Select the scale serial port",
+    "Seriellen Anschluss der Waage wählen",
+    "Виберіть послідовний порт ваг"
+  ],
+  "укажите IP-адрес или имя весов": [
+    "Enter the scale IP address or hostname",
+    "IP-Adresse oder Hostname der Waage angeben",
+    "Вкажіть IP-адресу або ім'я ваг"
+  ],
+  "{0} содержит недопустимые символы": [
+    "{0} contains invalid characters",
+    "{0} enthält ungültige Zeichen",
+    "{0} містить неприпустимі символи"
+  ],
+  "Отдельная потребительская упаковка": [
+    "Individual consumer package",
+    "Einzelne Verbraucherverpackung",
+    "Окрема споживча упаковка"
+  ],
+  "Групповая транспортная упаковка": [
+    "Grouped transport package",
+    "Gebündelte Transportverpackung",
+    "Групова транспортна упаковка"
+  ],
+  "Рулонный или обычный листовой принтер": [
+    "Roll or standard sheet printer",
+    "Rollen- oder Standard-Blattdrucker",
+    "Рулонний або звичайний аркушевий принтер"
+  ],
+  "неизвестная роль принтера: {0}": [
+    "Unknown printer role: {0}",
+    "Unbekannte Druckerrolle: {0}",
+    "Невідома роль принтера: {0}"
+  ],
+  "название принтера должно содержать 1–128 символов": [
+    "Printer name must contain 1–128 characters",
+    "Druckername muss 1–128 Zeichen enthalten",
+    "Назва принтера має містити 1–128 символів"
+  ],
+  "название принтера содержит управляющие символы": [
+    "Printer name contains control characters",
+    "Druckername enthält Steuerzeichen",
+    "Назва принтера містить керівні символи"
+  ],
+  "выберите TCP, Serial или Windows Driver": [
+    "Select TCP, Serial or Windows Driver",
+    "TCP, Serial oder Windows Driver wählen",
+    "Виберіть TCP, Serial або Windows Driver"
+  ],
+  "неподдерживаемый язык печати": [
+    "Unsupported printer language",
+    "Nicht unterstützte Druckersprache",
+    "Непідтримувана мова друку"
+  ],
+  "неподдерживаемый профиль совместимости": [
+    "Unsupported compatibility profile",
+    "Nicht unterstütztes Kompatibilitätsprofil",
+    "Непідтримуваний профіль сумісності"
+  ],
+  "неподдерживаемый режим RAM-кэша": [
+    "Unsupported RAM cache mode",
+    "Nicht unterstützter RAM-Cache-Modus",
+    "Непідтримуваний режим RAM-кешу"
+  ],
+  "скорость Serial должна быть в диапазоне 300–921600": [
+    "Serial baud rate must be 300–921600",
+    "Serielle Baudrate muss 300–921600 betragen",
+    "Швидкість Serial має бути 300–921600"
+  ],
+  "поддерживаются 203, 300 или 600 DPI": [
+    "Supported resolutions: 203, 300 or 600 DPI",
+    "Unterstützte Auflösungen: 203, 300 oder 600 DPI",
+    "Підтримуються 203, 300 або 600 DPI"
+  ],
+  "Бинарный протокол Massa-K: запрос J, 4800 бод, чётность Even": [
+    "Massa-K binary protocol: J request, 4800 baud, even parity",
+    "Massa-K-Binärprotokoll: J-Abfrage, 4800 Baud, gerade Parität",
+    "Бінарний протокол Massa-K: запит J, 4800 бод, парність Even"
+  ],
+  "Для весов, настроенных на постоянную передачу данных": [
+    "For scales configured for continuous transmission",
+    "Für Waagen mit kontinuierlicher Datenübertragung",
+    "Для ваг із постійним передаванням даних"
+  ],
+  "Стандартный ASCII-формат A&D (ST/US/OL) — A&D, Tscale и совместимые": [
+    "Standard A&D ASCII format (ST/US/OL) — A&D, Tscale and compatible scales",
+    "A&D-ASCII-Standardformat (ST/US/OL) — A&D, Tscale und kompatible Waagen",
+    "Стандартний ASCII-формат A&D (ST/US/OL) — A&D, Tscale та сумісні"
+  ],
+  "Dibal Delta: запрос D, ASCII-вес со знаком (кг)": [
+    "Dibal Delta: D request, signed ASCII weight (kg)",
+    "Dibal Delta: D-Abfrage, ASCII-Gewicht mit Vorzeichen (kg)",
+    "Dibal Delta: запит D, ASCII-вага зі знаком (кг)"
+  ],
+  "OHAUS Defender/Ranger/Scout/Valor — ASCII-печать, команда IP": [
+    "OHAUS Defender/Ranger/Scout/Valor — ASCII printing, IP command",
+    "OHAUS Defender/Ranger/Scout/Valor — ASCII-Druck, IP-Befehl",
+    "OHAUS Defender/Ranger/Scout/Valor — ASCII-друк, команда IP"
+  ],
+  "Sartorius SBI: печать по ESC P, ASCII со знаком и единицей": [
+    "Sartorius SBI: ESC P print, signed ASCII with unit",
+    "Sartorius SBI: Druck über ESC P, ASCII mit Vorzeichen und Einheit",
+    "Sartorius SBI: друк за ESC P, ASCII зі знаком та одиницею"
+  ],
+  "RADWAG: команда SI, ASCII-масса со знаком и единицей": [
+    "RADWAG: SI command, signed ASCII weight with unit",
+    "RADWAG: SI-Befehl, ASCII-Gewicht mit Vorzeichen und Einheit",
+    "RADWAG: команда SI, ASCII-маса зі знаком та одиницею"
+  ],
+  "KERN & Sohn: команда w, ASCII-масса с единицей": [
+    "KERN & Sohn: w command, ASCII weight with unit",
+    "KERN & Sohn: w-Befehl, ASCII-Gewicht mit Einheit",
+    "KERN & Sohn: команда w, ASCII-маса з одиницею"
+  ],
+  "Dini Argeo: запрос READ, строка ST,GS,вес,ед": [
+    "Dini Argeo: READ request, ST,GS,weight,unit string",
+    "Dini Argeo: READ-Abfrage, Zeichenfolge ST,GS,Gewicht,Einheit",
+    "Dini Argeo: запит READ, рядок ST,GS,вага,од"
+  ],
+  "Нет подтверждения от принтера. Проверьте подключение кабеля, наличие этикеток и состояние оборудования перед повторной отправкой задания.": [
+    "No printer confirmation. Check the cable, labels and equipment before resending the job.",
+    "Keine Druckerbestätigung. Vor erneutem Senden Kabel, Etiketten und Gerätezustand prüfen.",
+    "Немає підтвердження від принтера. Перевірте кабель, етикетки та обладнання перед повторним надсиланням."
+  ],
+  "Соединение не установлено за 5 секунд. Проверьте адрес, кабель, питание принтера и доступность порта 9100.": [
+    "Connection not established within 5 seconds. Check address, cable, printer power and port 9100.",
+    "Keine Verbindung innerhalb von 5 Sekunden. Adresse, Kabel, Stromversorgung und Port 9100 prüfen.",
+    "З'єднання не встановлено за 5 секунд. Перевірте адресу, кабель, живлення принтера та порт 9100."
+  ],
+  "Проверка подключения завершена": [
+    "Connection check complete",
+    "Verbindungsprüfung abgeschlossen",
+    "Перевірку підключення завершено"
+  ],
+  "Проверено {0} устройства": [
+    "Checked {0} devices",
+    "{0} Geräte geprüft",
+    "Перевірено {0} пристрої"
+  ],
+  "Январь {0}": [
+    "January {0}",
+    "Januar {0}",
+    "Січень {0}"
+  ],
+  "Февраль {0}": [
+    "February {0}",
+    "Februar {0}",
+    "Лютий {0}"
+  ],
+  "Март {0}": [
+    "March {0}",
+    "März {0}",
+    "Березень {0}"
+  ],
+  "Апрель {0}": [
+    "April {0}",
+    "April {0}",
+    "Квітень {0}"
+  ],
+  "Май {0}": [
+    "May {0}",
+    "Mai {0}",
+    "Травень {0}"
+  ],
+  "Июнь {0}": [
+    "June {0}",
+    "Juni {0}",
+    "Червень {0}"
+  ],
+  "Июль {0}": [
+    "July {0}",
+    "Juli {0}",
+    "Липень {0}"
+  ],
+  "Август {0}": [
+    "August {0}",
+    "August {0}",
+    "Серпень {0}"
+  ],
+  "Сентябрь {0}": [
+    "September {0}",
+    "September {0}",
+    "Вересень {0}"
+  ],
+  "Октябрь {0}": [
+    "October {0}",
+    "Oktober {0}",
+    "Жовтень {0}"
+  ],
+  "Ноябрь {0}": [
+    "November {0}",
+    "November {0}",
+    "Листопад {0}"
+  ],
+  "Декабрь {0}": [
+    "December {0}",
+    "Dezember {0}",
+    "Грудень {0}"
+  ],
+  "Универсальный текстовый протокол: стабильный вес, единицы измерения и статус устройства": [
+    "Universal text protocol: stable weight, units and device status",
+    "Universelles Textprotokoll: stabiles Gewicht, Einheiten und Gerätestatus",
+    "Універсальний текстовий протокол: стабільна вага, одиниці вимірювання та стан пристрою"
+  ],
+  "Parses first number found in output": [
+    "Parses first number found in output",
+    "Liest die erste Zahl in der Ausgabe",
+    "Зчитує перше число у вихідних даних"
+  ],
+  "Generates random weight and toggles stability": [
+    "Generates random weight and toggles stability",
+    "Erzeugt zufälliges Gewicht und wechselt den Stabilitätsstatus",
+    "Генерує випадкову вагу та змінює стан стабільності"
+  ],
+  "Standard CAS protocol (AD-1, ER, SW models)": [
+    "Standard CAS protocol (AD-1, ER, SW models)",
+    "CAS-Standardprotokoll (Modelle AD-1, ER, SW)",
+    "Стандартний протокол CAS (моделі AD-1, ER, SW)"
+  ],
+  "Standard Interface Command Set": [
+    "Standard Interface Command Set",
+    "Standard-Befehlssatz der Schnittstelle",
+    "Стандартний набір команд інтерфейсу"
+  ],
+  "Binary protocol (100) for Massa-K terminals": [
+    "Binary protocol (100) for Massa-K terminals",
+    "Binärprotokoll (100) für Massa-K-Terminals",
+    "Бінарний протокол (100) для терміналів Massa-K"
+  ],
+  "ASCII protocol for Massa-K terminals": [
+    "ASCII protocol for Massa-K terminals",
+    "ASCII-Protokoll für Massa-K-Terminals",
+    "ASCII-протокол для терміналів Massa-K"
+  ],
+  "Protocol 3 (Request 0x05) for AB/AB-series scales": [
+    "Protocol 3 (Request 0x05) for AB/AB-series scales",
+    "Protokoll 3 (Abfrage 0x05) für Waagen der AB-Serie",
+    "Протокол 3 (запит 0x05) для ваг серії AB"
+  ],
+  "Protocol using P command, common in A/TB series": [
+    "Protocol using P command, common in A/TB series",
+    "Protokoll mit P-Befehl, üblich in der A/TB-Serie",
+    "Протокол із командою P, поширений у серії A/TB"
+  ],
+  "Simple text protocol": [
+    "Simple text protocol",
+    "Einfaches Textprotokoll",
+    "Простий текстовий протокол"
+  ],
+  "Standard POS2 protocol": [
+    "Standard POS2 protocol",
+    "POS2-Standardprotokoll",
+    "Стандартний протокол POS2"
+  ],
+  "Universal Mertech Protocol": [
+    "Universal Mertech Protocol",
+    "Universelles Mertech-Protokoll",
+    "Універсальний протокол Mertech"
+  ]
+}

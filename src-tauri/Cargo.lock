@@ -3726,6 +3726,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-dialog",
  "tauri-plugin-updater",
+ "tauri-winres",
  "time",
  "uuid",
  "windows-sys 0.61.2",

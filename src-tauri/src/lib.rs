@@ -242,3 +242,6 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("failed to run LabelPilot Tauri runtime");
 }
+
+#[cfg(feature = "slint-ui")]
+pub mod ui_text;

@@ -75,6 +75,61 @@ pub fn initialize_settings_models(ui: &WeighingPrototype) {
     });
 }
 
+/// Bind the same preferences controller in production and in the UI probe.
+/// A failed save leaves the current language/theme unchanged and reports the error.
+pub fn initialize_ui_preferences(ui: &WeighingPrototype, directory: Option<PathBuf>) {
+    ui.global::<UiText>().on_translate(|language, source| {
+        crate::ui_text::translate(language.as_str(), source.as_str()).into()
+    });
+    let state = directory.map(|path| Rc::new(PersistedState::for_data_dir(path)));
+    if let Some(state) = state.as_ref() {
+        match state.load_ui_preferences() {
+            Ok(value) => {
+                ui.set_ui_language(normalized_ui_language(value["language"].as_str()).into());
+                ui.set_dark_theme(value["theme"].as_str() == Some("dark"));
+            }
+            Err(error) => ui.set_preferences_error(format!("Preferences: {error}").into()),
+        }
+    }
+    ui.on_change_ui_language({
+        let weak = ui.as_weak();
+        let state = state.clone();
+        move |language| {
+            let Some(ui) = weak.upgrade() else { return };
+            if !matches!(language.as_str(), "ru" | "en" | "de" | "uk") { return; }
+            if persist_ui_preferences(&ui, state.as_deref(), language.as_str(), ui.get_dark_theme()) {
+                ui.set_ui_language(language);
+            }
+        }
+    });
+    ui.on_change_ui_theme({
+        let weak = ui.as_weak();
+        move |dark| {
+            let Some(ui) = weak.upgrade() else { return };
+            if persist_ui_preferences(&ui, state.as_deref(), ui.get_ui_language().as_str(), dark) {
+                ui.set_dark_theme(dark);
+            }
+        }
+    });
+}
+
+fn persist_ui_preferences(ui: &WeighingPrototype, state: Option<&PersistedState>, language: &str, dark: bool) -> bool {
+    if let Some(state) = state {
+        if let Err(error) = state.save_ui_preferences(language, dark) {
+            let prefix = match ui.get_ui_language().as_str() {
+                "en" => "Settings were not saved",
+                "de" => "Einstellungen wurden nicht gespeichert",
+                "uk" => "Налаштування не збережено",
+                _ => "Настройки не сохранены",
+            };
+            ui.set_preferences_error(format!("{prefix}: {error}").into());
+            return false;
+        }
+    }
+    ui.set_preferences_error("".into());
+    true
+}
+
 fn settings_draft_open(dirty: bool, keyboard_open: bool) -> bool {
     dirty || keyboard_open
 }
@@ -1489,7 +1544,7 @@ fn apply_calendar(ui: &WeighingPrototype, visible_month: time::Date) {
     let today = time::OffsetDateTime::now_utc().date();
     let selected = parse_display_date(ui.get_labeling_date().as_str()).unwrap_or(today);
     ui.set_calendar_month_label(
-        calendar_month_label(visible_month, ui.get_ui_language().as_str()).into(),
+        calendar_month_label(visible_month, "ru").into(),
     );
     ui.set_calendar_days(ModelRc::new(VecModel::from(calendar_day_rows(
         visible_month,
@@ -2571,6 +2626,7 @@ pub fn run() -> Result<(), String> {
     let catalog_product_store = Rc::new(RefCell::new(Vec::<NativeUiProduct>::new()));
     let selected_catalog_product = Rc::new(Cell::new(None::<i64>));
 
+    let mut preferences_state = None;
     let active_printer_config;
     let native_updater;
     let mut auto_print_enabled;
@@ -2588,6 +2644,7 @@ pub fn run() -> Result<(), String> {
         } else {
             persisted.load_scale_config()
         };
+        preferences_state = Some(persisted.data_dir().to_path_buf());
         let persisted_printer_config = persisted.load_printer_config();
         ui.set_ui_language(
             normalized_ui_language(
@@ -2847,6 +2904,7 @@ pub fn run() -> Result<(), String> {
         }
     });
 
+    initialize_ui_preferences(&ui, preferences_state);
     initialize_settings_models(&ui);
     ui.on_edit_touch_text(|current, key, uppercase| {
         edit_touch_text(current.as_str(), key.as_str(), uppercase).into()

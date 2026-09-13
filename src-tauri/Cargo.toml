@@ -10,7 +10,7 @@ default = ["desktop"]
 desktop = ["native-update", "dep:tauri", "dep:tauri-plugin-dialog", "dep:tauri-plugin-updater", "dep:tauri-build"]
 native-ui = []
 native-update = []
-slint-ui = ["native-ui", "native-update", "dep:slint", "dep:slint-build", "dep:ab_glyph", "dep:rustybuzz", "dep:image", "dep:rxing"]
+slint-ui = ["native-ui", "native-update", "dep:slint", "dep:slint-build", "dep:tauri-winres", "dep:ab_glyph", "dep:rustybuzz", "dep:image", "dep:rxing"]
 
 [lib]
 name = "labelpilot_tauri_lib"
@@ -39,6 +39,7 @@ name = "settings_ui_probe"
 required-features = ["slint-ui"]
 
 [build-dependencies]
+tauri-winres = { version = "0.3.6", optional = true }
 tauri-build = { version = "2.6.3", features = [], optional = true }
 slint-build = { version = "1.17.1", optional = true }
 

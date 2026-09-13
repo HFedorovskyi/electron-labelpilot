@@ -135,6 +135,37 @@ impl PersistedState {
         Ok(())
     }
 
+    /// UI preferences are separate from printer configuration: changing appearance
+    /// must neither reconfigure hardware nor overwrite an in-flight settings save.
+    pub fn load_ui_preferences(&self) -> Result<Value, String> {
+        if let Some(value) = read_json(&self.data_dir.join("ui-preferences.json"))? {
+            let language = value.get("language").and_then(Value::as_str);
+            let theme = value.get("theme").and_then(Value::as_str);
+            if !matches!(language, Some("ru" | "en" | "de" | "uk"))
+                || !matches!(theme, Some("light" | "dark"))
+            {
+                return Err("invalid UI preferences".to_owned());
+            }
+            return Ok(value);
+        }
+        let legacy = self.load_printer_config();
+        let language = match legacy.get("language").and_then(Value::as_str) {
+            Some(value @ ("en" | "de" | "uk")) => value,
+            _ => "ru",
+        };
+        Ok(json!({"language": language, "theme": "light"}))
+    }
+
+    pub fn save_ui_preferences(&self, language: &str, dark: bool) -> Result<(), String> {
+        if !matches!(language, "ru" | "en" | "de" | "uk") {
+            return Err("unsupported interface language".to_owned());
+        }
+        atomic_write_json(
+            &self.data_dir.join("ui-preferences.json"),
+            &json!({"language": language, "theme": if dark { "dark" } else { "light" }}),
+        )
+    }
+
     pub fn load_identity(&self) -> Option<Value> {
         if let Ok(Some(identity)) = read_database_identity(&self.data_dir.join(DATABASE_FILE)) {
             return Some(identity);
@@ -719,6 +750,40 @@ mod tests {
         assert_eq!(identity["station_uuid"], "database-station");
         assert_eq!(identity["station_number"], "07");
         assert_eq!(identity["station_name"], "Database");
+    }
+
+    #[test]
+    fn ui_preferences_survive_restart_without_changing_printers() {
+        let directory = TestDirectory::new("ui-preferences");
+        let state = PersistedState::for_data_dir(directory.0.clone());
+        let mut printer = default_printer();
+        printer["language"] = json!("de");
+        state.save_printer_config(printer).unwrap();
+        let before = fs::read(directory.0.join(PRINTER_FILE)).unwrap();
+        assert_eq!(state.load_ui_preferences().unwrap()["language"], "de");
+        for language in ["ru", "en", "de", "uk"] {
+            for dark in [false, true] {
+                state.save_ui_preferences(language, dark).unwrap();
+                let restarted = PersistedState::for_data_dir(directory.0.clone());
+                assert_eq!(restarted.load_ui_preferences().unwrap(),
+                    json!({"language":language, "theme": if dark {"dark"} else {"light"}}));
+                assert_eq!(fs::read(directory.0.join(PRINTER_FILE)).unwrap(), before);
+            }
+        }
+        let before = fs::read(directory.0.join("ui-preferences.json")).unwrap();
+        assert!(state.save_ui_preferences("invalid", true).is_err());
+        assert_eq!(fs::read(directory.0.join("ui-preferences.json")).unwrap(), before);
+    }
+
+    #[test]
+    fn ui_preferences_surface_read_and_write_failures() {
+        let directory = TestDirectory::new("ui-preferences-errors");
+        let state = PersistedState::for_data_dir(directory.0.clone());
+        fs::write(directory.0.join("ui-preferences.json"), b"{broken").unwrap();
+        assert!(state.load_ui_preferences().is_err());
+        let file = directory.0.join("not-a-directory");
+        fs::write(&file, b"occupied").unwrap();
+        assert!(PersistedState::for_data_dir(file).save_ui_preferences("en", true).is_err());
     }
 
     #[test]

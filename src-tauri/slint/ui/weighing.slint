@@ -1,40 +1,15 @@
-import { LineEdit, ScrollView } from "std-widgets.slint";
+export global UiText {
+    in-out property <string> language: "ru";
+    pure callback translate(string, string) -> string;
+    translate(language, source) => { source }
+}
+
+import { Palette } from "palette.slint";
+import { LineEdit, ScrollView, Palette as WidgetPalette } from "std-widgets.slint";
 import { SettingsAction, SettingsTab, SettingsCard, SettingsField, SettingsSelect, SettingsToggle, SettingsNotice } from "settings-controls.slint";
 import "../assets/fonts/Inter-Regular.ttf";
 import "../assets/fonts/Inter-Bold.ttf";
 
-global Palette {
-    out property <color> n50: #fafafa;
-    out property <color> n100: #f5f5f5;
-    out property <color> n200: #e5e5e5;
-    out property <color> n300: #d4d4d4;
-    out property <color> n400: #a3a3a3;
-    out property <color> n500: #737373;
-    out property <color> n600: #525252;
-    out property <color> n700: #404040;
-    out property <color> n800: #262626;
-    out property <color> n900: #171717;
-    out property <color> e50: #ecfdf5;
-    out property <color> e100: #d1fae5;
-    out property <color> e200: #a7f3d0;
-    out property <color> e300: #6ee7b7;
-    out property <color> e400: #34d399;
-    out property <color> e500: #10b981;
-    out property <color> e600: #059669;
-    out property <color> e700: #047857;
-    out property <color> a50: #fffbeb;
-    out property <color> a300: #fcd34d;
-    out property <color> a500: #f59e0b;
-    out property <color> a600: #d97706;
-    out property <color> a700: #b45309;
-    out property <color> r50: #fef2f2;
-    out property <color> r100: #fee2e2;
-    out property <color> r300: #fca5a5;
-    out property <color> r400: #f87171;
-    out property <color> r500: #ef4444;
-    out property <color> r600: #dc2626;
-    out property <color> r700: #b91c1c;
-}
 
 component AppIcon inherits Rectangle {
     in property <image> icon;
@@ -115,7 +90,7 @@ component SidebarItem inherits Rectangle {
     border-color: root.danger ? Palette.r300 : #10b98133;
     background: root.danger
         ? touch.pressed ? Palette.r300 : touch.has-hover ? Palette.r100 : Palette.r50
-        : root.active ? #d1fae580 : touch.has-hover ? Palette.n100 : transparent;
+        : root.active ? Palette.e100 : touch.has-hover ? Palette.n100 : transparent;
     drop-shadow-color: root.danger ? #dc262622 : transparent;
     drop-shadow-blur: root.danger ? 10px : 0px;
     drop-shadow-offset-y: root.danger ? 2px : 0px;
@@ -159,7 +134,7 @@ component SidebarToggleButton inherits Rectangle {
     border-radius: 12px;
     border-width: 1px;
     border-color: touch.has-hover ? Palette.e300 : Palette.n200;
-    background: touch.pressed ? Palette.e200 : touch.has-hover ? Palette.e50 : white;
+    background: touch.pressed ? Palette.e200 : touch.has-hover ? Palette.e50 : Palette.surface;
 
     AppIcon {
         width: 20px;
@@ -177,7 +152,7 @@ component MainButton inherits Rectangle {
     in property <image> icon;
     in property <color> normal-color: Palette.e600;
     in property <color> hover-color: Palette.e500;
-    in property <color> pressed-color: Palette.e700;
+    in property <color> pressed-color: Palette.solid-e700;
     in property <bool> enabled: true;
     in property <length> label-font-size: 20px;
     callback clicked;
@@ -214,7 +189,7 @@ component TileButton inherits Rectangle {
     border-radius: 16px;
     border-width: 1px;
     border-color: root.outline;
-    background: !root.enabled ? #f5f5f580 : touch.pressed ? root.pressed-color : touch.has-hover ? root.hover-color : root.normal-color;
+    background: !root.enabled ? Palette.n100 : touch.pressed ? root.pressed-color : touch.has-hover ? root.hover-color : root.normal-color;
     drop-shadow-color: #0000000d;
     drop-shadow-blur: 5px;
     drop-shadow-offset-y: 1px;
@@ -344,7 +319,7 @@ component StatEditorRow inherits Rectangle {
                     border-radius: 8px;
                     border-width: 1px;
                     border-color: touch.has-hover ? Palette.e400 : Palette.n300;
-                    background: touch.has-hover ? Palette.e100 : white;
+                    background: touch.has-hover ? Palette.e100 : Palette.surface;
                     AppIcon { width: 16px; height: 16px; x: 9px; y: 9px; icon: root.icon; icon-color: Palette.e600; }
                 }
             }
@@ -378,7 +353,7 @@ component KeyboardKey inherits Rectangle {
     border-radius: root.roomy ? 14px : root.compact ? 9px : 11px;
     border-width: 1px;
     border-color: root.selected || root.primary ? Palette.e500 : Palette.n300;
-    background: touch.pressed ? Palette.e200 : root.primary ? Palette.e600 : root.selected ? Palette.e100 : touch.has-hover ? Palette.e50 : white;
+    background: touch.pressed ? Palette.e200 : root.primary ? Palette.e600 : root.selected ? Palette.e100 : touch.has-hover ? Palette.e50 : Palette.surface;
     Text {
         text: root.text;
         color: root.primary ? white : root.selected ? Palette.e700 : Palette.n800;
@@ -396,9 +371,9 @@ component TouchKeyboard inherits Rectangle {
     in-out property <bool> uppercase: false;
     in property <bool> compact: false;
     in property <bool> roomy: false;
-    in property <string> space-label: "ПРОБЕЛ";
-    in property <string> clear-label: "ОЧИСТИТЬ";
-    in property <string> done-label: "ГОТОВО";
+    in property <string> space-label: UiText.translate(UiText.language, "ПРОБЕЛ");
+    in property <string> clear-label: UiText.translate(UiText.language, "ОЧИСТИТЬ");
+    in property <string> done-label: UiText.translate(UiText.language, "ГОТОВО");
     callback key-pressed(string, bool);
     callback backspace;
     callback clear;
@@ -490,7 +465,7 @@ component TouchScrollStepButton inherits Rectangle {
     border-radius: 14px;
     border-width: 1px;
     border-color: root.enabled ? Palette.e300 : Palette.n200;
-    background: !root.enabled ? Palette.n100 : touch.pressed ? Palette.e200 : touch.has-hover ? Palette.e100 : white;
+    background: !root.enabled ? Palette.n100 : touch.pressed ? Palette.e200 : touch.has-hover ? Palette.e100 : Palette.surface;
     Text {
         text: root.glyph;
         color: root.enabled ? Palette.e700 : Palette.n400;
@@ -514,7 +489,7 @@ component CompactActionButton inherits Rectangle {
     border-radius: 14px;
     border-width: 1px;
     border-color: root.danger ? Palette.r300 : root.primary ? Palette.e500 : Palette.n300;
-    background: !root.enabled ? Palette.n100 : touch.pressed ? (root.danger ? Palette.r300 : Palette.e200) : touch.has-hover ? (root.danger ? Palette.r100 : Palette.e50) : root.primary ? Palette.e600 : white;
+    background: !root.enabled ? Palette.n100 : touch.pressed ? (root.danger ? Palette.r300 : Palette.e200) : touch.has-hover ? (root.danger ? Palette.r100 : Palette.e50) : root.primary ? Palette.e600 : Palette.surface;
     Text {
         text: root.text;
         color: !root.enabled ? Palette.n400 : root.primary ? white : root.danger ? Palette.r600 : Palette.e700;
@@ -537,7 +512,7 @@ component SettingsChoiceButton inherits Rectangle {
     border-radius: 14px;
     border-width: 1px;
     border-color: root.selected ? Palette.e500 : Palette.n300;
-    background: !root.enabled ? Palette.n100 : touch.pressed ? Palette.e200 : root.selected ? Palette.e50 : touch.has-hover ? Palette.n100 : white;
+    background: !root.enabled ? Palette.n100 : touch.pressed ? Palette.e200 : root.selected ? Palette.e50 : touch.has-hover ? Palette.n100 : Palette.surface;
     VerticalLayout {
         alignment: center;
         spacing: 1px;
@@ -562,7 +537,7 @@ component SettingsSectionNav inherits Rectangle {
     callback open-queue;
     callback open-scales;
     callback open-diagnostics;
-    height: 52px; border-radius: 14px; border-width: 1px; border-color: Palette.n200; background: white;
+    height: 52px; border-radius: 14px; border-width: 1px; border-color: Palette.n200; background: Palette.surface;
     HorizontalLayout { padding: 4px; spacing: 4px;
         SettingsTab { horizontal-stretch: 1; text: root.printers-label; selected: root.active-page == 3; clicked => { root.open-printers(); } }
         SettingsTab { horizontal-stretch: 1; text: root.scales-label; selected: root.active-page == 4; clicked => { root.open-scales(); } }
@@ -583,7 +558,7 @@ component ProductionJobMetricCard inherits Rectangle {
     border-radius: 16px;
     border-width: 1px;
     border-color: Palette.n200;
-    background: white;
+    background: Palette.surface;
 
     VerticalLayout {
         padding: root.compact ? 8px : 10px;
@@ -837,7 +812,7 @@ component CalendarDayButton inherits Rectangle {
     border-radius: root.compact ? 10px : 12px;
     border-width: root.day.today && !root.day.selected ? 2px : root.day.selected ? 0px : 1px;
     border-color: root.day.today ? Palette.e500 : Palette.n200;
-    background: root.day.selected ? Palette.e600 : touch.pressed ? Palette.e200 : touch.has-hover ? Palette.e50 : white;
+    background: root.day.selected ? Palette.e600 : touch.pressed ? Palette.e200 : touch.has-hover ? Palette.e50 : Palette.surface;
 
     Text {
         text: root.day.label;
@@ -859,7 +834,7 @@ component CalendarNavButton inherits Rectangle {
     border-radius: 14px;
     border-width: 1px;
     border-color: Palette.n300;
-    background: touch.pressed ? Palette.e200 : touch.has-hover ? Palette.e50 : white;
+    background: touch.pressed ? Palette.e200 : touch.has-hover ? Palette.e50 : Palette.surface;
     Text {
         text: root.text;
         color: Palette.e700;
@@ -873,12 +848,30 @@ component CalendarNavButton inherits Rectangle {
 
 export component WeighingPrototype inherits Window {
     title: "LabelPilot";
+    icon: @image-url("../assets/app-icon.png");
     preferred-width: 1366px;
     preferred-height: 768px;
     min-width: 1024px;
     min-height: 600px;
     in-out property <bool> kiosk-mode: true;
-    in-out property <string> ui-language: "ru";
+    in-out property <string> ui-language <=> UiText.language;
+
+    in-out property <bool> dark-theme <=> Palette.dark;
+    in-out property <bool> preferences-visible: false;
+    in-out property <string> preferences-error: "";
+    callback change-ui-language(string);
+    callback change-ui-theme(bool);
+    callback open-preferences;
+    open-preferences => { root.preferences-error = ""; root.preferences-visible = true; }
+    init => { WidgetPalette.color-scheme = root.dark-theme ? ColorScheme.dark : ColorScheme.light; }
+    changed dark-theme => { WidgetPalette.color-scheme = root.dark-theme ? ColorScheme.dark : ColorScheme.light; }
+    property <string> preferences-title: root.ui-language == "en" ? "Language and theme" : root.ui-language == "de" ? "Sprache und Design" : root.ui-language == "uk" ? "Мова й тема" : "Язык и тема";
+    property <string> preferences-language-label: root.ui-language == "en" ? "Interface language" : root.ui-language == "de" ? "Sprache der Oberfläche" : root.ui-language == "uk" ? "Мова інтерфейсу" : "Язык интерфейса";
+    property <string> preferences-theme-label: root.ui-language == "en" ? "Appearance" : root.ui-language == "de" ? "Darstellung" : root.ui-language == "uk" ? "Оформлення" : "Оформление";
+    property <string> preferences-light-label: root.ui-language == "en" ? "Light" : root.ui-language == "de" ? "Hell" : root.ui-language == "uk" ? "Світла" : "Светлая";
+    property <string> preferences-dark-label: root.ui-language == "en" ? "Dark" : root.ui-language == "de" ? "Dunkel" : root.ui-language == "uk" ? "Темна" : "Тёмная";
+    property <string> preferences-hint: root.ui-language == "en" ? "Changes apply immediately and are saved on this station." : root.ui-language == "de" ? "Änderungen werden sofort angewendet und auf dieser Station gespeichert." : root.ui-language == "uk" ? "Зміни застосовуються одразу й зберігаються на цій станції." : "Изменения применяются сразу и сохраняются на этой станции.";
+
     property <string> exit-label: root.ui-language == "en" ? "Exit" : root.ui-language == "de" ? "Beenden" : root.ui-language == "uk" ? "Вийти" : "Выйти";
     property <string> keyboard-label: root.ui-language == "en" ? "KEYBOARD" : root.ui-language == "de" ? "TASTATUR" : root.ui-language == "uk" ? "КЛАВІАТУРА" : "КЛАВИАТУРА";
     property <string> hide-keyboard-label: root.ui-language == "en" ? "HIDE" : root.ui-language == "de" ? "AUSBLENDEN" : root.ui-language == "uk" ? "СХОВАТИ" : "СКРЫТЬ";
@@ -1026,7 +1019,7 @@ export component WeighingPrototype inherits Window {
     in-out property <string> last-print: "—";
     in-out property <[ProductRow]> products: [];
     in-out property <int> selected-product-id: 0;
-    in-out property <string> product-name: "Товары не загружены";
+    in-out property <string> product-name: UiText.translate(UiText.language, "Товары не загружены");
     in-out property <string> product-article: "";
     in-out property <int> expiration-days: 0;
     in-out property <float> product-tare-kg: 0;
@@ -1043,7 +1036,7 @@ export component WeighingPrototype inherits Window {
     property <string> product-search-label: root.ui-language == "en" ? "SEARCH" : root.ui-language == "de" ? "SUCHEN" : root.ui-language == "uk" ? "ЗНАЙТИ" : "НАЙТИ";
     property <string> product-empty-label: root.ui-language == "en" ? "No products found" : root.ui-language == "de" ? "Keine Produkte gefunden" : root.ui-language == "uk" ? "Товари не знайдено" : "Товары не найдены";
     in-out property <string> station-number: "--";
-    in-out property <string> operator-name: "Оператор не выбран";
+    in-out property <string> operator-name: UiText.translate(UiText.language, "Оператор не выбран");
     in-out property <[OperatorRow]> operators: [];
     in-out property <bool> operator-login-visible: false;
     in-out property <bool> operator-bypass-active: false;
@@ -1054,11 +1047,11 @@ export component WeighingPrototype inherits Window {
     property <int> operator-pin-length: root.operator-pin.character-count;
     in-out property <int> selected-operator-index: -1;
     in-out property <string> selected-operator-name: "";
-    in-out property <string> server-status: "Локальные данные";
+    in-out property <string> server-status: UiText.translate(UiText.language, "Локальные данные");
     in-out property <bool> server-online: false;
-    in-out property <string> scale-status: "Весы: отключены";
+    in-out property <string> scale-status: UiText.translate(UiText.language, "Весы: отключены");
     in-out property <bool> scale-online: false;
-    in-out property <string> printer-status: "Принтер: не настроен";
+    in-out property <string> printer-status: UiText.translate(UiText.language, "Принтер: не настроен");
     in-out property <bool> printer-ready: false;
     in-out property <bool> auto-print-enabled: false;
     in-out property <string> auto-print-status: "";
@@ -1071,17 +1064,19 @@ export component WeighingPrototype inherits Window {
     in-out property <int> queue-waiting: 0;
     in-out property <int> queue-accepted: 0;
     in-out property <int> queue-problems: 0;
+    out property <string> localized-queue-status: UiText.translate(UiText.language, root.queue-status);
+    out property <string> localized-alert-text: UiText.translate(UiText.language, root.alert-text);
     in-out property <int> queue-total: 0;
     in-out property <bool> queue-busy: false;
-    in-out property <string> queue-status: "Очередь ещё не загружена";
+    in-out property <string> queue-status: UiText.translate(UiText.language, "Очередь ещё не загружена");
     in-out property <[PrinterDiagnosticRow]> printer-diagnostics: [];
     in-out property <bool> diagnostics-busy: false;
-    in-out property <string> diagnostics-status: "Проверка ещё не запускалась";
+    in-out property <string> diagnostics-status: UiText.translate(UiText.language, "Проверка ещё не запускалась");
     in-out property <[PrinterSettingsRoleRow]> printer-settings-roles: [];
     in-out property <[PrinterChoiceRow]> settings-system-printers: [];
     in-out property <[PrinterChoiceRow]> settings-serial-ports: [];
     in-out property <string> settings-selected-role: "packPrinter";
-    in-out property <string> settings-selected-role-label: "Этикетка упаковки";
+    in-out property <string> settings-selected-role-label: UiText.translate(UiText.language, "Этикетка упаковки");
     in-out property <string> settings-selected-description: "";
     in-out property <bool> settings-active: false;
     in-out property <string> settings-name: "Pack Printer";
@@ -1108,7 +1103,7 @@ export component WeighingPrototype inherits Window {
     in-out property <bool> settings-dirty: false;
     in-out property <bool> settings-busy: false;
     in-out property <bool> settings-advanced-visible: false;
-    in-out property <string> settings-status: "Настройки ещё не загружены";
+    in-out property <string> settings-status: UiText.translate(UiText.language, "Настройки ещё не загружены");
     in-out property <string> settings-detection: "";
     in-out property <bool> settings-language-help-visible: false;
     in-out property <bool> settings-compatibility-help-visible: false;
@@ -1171,8 +1166,8 @@ export component WeighingPrototype inherits Window {
     in-out property <string> scale-settings-connection: "simulator";
     in-out property <string> scale-settings-protocol: "simulator";
     in-out property <string> scale-settings-protocol-name: "Simulator";
-    in-out property <string> scale-settings-protocol-description: "Встроенные виртуальные весы";
-    in-out property <string> scale-settings-endpoint: "Встроенный симулятор";
+    in-out property <string> scale-settings-protocol-description: UiText.translate(UiText.language, "Встроенные виртуальные весы");
+    in-out property <string> scale-settings-endpoint: UiText.translate(UiText.language, "Встроенный симулятор");
     in-out property <string> scale-settings-serial-path: "";
     in-out property <string> scale-settings-baud-rate: "9600";
     in-out property <string> scale-settings-host: "";
@@ -1182,7 +1177,7 @@ export component WeighingPrototype inherits Window {
     in-out property <string> scale-settings-runtime-status: "disconnected";
     in-out property <bool> scale-settings-dirty: false;
     in-out property <bool> scale-settings-busy: false;
-    in-out property <string> scale-settings-status: "Настройки весов ещё не загружены";
+    in-out property <string> scale-settings-status: UiText.translate(UiText.language, "Настройки весов ещё не загружены");
     in-out property <string> scale-settings-probe: "";
     in-out property <length> scale-settings-page-scroll-y: 0px;
     in-out property <length> scale-settings-serial-scroll-y: 0px;
@@ -1190,7 +1185,7 @@ export component WeighingPrototype inherits Window {
 
     in-out property <[ProductRow]> fixed-products: [];
     in-out property <int> fixed-selected-product-id: 0;
-    in-out property <string> fixed-product-name: "Товары фиксированного веса не загружены";
+    in-out property <string> fixed-product-name: UiText.translate(UiText.language, "Товары фиксированного веса не загружены");
     in-out property <string> fixed-product-article: "";
     in-out property <string> fixed-nominal-weight: "0.000";
     in-out property <string> fixed-min-weight: "0";
@@ -1201,7 +1196,7 @@ export component WeighingPrototype inherits Window {
     in-out property <bool> fixed-busy: false;
     in-out property <int> fixed-progress: 0;
     in-out property <int> fixed-progress-total: 0;
-    in-out property <string> fixed-status: "Выберите товар фиксированного веса";
+    in-out property <string> fixed-status: UiText.translate(UiText.language, "Выберите товар фиксированного веса");
     in-out property <bool> fixed-product-modal-visible: false;
     in-out property <string> fixed-product-search: "";
     in-out property <length> fixed-product-scroll-y: 0px;
@@ -1246,7 +1241,7 @@ export component WeighingPrototype inherits Window {
     in-out property <bool> production-job-marking-visible: false;
     in-out property <int> selected-production-job-id: 0;
     in-out property <int> selected-production-product-id: 0;
-    in-out property <string> selected-production-job-product: "Выберите задание";
+    in-out property <string> selected-production-job-product: UiText.translate(UiText.language, "Выберите задание");
     in-out property <string> selected-production-job-article: "";
     in-out property <string> selected-production-job-quantity: "0";
     in-out property <string> selected-production-job-printed: "0";
@@ -1260,7 +1255,7 @@ export component WeighingPrototype inherits Window {
     in-out property <string> selected-production-product-weight: "0.000";
     in-out property <bool> production-job-weight-valid: false;
     in-out property <bool> production-jobs-busy: false;
-    in-out property <string> production-jobs-status: "Задания ещё не загружены";
+    in-out property <string> production-jobs-status: UiText.translate(UiText.language, "Задания ещё не загружены");
     in-out property <length> production-jobs-scroll-y: 0px;
     property <string> jobs-page-title: root.ui-language == "en" ? "Print tasks" : root.ui-language == "de" ? "Druckaufträge" : root.ui-language == "uk" ? "Завдання на друк" : "Задания на печать";
     property <string> jobs-marking-title: root.ui-language == "en" ? "Task marking" : root.ui-language == "de" ? "Auftragskennzeichnung" : root.ui-language == "uk" ? "Маркування за завданням" : "Маркировка по заданию";
@@ -1359,27 +1354,27 @@ export component WeighingPrototype inherits Window {
     in-out property <length> catalog-list-scroll-y: 0px;
     in-out property <length> catalog-detail-scroll-y: 0px;
     in-out property <string> catalog-status: "";
-    in-out property <string> catalog-name: "Выберите товар";
+    in-out property <string> catalog-name: UiText.translate(UiText.language, "Выберите товар");
     in-out property <string> catalog-article: "—";
     in-out property <string> catalog-expiration: "—";
     in-out property <string> catalog-mode: "Весовой";
     in-out property <string> catalog-fixed-weight: "—";
-    in-out property <string> catalog-portion-container: "Не назначена";
-    in-out property <string> catalog-portion-tare: "0 г";
-    in-out property <string> catalog-box-container: "Не назначена";
-    in-out property <string> catalog-box-tare: "0 г";
+    in-out property <string> catalog-portion-container: UiText.translate(UiText.language, "Не назначена");
+    in-out property <string> catalog-portion-tare: UiText.translate(UiText.language, "0 г");
+    in-out property <string> catalog-box-container: UiText.translate(UiText.language, "Не назначена");
+    in-out property <string> catalog-box-tare: UiText.translate(UiText.language, "0 г");
     in-out property <string> catalog-box-limit: "—";
-    in-out property <string> catalog-pack-label: "Не назначен";
-    in-out property <string> catalog-box-label: "Не назначен";
-    in-out property <string> catalog-pallet-label: "Не назначен";
-    in-out property <string> catalog-extra: "Нет дополнительных данных";
+    in-out property <string> catalog-pack-label: UiText.translate(UiText.language, "Не назначен");
+    in-out property <string> catalog-box-label: UiText.translate(UiText.language, "Не назначен");
+    in-out property <string> catalog-pallet-label: UiText.translate(UiText.language, "Не назначен");
+    in-out property <string> catalog-extra: UiText.translate(UiText.language, "Нет дополнительных данных");
 
     in-out property <bool> license-busy: false;
-    in-out property <string> license-status: "Статус ещё не проверен";
-    in-out property <string> license-station-name: "Станция не настроена";
+    in-out property <string> license-status: UiText.translate(UiText.language, "Статус ещё не проверен");
+    in-out property <string> license-station-name: UiText.translate(UiText.language, "Станция не настроена");
     in-out property <string> license-station-uuid: "—";
     in-out property <string> license-station-number: "—";
-    in-out property <string> license-last-sync: "Нет синхронизации";
+    in-out property <string> license-last-sync: UiText.translate(UiText.language, "Нет синхронизации");
     in-out property <string> license-server-address: "";
     in-out property <bool> license-server-configured: false;
     in-out property <bool> license-server-online: false;
@@ -1396,15 +1391,15 @@ export component WeighingPrototype inherits Window {
     in-out property <string> license-expires: "—";
     in-out property <string> license-id: "—";
     in-out property <string> license-stations: "—";
-    in-out property <string> license-features: "Функции не получены";
-    in-out property <string> license-signature: "Не проверена";
+    in-out property <string> license-features: UiText.translate(UiText.language, "Функции не получены");
+    in-out property <string> license-signature: UiText.translate(UiText.language, "Не проверена");
     in-out property <string> license-machine: "—";
     in-out property <bool> update-busy: false;
     in-out property <string> update-state: "idle";
-    in-out property <string> update-status: "Готово к проверке обновлений";
+    in-out property <string> update-status: UiText.translate(UiText.language, "Готово к проверке обновлений");
     in-out property <string> update-current-version: "2.0.4";
     in-out property <string> update-available-version: "—";
-    in-out property <string> update-notes: "Канал обновлений ещё не проверен";
+    in-out property <string> update-notes: UiText.translate(UiText.language, "Канал обновлений ещё не проверен");
     in-out property <string> update-size: "—";
     in-out property <int> update-progress: 0;
     in-out property <bool> update-available: false;
@@ -1677,7 +1672,7 @@ export component WeighingPrototype inherits Window {
 
         Rectangle {
             width: root.sidebar-width;
-            background: #ffffffee;
+            background: Palette.surface;
             border-width: 1px;
             border-color: Palette.n200;
 
@@ -1749,28 +1744,28 @@ export component WeighingPrototype inherits Window {
                     VerticalLayout {
                         spacing: root.short ? 4px : 8px;
                         SidebarItem {
-                            text: "Весовая станция";
+                            text: root.ui-language == "en" ? "Weighing station" : root.ui-language == "de" ? "Wiegestation" : root.ui-language == "uk" ? "Вагова станція" : "Весовая станция";
                             icon: @image-url("../assets/icons/scale-green.png");
                             active: root.active-page == 0;
                             collapsed: root.effective-collapsed;
                             clicked => { root.active-page = 0; }
                         }
                         SidebarItem {
-                            text: "Фиксированный вес";
+                            text: root.ui-language == "en" ? "Fixed weight" : root.ui-language == "de" ? "Festgewicht" : root.ui-language == "uk" ? "Фіксована вага" : "Фиксированный вес";
                             icon: @image-url("../assets/icons/weight.png");
                             active: root.active-page == 5;
                             collapsed: root.effective-collapsed;
                             clicked => { root.active-page = 5; root.reload-fixed-weight(); }
                         }
                         SidebarItem {
-                            text: "Задания на печать";
+                            text: root.ui-language == "en" ? "Print jobs" : root.ui-language == "de" ? "Druckaufträge" : root.ui-language == "uk" ? "Завдання друку" : "Задания на печать";
                             icon: @image-url("../assets/icons/clipboard-list.png");
                             active: root.active-page == 6;
                             collapsed: root.effective-collapsed;
                             clicked => { root.active-page = 6; root.production-job-marking-visible = false; root.production-jobs-scroll-y = 0px; root.reload-production-jobs(); }
                         }
                         SidebarItem {
-                            text: "Товары";
+                            text: root.ui-language == "en" ? "Products" : root.ui-language == "de" ? "Artikel" : root.ui-language == "uk" ? "Товари" : "Товары";
                             icon: @image-url("../assets/icons/package.png");
                             active: root.active-page == 7;
                             collapsed: root.effective-collapsed;
@@ -1782,21 +1777,21 @@ export component WeighingPrototype inherits Window {
                             }
                         }
                         SidebarItem {
-                            text: "Лицензия";
+                            text: root.ui-language == "en" ? "License" : root.ui-language == "de" ? "Lizenz" : root.ui-language == "uk" ? "Ліцензія" : "Лицензия";
                             icon: @image-url("../assets/icons/key-round.png");
                             active: root.active-page == 8;
                             collapsed: root.effective-collapsed;
                             clicked => { root.active-page = 8; root.reload-license(); }
                         }
                         SidebarItem {
-                            text: "Обновление";
+                            text: root.ui-language == "en" ? "Update" : root.ui-language == "de" ? "Aktualisierung" : root.ui-language == "uk" ? "Оновлення" : "Обновление";
                             icon: @image-url("../assets/icons/refresh-cw.png");
                             active: root.active-page == 9;
                             collapsed: root.effective-collapsed;
                             clicked => { root.active-page = 9; root.check-update(); }
                         }
                         SidebarItem {
-                            text: "Настройки";
+                            text: root.ui-language == "en" ? "Settings" : root.ui-language == "de" ? "Einstellungen" : root.ui-language == "uk" ? "Налаштування" : "Настройки";
                             icon: @image-url("../assets/icons/settings.png");
                             active: root.active-page == 1 || root.active-page == 2 || root.active-page == 3 || root.active-page == 4;
                             collapsed: root.effective-collapsed;
@@ -1805,6 +1800,12 @@ export component WeighingPrototype inherits Window {
                     }
                 }
 
+                Rectangle { height: root.short ? 5px : 8px; }
+                SettingsAction {
+                    text: root.effective-collapsed ? (root.ui-language == "en" ? "EN / ◐" : root.ui-language == "de" ? "DE / ◐" : root.ui-language == "uk" ? "UK / ◐" : "RU / ◐") : root.preferences-title;
+                    accessible-label: root.preferences-title;
+                    clicked => { root.open-preferences(); }
+                }
                 Rectangle { height: root.short ? 5px : 8px; }
                 SidebarItem {
                     text: root.exit-label;
@@ -1864,7 +1865,7 @@ export component WeighingPrototype inherits Window {
                             border-radius: 12px;
                             border-width: 1px;
                             border-color: collapsed-operator-touch.has-hover ? Palette.e300 : Palette.n200;
-                            background: collapsed-operator-touch.pressed ? Palette.e100 : collapsed-operator-touch.has-hover ? Palette.e50 : white;
+                            background: collapsed-operator-touch.pressed ? Palette.e100 : collapsed-operator-touch.has-hover ? Palette.e50 : Palette.surface;
                             HorizontalIcon {
                                 x: (parent.width - self.width) / 2;
                                 y: (parent.height - self.height) / 2;
@@ -1881,7 +1882,7 @@ export component WeighingPrototype inherits Window {
                             border-radius: 12px;
                             border-width: 1px;
                             border-color: Palette.n200;
-                            background: white;
+                            background: Palette.surface;
                             clip: true;
 
                             VerticalLayout {
@@ -1979,7 +1980,7 @@ export component WeighingPrototype inherits Window {
                                 expanded-operator-row := Rectangle {
                                     height: root.short ? 30px : 36px;
                                     horizontal-stretch: 1;
-                                    background: expanded-operator-touch.pressed ? Palette.e100 : expanded-operator-touch.has-hover ? Palette.e50 : white;
+                                    background: expanded-operator-touch.pressed ? Palette.e100 : expanded-operator-touch.has-hover ? Palette.e50 : Palette.surface;
                                     HorizontalLayout {
                                         padding-left: 10px;
                                         padding-right: 10px;
@@ -2032,7 +2033,7 @@ export component WeighingPrototype inherits Window {
                     border-radius: 16px;
                     border-width: 1px;
                     border-color: Palette.n200;
-                    background: white;
+                    background: Palette.surface;
                     drop-shadow-color: #00000012;
                     drop-shadow-blur: 8px;
                     drop-shadow-offset-y: 2px;
@@ -2053,7 +2054,7 @@ export component WeighingPrototype inherits Window {
                                 HorizontalLayout {
                                     height: root.short ? 32px : 36px;
                                     Text {
-                                        text: "Весовая станция";
+                                        text: root.ui-language == "en" ? "Weighing station" : root.ui-language == "de" ? "Wiegestation" : root.ui-language == "uk" ? "Вагова станція" : "Весовая станция";
                                         color: Palette.n900;
                                         font-size: root.compact ? 22px : 24px;
                                         font-weight: 600;
@@ -2069,7 +2070,7 @@ export component WeighingPrototype inherits Window {
                                         horizontal-stretch: 1;
                                         height: parent.height;
                                         compact: root.compact;
-                                        text: root.scale-status;
+                                        text: UiText.translate(UiText.language, root.scale-status);
                                         good: root.scale-online;
                                         icon: @image-url("../assets/icons/scale.png");
                                         show-icon: true;
@@ -2078,7 +2079,7 @@ export component WeighingPrototype inherits Window {
                                         horizontal-stretch: 1;
                                         height: parent.height;
                                         compact: root.compact;
-                                        text: root.printer-status;
+                                        text: UiText.translate(UiText.language, root.printer-status);
                                         good: root.printer-ready;
                                         icon: @image-url("../assets/icons/printer.png");
                                         show-icon: true;
@@ -2087,7 +2088,7 @@ export component WeighingPrototype inherits Window {
                                         horizontal-stretch: 1;
                                         height: parent.height;
                                         compact: root.compact;
-                                        text: root.auto-print-enabled && root.auto-print-status != "" ? root.auto-print-status : root.auto-print-enabled ? root.jobs-auto-print-on-label : root.jobs-auto-print-off-label;
+                                        text: root.auto-print-enabled && UiText.translate(UiText.language, root.auto-print-status) != "" ? UiText.translate(UiText.language, root.auto-print-status) : root.auto-print-enabled ? root.jobs-auto-print-on-label : root.jobs-auto-print-off-label;
                                         good: root.auto-print-enabled;
                                         neutral: !root.auto-print-enabled;
                                         icon: @image-url("../assets/icons/refresh-cw.png");
@@ -2100,7 +2101,7 @@ export component WeighingPrototype inherits Window {
                                 height: 84px;
                                 spacing: 8px;
                                 Text {
-                                    text: "Поиск товара";
+                                    text: UiText.translate(UiText.language, "Поиск товара");
                                     color: Palette.n400;
                                     font-size: 14px;
                                     font-weight: 500;
@@ -2149,7 +2150,7 @@ export component WeighingPrototype inherits Window {
                                     spacing: 6px;
                                     alignment: start;
                                     Text {
-                                        text: "НАИМЕНОВАНИЕ";
+                                        text: UiText.translate(UiText.language, "НАИМЕНОВАНИЕ");
                                         color: Palette.e600;
                                         font-size: 14px;
                                         font-weight: 700;
@@ -2164,7 +2165,7 @@ export component WeighingPrototype inherits Window {
                                         wrap: word-wrap;
                                     }
                                     Text {
-                                        text: "АРТИКУЛ: " + (root.product-article == "" ? "—" : root.product-article) + "     СРОК ГОДНОСТИ: " + root.expiration-days;
+                                        text: UiText.translate(UiText.language, "АРТИКУЛ: ") + (root.product-article == "" ? "—" : root.product-article) + UiText.translate(UiText.language, "     СРОК ГОДНОСТИ: ") + root.expiration-days;
                                         color: #34d39999;
                                         font-family: "Consolas";
                                         font-size: 14px;
@@ -2189,7 +2190,7 @@ export component WeighingPrototype inherits Window {
                                         alignment: center;
                                         spacing: 8px;
                                         Text {
-                                            text: "ВЕС БРУТТО";
+                                            text: UiText.translate(UiText.language, "ВЕС БРУТТО");
                                             color: Palette.n500;
                                             font-size: 12px;
                                             font-weight: 700;
@@ -2208,7 +2209,7 @@ export component WeighingPrototype inherits Window {
                                                 vertical-alignment: center;
                                             }
                                             Text {
-                                                text: "кг";
+                                                text: UiText.translate(UiText.language, "кг");
                                                 color: #10b98180;
                                                 font-size: 24px;
                                                 vertical-alignment: center;
@@ -2222,7 +2223,7 @@ export component WeighingPrototype inherits Window {
                                                 dot-color: Palette.e500;
                                             }
                                             Text {
-                                                text: root.auto-print-enabled && root.auto-print-status != "" ? root.auto-print-status : "СТАБИЛЬНО";
+                                                text: root.auto-print-enabled && UiText.translate(UiText.language, root.auto-print-status) != "" ? UiText.translate(UiText.language, root.auto-print-status) : UiText.translate(UiText.language, "СТАБИЛЬНО");
                                                 color: Palette.e600;
                                                 font-size: 12px;
                                                 font-weight: 700;
@@ -2243,7 +2244,7 @@ export component WeighingPrototype inherits Window {
                                         alignment: center;
                                         spacing: 8px;
                                         Text {
-                                            text: "ВЕС НЕТТО";
+                                            text: UiText.translate(UiText.language, "ВЕС НЕТТО");
                                             color: Palette.n500;
                                             font-size: 12px;
                                             font-weight: 700;
@@ -2262,7 +2263,7 @@ export component WeighingPrototype inherits Window {
                                                 vertical-alignment: center;
                                             }
                                             Text {
-                                                text: "кг";
+                                                text: UiText.translate(UiText.language, "кг");
                                                 color: Palette.n500;
                                                 font-size: 24px;
                                                 vertical-alignment: center;
@@ -2288,7 +2289,7 @@ export component WeighingPrototype inherits Window {
 
                             MainButton {
                                 border-radius: 16px;
-                                text: "ПЕЧАТЬ ЭТИКЕТКИ";
+                                text: UiText.translate(UiText.language, "ПЕЧАТЬ ЭТИКЕТКИ");
                                 icon: @image-url("../assets/icons/printer-white.png");
                                 clicked => { root.print-label(); }
                             }
@@ -2298,14 +2299,14 @@ export component WeighingPrototype inherits Window {
                                 spacing: 16px;
                                 TileButton {
                                     width: (root.right-panel-width - 16px) / 2;
-                                    text: "ПОВТОР";
+                                    text: UiText.translate(UiText.language, "ПОВТОР");
                                     icon: @image-url("../assets/icons/refresh-cw.png");
                                     short: root.short;
                                     clicked => { root.repeat-print(); }
                                 }
                                 TileButton {
                                     horizontal-stretch: 1;
-                                    text: "КОРОБ";
+                                    text: UiText.translate(UiText.language, "КОРОБ");
                                     icon: @image-url("../assets/icons/box.png");
                                     short: root.short;
                                     enabled: root.units-in-box > 0;
@@ -2318,12 +2319,12 @@ export component WeighingPrototype inherits Window {
                                 spacing: 16px;
                                 TileButton {
                                     width: (root.right-panel-width - 16px) / 2;
-                                    text: "УДАЛИТЬ";
+                                    text: UiText.translate(UiText.language, "УДАЛИТЬ");
                                     icon: @image-url("../assets/icons/trash2-red.png");
                                     short: root.short;
                                     normal-color: Palette.r50;
                                     hover-color: Palette.r100;
-                                    pressed-color: #fecaca;
+                                    pressed-color: Palette.r300;
                                     outline: Palette.r300;
                                     foreground: Palette.r600;
                                     clicked => { root.delete-modal-visible = true; }
@@ -2334,11 +2335,11 @@ export component WeighingPrototype inherits Window {
                             MainButton {
                                 height: 52px;
                                 border-radius: 16px;
-                                text: "ПАЛЛЕТНЫЙ ЛИСТ";
+                                text: UiText.translate(UiText.language, "ПАЛЛЕТНЫЙ ЛИСТ");
                                 icon: @image-url("../assets/icons/layers-white.png");
-                                normal-color: Palette.a600;
+                                normal-color: Palette.solid-a600;
                                 hover-color: Palette.a500;
-                                pressed-color: Palette.a700;
+                                pressed-color: Palette.solid-a700;
                                 clicked => { root.print-pallet(); }
                             }
 
@@ -2348,7 +2349,7 @@ export component WeighingPrototype inherits Window {
                                 border-radius: 24px;
                                 border-width: 1px;
                                 border-color: Palette.n200;
-                                background: white;
+                                background: Palette.surface;
                                 drop-shadow-color: #0000000d;
                                 drop-shadow-blur: 5px;
                                 drop-shadow-offset-y: 1px;
@@ -2357,7 +2358,7 @@ export component WeighingPrototype inherits Window {
                                     padding: root.short ? 12px : 16px;
                                     spacing: root.short ? 2px : 3px;
                                     Text {
-                                        text: "СТАТИСТИКА СЕССИИ";
+                                        text: UiText.translate(UiText.language, "СТАТИСТИКА СЕССИИ");
                                         color: Palette.n500;
                                         font-size: 14px;
                                         font-weight: 600;
@@ -2365,14 +2366,14 @@ export component WeighingPrototype inherits Window {
                                     }
                                     StatEditorRow {
                                         compact: root.short;
-                                        label: "ПАРТИЯ";
+                                        label: UiText.translate(UiText.language, "ПАРТИЯ");
                                         value: root.batch-number;
                                         icon: @image-url("../assets/icons/hash-green.png");
                                         clicked => { root.keypad-visible = true; }
                                     }
                                     StatEditorRow {
                                         compact: root.short;
-                                        label: root.narrow ? "ДАТА ПРОИЗВ." : "ДАТА ПРОИЗВОДСТВА";
+                                        label: root.narrow ? UiText.translate(UiText.language, "ДАТА ПРОИЗВ.") : UiText.translate(UiText.language, "ДАТА ПРОИЗВОДСТВА");
                                         dense-label: true;
                                         value: root.labeling-date;
                                         icon: @image-url("../assets/icons/calendar-green.png");
@@ -2383,13 +2384,13 @@ export component WeighingPrototype inherits Window {
                                     }
                                     ThinStatRow {
                                         compact: root.short;
-                                        label: "Упаковка №";
+                                        label: UiText.translate(UiText.language, "Упаковка №");
                                         value: root.pack-number;
                                         value-color: Palette.e600;
                                     }
                                     ThinStatRow {
                                         compact: root.short;
-                                        label: "Короб №";
+                                        label: UiText.translate(UiText.language, "Короб №");
                                         value: root.box-number;
                                         value-color: Palette.e600;
                                     }
@@ -2398,7 +2399,7 @@ export component WeighingPrototype inherits Window {
                                         spacing: root.short ? 3px : 5px;
                                         HorizontalLayout {
                                             Text {
-                                                text: "В коробе";
+                                                text: UiText.translate(UiText.language, "В коробе");
                                                 color: Palette.n500;
                                                 font-size: 14px;
                                             }
@@ -2426,13 +2427,13 @@ export component WeighingPrototype inherits Window {
                                     }
                                     ThinStatRow {
                                         compact: root.short;
-                                        label: "Коробов на паллете";
+                                        label: UiText.translate(UiText.language, "Коробов на паллете");
                                         value: root.boxes-on-pallet;
                                         value-color: Palette.a600;
                                     }
                                     ThinStatRow {
                                         compact: root.short;
-                                        label: "Всего упаковок";
+                                        label: UiText.translate(UiText.language, "Всего упаковок");
                                         value: root.total-units;
                                     }
                                 }
@@ -2463,7 +2464,7 @@ export component WeighingPrototype inherits Window {
                 VerticalLayout {
                     horizontal-stretch: 1; alignment: center; spacing: 3px;
                     Text { min-width: 0px; text: root.form-queue; color: Palette.n900; font-size: 24px; font-weight: 750; wrap: word-wrap; }
-                    Text { min-width: 0px; text: root.queue-status; color: Palette.n500; font-size: 12px; wrap: word-wrap; }
+                    Text { min-width: 0px; text: root.localized-queue-status; color: Palette.n500; font-size: 12px; wrap: word-wrap; }
                 }
                 SettingsAction { width: 164px; text: root.queue-busy ? root.form-working : root.settings-refresh-label; enabled: !root.queue-busy; clicked => { root.refresh-print-queue(); } }
             }
@@ -2488,17 +2489,17 @@ export component WeighingPrototype inherits Window {
                     }
                     for job in root.settings-visible-jobs: Rectangle {
                         min-width: 0px; min-height: job-content.min-height; preferred-height: job-content.preferred-height; vertical-stretch: 0;
-                        border-radius: 14px; border-width: 1px; border-color: job.warning ? Palette.a300 : job.state == "failed" ? Palette.r300 : Palette.n200; background: white;
+                        border-radius: 14px; border-width: 1px; border-color: job.warning ? Palette.a300 : job.state == "failed" ? Palette.r300 : Palette.n200; background: Palette.surface;
                         job-content := VerticalLayout { padding: 16px; spacing: 10px; alignment: start;
                             HorizontalLayout { spacing: 12px;
                                 Text { min-width: 0px; horizontal-stretch: 1; text: job.printer-name; color: Palette.n900; font-size: 15px; font-weight: 700; wrap: word-wrap; }
                                 Rectangle { width: 156px; height: 32px; border-radius: 8px; background: job.warning ? Palette.a50 : job.good ? Palette.e50 : job.state == "failed" ? Palette.r50 : Palette.n100;
-                                    Text { x: 8px; width: parent.width - 16px; text: job.state-label; color: job.warning ? Palette.a700 : job.good ? Palette.e700 : job.state == "failed" ? Palette.r700 : Palette.n600; font-size: 12px; font-weight: 650; wrap: word-wrap; horizontal-alignment: center; vertical-alignment: center; }
+                                    Text { x: 8px; width: parent.width - 16px; text: UiText.translate(UiText.language, job.state-label); color: job.warning ? Palette.a700 : job.good ? Palette.e700 : job.state == "failed" ? Palette.r700 : Palette.n600; font-size: 12px; font-weight: 650; wrap: word-wrap; horizontal-alignment: center; vertical-alignment: center; }
                                 }
                             }
-                            Text { min-width: 0px; text: job.action + " · " + job.route + " · " + job.payload; color: Palette.n600; font-size: 12px; wrap: word-wrap; }
-                            Text { min-width: 0px; text: "#" + job.short-id + " · " + root.form-attempt + " " + job.attempts + " · " + job.updated; color: Palette.n500; font-size: 12px; wrap: word-wrap; }
-                            if job.error != "": SettingsNotice { text: job.error; warning: true; }
+                            Text { min-width: 0px; text: UiText.translate(UiText.language, job.action) + " · " + job.route + " · " + job.payload; color: Palette.n600; font-size: 12px; wrap: word-wrap; }
+                            Text { min-width: 0px; text: "#" + job.short-id + " · " + root.form-attempt + " " + job.attempts + " · " + UiText.translate(UiText.language, job.updated); color: Palette.n500; font-size: 12px; wrap: word-wrap; }
+                            if job.error != "": SettingsNotice { text: UiText.translate(UiText.language, job.error); warning: true; }
                             if job.can-retry || job.can-cancel: HorizontalLayout { spacing: 8px;
                                 Rectangle { horizontal-stretch: 1; }
                                 if job.can-retry: SettingsAction { width: 156px; text: root.form-retry; primary: !job.uncertain; enabled: !root.queue-busy; clicked => { root.confirm-print-action = "retry"; root.confirm-print-job-id = job.job-id; root.confirm-print-job-title = job.short-id; root.confirm-print-uncertain = job.uncertain; root.confirm-print-action-visible = true; } }
@@ -2531,7 +2532,7 @@ export component WeighingPrototype inherits Window {
                 VerticalLayout {
                     horizontal-stretch: 1; alignment: center; spacing: 3px;
                     Text { min-width: 0px; text: root.form-diagnostics; color: Palette.n900; font-size: 24px; font-weight: 750; wrap: word-wrap; }
-                    Text { min-width: 0px; text: root.diagnostics-status; color: Palette.n500; font-size: 12px; wrap: word-wrap; }
+                    Text { min-width: 0px; text: UiText.translate(UiText.language, root.diagnostics-status); color: Palette.n500; font-size: 12px; wrap: word-wrap; }
                 }
                 SettingsAction { width: 164px; text: root.diagnostics-busy ? root.form-working : root.form-check-all; enabled: !root.diagnostics-busy; clicked => { root.probe-printers(); } }
             }
@@ -2546,11 +2547,11 @@ export component WeighingPrototype inherits Window {
                     SettingsNotice { text: root.form-diagnostics-hint;  }
                     if root.printer-diagnostics.length == 0: SettingsCard {
                         title: root.form-check-empty;
-                        SettingsNotice { text: root.diagnostics-status;  }
+                        SettingsNotice { text: UiText.translate(UiText.language, root.diagnostics-status);  }
                     }
                     for device in root.printer-diagnostics: Rectangle {
                         min-width: 0px; min-height: device-content.min-height; preferred-height: device-content.preferred-height; vertical-stretch: 0;
-                        border-radius: 14px; border-width: 1px; border-color: !device.configured ? Palette.n200 : device.reachable ? Palette.e300 : Palette.r300; background: white;
+                        border-radius: 14px; border-width: 1px; border-color: !device.configured ? Palette.n200 : device.reachable ? Palette.e300 : Palette.r300; background: Palette.surface;
                         device-content := VerticalLayout { padding: 16px; spacing: 10px; alignment: start;
                             HorizontalLayout { spacing: 12px;
                                 VerticalLayout { horizontal-stretch: 1; spacing: 4px;
@@ -2558,11 +2559,11 @@ export component WeighingPrototype inherits Window {
                                     Text { min-width: 0px; text: device.printer-name; color: Palette.n900; font-size: 16px; font-weight: 700; wrap: word-wrap; }
                                 }
                                 Rectangle { width: 156px; height: 36px; border-radius: 8px; background: !device.configured ? Palette.n100 : device.reachable ? Palette.e50 : Palette.r50;
-                                    Text { x: 8px; width: parent.width - 16px; text: device.status-label; color: !device.configured ? Palette.n600 : device.reachable ? Palette.e700 : Palette.r700; font-size: 12px; font-weight: 650; wrap: word-wrap; horizontal-alignment: center; vertical-alignment: center; }
+                                    Text { x: 8px; width: parent.width - 16px; text: UiText.translate(UiText.language, device.status-label); color: !device.configured ? Palette.n600 : device.reachable ? Palette.e700 : Palette.r700; font-size: 12px; font-weight: 650; wrap: word-wrap; horizontal-alignment: center; vertical-alignment: center; }
                                 }
                             }
-                            Text { min-width: 0px; text: device.transport + " · " + device.endpoint + " · " + device.queried; color: Palette.n500; font-size: 12px; wrap: word-wrap; }
-                            SettingsNotice { text: device.details; warning: device.configured && !device.reachable; success: device.reachable; }
+                            Text { min-width: 0px; text: device.transport + " · " + device.endpoint + " · " + UiText.translate(UiText.language, device.queried); color: Palette.n500; font-size: 12px; wrap: word-wrap; }
+                            SettingsNotice { text: UiText.translate(UiText.language, device.details); warning: device.configured && !device.reachable; success: device.reachable; }
                             HorizontalLayout { Rectangle { horizontal-stretch: 1; } SettingsAction { width: 156px; text: root.form-configure; enabled: !root.settings-busy; clicked => { root.open-settings-diagnostic-role(device.role); } } }
                         }
                     }
@@ -2701,10 +2702,10 @@ export component WeighingPrototype inherits Window {
                 }
             }
             Rectangle {
-                height: 68px; border-radius: 14px; border-width: 1px; border-color: Palette.n200; background: white;
+                height: 68px; border-radius: 14px; border-width: 1px; border-color: Palette.n200; background: Palette.surface;
                 HorizontalLayout {
                     padding: 10px; spacing: 8px;
-                    Text { min-width: 0px; horizontal-stretch: 1; text: root.settings-busy ? root.settings-status : root.settings-dirty ? root.form-unsaved : root.settings-status; color: root.settings-dirty ? Palette.a700 : Palette.n500; font-size: 12px; wrap: word-wrap; vertical-alignment: center; }
+                    Text { min-width: 0px; horizontal-stretch: 1; text: root.settings-busy ? UiText.translate(UiText.language, root.settings-status) : root.settings-dirty ? root.form-unsaved : UiText.translate(UiText.language, root.settings-status); color: root.settings-dirty ? Palette.a700 : Palette.n500; font-size: 12px; wrap: word-wrap; vertical-alignment: center; }
                     SettingsAction { width: 186px; text: root.settings-detect-label; enabled: !root.settings-busy; clicked => { root.detect-printer-settings(); } }
                     SettingsAction { width: 166px; text: root.settings-test-label; enabled: !root.settings-busy; clicked => { root.test-printer-settings(); } }
                     SettingsAction { width: 158px; text: root.settings-busy ? root.form-working : root.settings-save-label; primary: true; enabled: !root.settings-busy; clicked => { root.save-printer-settings(); } }
@@ -2786,7 +2787,7 @@ export component WeighingPrototype inherits Window {
                         if root.scale-settings-connection != "simulator": VerticalLayout { horizontal-stretch: 0; alignment: start; width: (scale-form-scroll.visible-width - 20px) * 0.40;
                             if root.scale-settings-connection != "simulator": SettingsCard {
                                 title: root.form-choose-protocol;
-                                SettingsSelect { horizontal-stretch: 1; label: ""; value: root.scale-settings-protocol-name; hint: root.scale-settings-protocol-description; enabled: !root.scale-settings-busy; clicked => { root.settings-picker-target = "scale-protocol"; root.settings-picker-search = ""; root.settings-picker-scroll-y = 0px; } }
+                                SettingsSelect { horizontal-stretch: 1; label: ""; value: root.scale-settings-protocol-name; hint: UiText.translate(UiText.language, root.scale-settings-protocol-description); enabled: !root.scale-settings-busy; clicked => { root.settings-picker-target = "scale-protocol"; root.settings-picker-search = ""; root.settings-picker-scroll-y = 0px; } }
                             }
                         }
                     }
@@ -2814,10 +2815,10 @@ export component WeighingPrototype inherits Window {
                 }
             }
             Rectangle {
-                height: 68px; border-radius: 14px; border-width: 1px; border-color: Palette.n200; background: white;
+                height: 68px; border-radius: 14px; border-width: 1px; border-color: Palette.n200; background: Palette.surface;
                 HorizontalLayout {
                     padding: 10px; spacing: 8px;
-                    Text { min-width: 0px; horizontal-stretch: 1; text: root.scale-settings-busy ? root.scale-settings-status : root.scale-settings-dirty ? root.form-unsaved : root.scale-settings-status; color: root.scale-settings-dirty ? Palette.a700 : Palette.n500; font-size: 12px; wrap: word-wrap; vertical-alignment: center; }
+                    Text { min-width: 0px; horizontal-stretch: 1; text: root.scale-settings-busy ? UiText.translate(UiText.language, root.scale-settings-status) : root.scale-settings-dirty ? root.form-unsaved : UiText.translate(UiText.language, root.scale-settings-status); color: root.scale-settings-dirty ? Palette.a700 : Palette.n500; font-size: 12px; wrap: word-wrap; vertical-alignment: center; }
                     SettingsAction { width: 166px; text: root.scale-test-label; enabled: !root.scale-settings-busy; clicked => { root.test-scale-settings(); } }
                     SettingsAction { width: 158px; text: root.scale-settings-busy ? root.form-working : root.settings-save-label; primary: true; enabled: !root.scale-settings-busy; clicked => { root.save-scale-settings(); } }
                 }
@@ -2854,7 +2855,7 @@ export component WeighingPrototype inherits Window {
                         alignment: center;
                         spacing: 1px;
                         Text { text: root.fixed-page-title; color: Palette.n900; font-size: root.short ? 22px : 26px; font-weight: 750; horizontal-alignment: center; overflow: elide; }
-                        Text { text: root.fixed-status; color: root.fixed-control-in-range ? Palette.e700 : Palette.n500; font-size: 11px; horizontal-alignment: center; overflow: elide; }
+                        Text { text: UiText.translate(UiText.language, root.fixed-status); color: root.fixed-control-in-range ? Palette.e700 : Palette.n500; font-size: 11px; horizontal-alignment: center; overflow: elide; }
                     }
 
                     Rectangle {
@@ -2911,7 +2912,7 @@ export component WeighingPrototype inherits Window {
                     border-radius: 22px;
                     border-width: 1px;
                     border-color: Palette.n200;
-                    background: white;
+                    background: Palette.surface;
                     drop-shadow-color: #0000000b;
                     drop-shadow-blur: 10px;
                     drop-shadow-offset-y: 2px;
@@ -2981,7 +2982,7 @@ export component WeighingPrototype inherits Window {
                                     spacing: 2px;
                                     Text { text: root.fixed-control-weight-label; color: Palette.n500; font-size: 10px; font-weight: 750; letter-spacing: 0.7px; horizontal-alignment: center; }
                                     Text { text: root.gross-weight; color: root.fixed-control-in-range ? Palette.e700 : Palette.n900; font-family: "Consolas"; font-size: root.short ? 34px : 46px; font-weight: 800; horizontal-alignment: center; }
-                                    Text { text: "кг · " + (root.stable ? root.fixed-control-in-range ? root.fixed-in-range-label : root.fixed-out-range-label : root.fixed-wait-stable-label); color: root.fixed-control-in-range ? Palette.e700 : root.stable ? Palette.a700 : Palette.n500; font-size: 10px; font-weight: 750; horizontal-alignment: center; overflow: elide; }
+                                    Text { text: UiText.translate(UiText.language, "кг · ") + (root.stable ? root.fixed-control-in-range ? root.fixed-in-range-label : root.fixed-out-range-label : root.fixed-wait-stable-label); color: root.fixed-control-in-range ? Palette.e700 : root.stable ? Palette.a700 : Palette.n500; font-size: 10px; font-weight: 750; horizontal-alignment: center; overflow: elide; }
                                 }
                             }
 
@@ -2996,7 +2997,7 @@ export component WeighingPrototype inherits Window {
                                     spacing: 2px;
                                     Text { text: root.fixed-label-weight-label; color: Palette.e700; font-size: 10px; font-weight: 750; letter-spacing: 0.7px; horizontal-alignment: center; }
                                     Text { text: root.fixed-nominal-weight; color: Palette.e700; font-family: "Consolas"; font-size: root.short ? 34px : 46px; font-weight: 800; horizontal-alignment: center; }
-                                    Text { text: "кг · " + root.fixed-tolerance-label + " " + root.fixed-min-weight + "–" + root.fixed-max-weight + " г"; color: Palette.e700; font-size: 10px; font-weight: 650; horizontal-alignment: center; overflow: elide; }
+                                    Text { text: UiText.translate(UiText.language, "кг · ") + root.fixed-tolerance-label + " " + root.fixed-min-weight + "–" + root.fixed-max-weight + UiText.translate(UiText.language, " г"); color: Palette.e700; font-size: 10px; font-weight: 650; horizontal-alignment: center; overflow: elide; }
                                 }
                             }
                         }
@@ -3073,7 +3074,7 @@ export component WeighingPrototype inherits Window {
                                         border-radius: 14px;
                                         border-width: 2px;
                                         border-color: quantity-touch.has-hover ? Palette.e500 : Palette.e300;
-                                        background: quantity-touch.pressed ? Palette.e200 : white;
+                                        background: quantity-touch.pressed ? Palette.e200 : Palette.surface;
                                         Text { text: root.fixed-copies; color: Palette.e700; font-family: "Consolas"; font-size: root.short ? 24px : 30px; font-weight: 800; horizontal-alignment: center; vertical-alignment: center; }
                                         quantity-touch := TouchArea { enabled: !root.fixed-busy; clicked => { root.fixed-copies-draft = ""; root.fixed-quantity-keypad-visible = true; } }
                                     }
@@ -3325,7 +3326,7 @@ export component WeighingPrototype inherits Window {
                             border-radius: 20px;
                             border-width: 1px;
                             border-color: Palette.n200;
-                            background: white;
+                            background: Palette.surface;
                             drop-shadow-color: #0000000b;
                             drop-shadow-blur: 14px;
                             drop-shadow-offset-y: 3px;
@@ -3408,7 +3409,7 @@ export component WeighingPrototype inherits Window {
                                                             width: root.short ? 36px : 40px;
                                                             height: root.short ? 36px : 40px;
                                                             border-radius: 11px;
-                                                            background: job.job-id == root.selected-production-job-id ? Palette.e200 : white;
+                                                            background: job.job-id == root.selected-production-job-id ? Palette.e200 : Palette.surface;
                                                             AppIcon {
                                                                 width: 20px;
                                                                 height: 20px;
@@ -3536,7 +3537,7 @@ export component WeighingPrototype inherits Window {
                             border-radius: 20px;
                             border-width: 1px;
                             border-color: Palette.n200;
-                            background: white;
+                            background: Palette.surface;
                             drop-shadow-color: #0000000b;
                             drop-shadow-blur: 14px;
                             drop-shadow-offset-y: 3px;
@@ -3850,7 +3851,7 @@ export component WeighingPrototype inherits Window {
                                         border-radius: 16px;
                                         normal-color: Palette.e600;
                                         hover-color: Palette.e500;
-                                        pressed-color: Palette.e700;
+                                        pressed-color: Palette.solid-e700;
                                         enabled: !root.production-jobs-busy
                                             && root.selected-production-job-id > 0
                                             && root.units-in-box > 0;
@@ -3863,9 +3864,9 @@ export component WeighingPrototype inherits Window {
                                         icon: @image-url("../assets/icons/layers-white.png");
                                         label-font-size: root.short ? 12px : 14px;
                                         border-radius: 16px;
-                                        normal-color: Palette.a600;
+                                        normal-color: Palette.solid-a600;
                                         hover-color: Palette.a500;
-                                        pressed-color: Palette.a700;
+                                        pressed-color: Palette.solid-a700;
                                         enabled: !root.production-jobs-busy
                                             && root.selected-production-job-id > 0
                                             && root.boxes-on-pallet > 0
@@ -3935,7 +3936,7 @@ export component WeighingPrototype inherits Window {
                     }
                     Text {
                         text: root.catalog-error
-                            ? root.catalog-status
+                            ? UiText.translate(UiText.language, root.catalog-status)
                             : root.catalog-busy
                                 ? root.catalog-loading-label
                                 : root.catalog-shown-label + " " + root.catalog-products.length + " " + root.catalog-of-label + " " + root.catalog-total;
@@ -3981,7 +3982,7 @@ export component WeighingPrototype inherits Window {
                     border-radius: 18px;
                     border-width: 1px;
                     border-color: Palette.n200;
-                    background: white;
+                    background: Palette.surface;
                     clip: true;
 
                     VerticalLayout {
@@ -4130,7 +4131,7 @@ export component WeighingPrototype inherits Window {
                                         border-radius: 14px;
                                         border-width: product.id == root.catalog-selected-product-id ? 2px : 1px;
                                         border-color: product.id == root.catalog-selected-product-id ? Palette.e400 : Palette.n300;
-                                        background: catalog-row-touch.pressed ? Palette.e100 : catalog-row-touch.has-hover ? Palette.n100 : product.id == root.catalog-selected-product-id ? Palette.e50 : white;
+                                        background: catalog-row-touch.pressed ? Palette.e100 : catalog-row-touch.has-hover ? Palette.n100 : product.id == root.catalog-selected-product-id ? Palette.e50 : Palette.surface;
                                         HorizontalLayout {
                                             padding-left: 12px;
                                             padding-right: 12px;
@@ -4161,7 +4162,7 @@ export component WeighingPrototype inherits Window {
                                                 alignment: center;
                                                 spacing: 3px;
                                                 Text { text: product.name; color: Palette.n900; font-size: root.narrow ? 15px : 16px; font-weight: 700; overflow: elide; }
-                                                Text { text: product.details; color: Palette.n600; font-size: root.narrow ? 11px : 12px; font-weight: 500; overflow: elide; }
+                                                Text { text: UiText.translate(UiText.language, product.details); color: Palette.n600; font-size: root.narrow ? 11px : 12px; font-weight: 500; overflow: elide; }
                                             }
                                             Rectangle {
                                                 width: 72px;
@@ -4173,7 +4174,7 @@ export component WeighingPrototype inherits Window {
                                                     x: (parent.width - self.width) / 2;
                                                     y: (parent.height - self.height) / 2;
                                                     border-radius: 10px;
-                                                    background: white;
+                                                    background: Palette.surface;
                                                     Text {
                                                         text: "#" + product.id;
                                                         color: Palette.n500;
@@ -4236,7 +4237,7 @@ export component WeighingPrototype inherits Window {
                     border-radius: 18px;
                     border-width: 1px;
                     border-color: Palette.n200;
-                    background: white;
+                    background: Palette.surface;
                     clip: true;
 
                     VerticalLayout {
@@ -4340,7 +4341,7 @@ export component WeighingPrototype inherits Window {
                                         border-radius: 11px;
                                         background: Palette.n100;
                                         Text {
-                                            text: root.catalog-expiration-label + " · " + root.catalog-expiration;
+                                            text: root.catalog-expiration-label + " · " + UiText.translate(UiText.language, root.catalog-expiration);
                                             color: Palette.n800;
                                             font-size: 12px;
                                             font-weight: 700;
@@ -4375,7 +4376,7 @@ export component WeighingPrototype inherits Window {
                                         padding-left: 14px;
                                         padding-right: 14px;
                                         alignment: center;
-                                        ThinStatRow { compact: false; label: root.catalog-fixed-weight-label; value: root.catalog-fixed-weight; value-color: Palette.e700; }
+                                        ThinStatRow { compact: false; label: root.catalog-fixed-weight-label; value: UiText.translate(UiText.language, root.catalog-fixed-weight); value-color: Palette.e700; }
                                     }
                                 }
 
@@ -4390,9 +4391,9 @@ export component WeighingPrototype inherits Window {
                                         spacing: 3px;
                                         Text { height: 22px; text: root.catalog-packaging-title; color: Palette.n600; font-size: 11px; font-weight: 700; letter-spacing: 0.6px; vertical-alignment: center; }
                                         ThinStatRow { compact: false; label: root.catalog-portion-container-label; value: root.catalog-portion-container; }
-                                        ThinStatRow { compact: false; label: root.catalog-portion-tare-label; value: root.catalog-portion-tare; }
+                                        ThinStatRow { compact: false; label: root.catalog-portion-tare-label; value: UiText.translate(UiText.language, root.catalog-portion-tare); }
                                         ThinStatRow { compact: false; label: root.catalog-box-container-label; value: root.catalog-box-container; }
-                                        ThinStatRow { compact: false; label: root.catalog-box-tare-label; value: root.catalog-box-tare; }
+                                        ThinStatRow { compact: false; label: root.catalog-box-tare-label; value: UiText.translate(UiText.language, root.catalog-box-tare); }
                                         ThinStatRow { compact: false; label: root.catalog-box-limit-label; value: root.catalog-box-limit; }
                                     }
                                 }
@@ -4469,12 +4470,12 @@ export component WeighingPrototype inherits Window {
                 VerticalLayout {
                     alignment: center;
                     spacing: 2px;
-                    Text { text: "Станция и лицензия"; color: Palette.n900; font-size: 26px; font-weight: 750; }
-                    Text { text: root.license-status; color: root.license-server-online ? Palette.e700 : Palette.n500; font-size: 12px; overflow: elide; }
+                    Text { text: UiText.translate(UiText.language, "Станция и лицензия"); color: Palette.n900; font-size: 26px; font-weight: 750; }
+                    Text { text: UiText.translate(UiText.language, root.license-status); color: root.license-server-online ? Palette.e700 : Palette.n500; font-size: 12px; overflow: elide; }
                 }
                 Rectangle { horizontal-stretch: 1; }
-                StatusPill { text: root.license-server-online ? "Сервер доступен" : "Сервер недоступен"; good: root.license-server-online; }
-                CompactActionButton { width: 152px; text: root.license-busy ? "ПРОВЕРКА…" : "ОБНОВИТЬ"; primary: true; enabled: !root.license-busy; clicked => { root.reload-license(); } }
+                StatusPill { text: root.license-server-online ? UiText.translate(UiText.language, "Сервер доступен") : UiText.translate(UiText.language, "Сервер недоступен"); good: root.license-server-online; }
+                CompactActionButton { width: 152px; text: root.license-busy ? UiText.translate(UiText.language, "ПРОВЕРКА…") : UiText.translate(UiText.language, "ОБНОВИТЬ"); primary: true; enabled: !root.license-busy; clicked => { root.reload-license(); } }
             }
 
             HorizontalLayout {
@@ -4485,24 +4486,24 @@ export component WeighingPrototype inherits Window {
                     border-radius: 20px;
                     border-width: 1px;
                     border-color: Palette.n200;
-                    background: white;
+                    background: Palette.surface;
                     VerticalLayout {
                         padding: root.narrow ? 14px : 18px;
                         spacing: root.narrow ? 10px : 13px;
-                        Text { text: "РАБОЧАЯ СТАНЦИЯ"; color: Palette.n500; font-size: 10px; font-weight: 750; letter-spacing: 0.9px; }
+                        Text { text: UiText.translate(UiText.language, "РАБОЧАЯ СТАНЦИЯ"); color: Palette.n500; font-size: 10px; font-weight: 750; letter-spacing: 0.9px; }
                         Text { text: root.license-station-name; color: Palette.n900; font-size: 21px; font-weight: 800; wrap: word-wrap; }
-                        ThinStatRow { compact: root.short; label: "Номер"; value: root.license-station-number; }
+                        ThinStatRow { compact: root.short; label: UiText.translate(UiText.language, "Номер"); value: root.license-station-number; }
                         ThinStatRow { compact: root.short; label: "UUID"; value: root.license-station-uuid; }
-                        ThinStatRow { compact: root.short; label: "Последняя синхронизация"; value: root.license-last-sync; }
+                        ThinStatRow { compact: root.short; label: UiText.translate(UiText.language, "Последняя синхронизация"); value: UiText.translate(UiText.language, root.license-last-sync); }
                         Rectangle { height: 1px; background: Palette.n200; }
-                        Text { text: "СЕРВЕР"; color: Palette.n500; font-size: 10px; font-weight: 750; letter-spacing: 0.9px; }
-                        Text { text: "IP, host:port или URL"; color: Palette.n500; font-size: 11px; }
-                        LineEdit { height: 50px; text <=> root.license-server-address; placeholder-text: "192.168.1.10 или http://server:8000"; accepted => { root.save-server-address(self.text); } }
+                        Text { text: UiText.translate(UiText.language, "СЕРВЕР"); color: Palette.n500; font-size: 10px; font-weight: 750; letter-spacing: 0.9px; }
+                        Text { text: UiText.translate(UiText.language, "IP, host:port или URL"); color: Palette.n500; font-size: 11px; }
+                        LineEdit { height: 50px; text <=> root.license-server-address; placeholder-text: UiText.translate(UiText.language, "192.168.1.10 или http://server:8000"); accepted => { root.save-server-address(self.text); } }
                         HorizontalLayout {
                             height: 48px;
                             spacing: 9px;
-                            CompactActionButton { horizontal-stretch: 1; text: "ПРОВЕРИТЬ"; enabled: !root.license-busy; clicked => { root.reload-license(); } }
-                            CompactActionButton { horizontal-stretch: 1; text: "СОХРАНИТЬ"; primary: true; enabled: !root.license-busy; clicked => { root.save-server-address(root.license-server-address); } }
+                            CompactActionButton { horizontal-stretch: 1; text: UiText.translate(UiText.language, "ПРОВЕРИТЬ"); enabled: !root.license-busy; clicked => { root.reload-license(); } }
+                            CompactActionButton { horizontal-stretch: 1; text: UiText.translate(UiText.language, "СОХРАНИТЬ"); primary: true; enabled: !root.license-busy; clicked => { root.save-server-address(root.license-server-address); } }
                         }
                         Rectangle {
                             min-height: 82px;
@@ -4513,11 +4514,11 @@ export component WeighingPrototype inherits Window {
                             VerticalLayout {
                                 padding: 12px;
                                 spacing: 4px;
-                                Text { text: !root.license-server-configured ? "СЕРВЕР НЕ НАСТРОЕН" : !root.license-server-online ? "НЕТ СОЕДИНЕНИЯ" : !root.license-server-compatible ? "ТРЕБУЕТСЯ ОБНОВЛЕНИЕ КЛИЕНТА" : "СЕРВЕР ГОТОВ"; color: !root.license-server-configured ? Palette.n600 : !root.license-server-online ? Palette.r600 : !root.license-server-compatible ? Palette.a700 : Palette.e700; font-size: 11px; font-weight: 800; }
-                                Text { text: root.license-compatibility == "" ? "Версия сервера " + root.license-server-version + " · минимум клиента " + root.license-min-client-version : root.license-compatibility; color: Palette.n600; font-size: 11px; wrap: word-wrap; }
+                                Text { text: !root.license-server-configured ? UiText.translate(UiText.language, "СЕРВЕР НЕ НАСТРОЕН") : !root.license-server-online ? UiText.translate(UiText.language, "НЕТ СОЕДИНЕНИЯ") : !root.license-server-compatible ? UiText.translate(UiText.language, "ТРЕБУЕТСЯ ОБНОВЛЕНИЕ КЛИЕНТА") : UiText.translate(UiText.language, "СЕРВЕР ГОТОВ"); color: !root.license-server-configured ? Palette.n600 : !root.license-server-online ? Palette.r600 : !root.license-server-compatible ? Palette.a700 : Palette.e700; font-size: 11px; font-weight: 800; }
+                                Text { text: UiText.translate(UiText.language, root.license-compatibility) == "" ? UiText.translate(UiText.language, "Версия сервера ") + root.license-server-version + UiText.translate(UiText.language, " · минимум клиента ") + root.license-min-client-version : UiText.translate(UiText.language, root.license-compatibility); color: Palette.n600; font-size: 11px; wrap: word-wrap; }
                             }
                         }
-                        Text { text: "Синхронизацию данных инициирует сервер; эта кнопка проверяет связь и лицензию без блокировки рабочего экрана."; color: Palette.n500; font-size: 11px; wrap: word-wrap; }
+                        Text { text: UiText.translate(UiText.language, "Синхронизацию данных инициирует сервер; эта кнопка проверяет связь и лицензию без блокировки рабочего экрана."); color: Palette.n500; font-size: 11px; wrap: word-wrap; }
                     }
                 }
 
@@ -4526,7 +4527,7 @@ export component WeighingPrototype inherits Window {
                     border-radius: 20px;
                     border-width: 1px;
                     border-color: root.license-active && !root.license-expired ? Palette.e300 : root.license-expired ? Palette.r300 : Palette.a300;
-                    background: white;
+                    background: Palette.surface;
                     clip: true;
                     ScrollView {
                         width: parent.width;
@@ -4544,22 +4545,22 @@ export component WeighingPrototype inherits Window {
                                     Text { text: root.license-customer; color: Palette.n500; font-size: 12px; overflow: elide; }
                                 }
                                 Rectangle { horizontal-stretch: 1; }
-                                Rectangle { width: 116px; height: 34px; border-radius: 17px; background: root.license-active && !root.license-expired ? Palette.e100 : root.license-expired ? Palette.r100 : Palette.a50; Text { text: root.license-expired ? "ИСТЕКЛА" : root.license-mode; color: root.license-active && !root.license-expired ? Palette.e700 : root.license-expired ? Palette.r700 : Palette.a700; font-size: 11px; font-weight: 800; horizontal-alignment: center; vertical-alignment: center; overflow: elide; } }
+                                Rectangle { width: 116px; height: 34px; border-radius: 17px; background: root.license-active && !root.license-expired ? Palette.e100 : root.license-expired ? Palette.r100 : Palette.a50; Text { text: root.license-expired ? UiText.translate(UiText.language, "ИСТЕКЛА") : root.license-mode; color: root.license-active && !root.license-expired ? Palette.e700 : root.license-expired ? Palette.r700 : Palette.a700; font-size: 11px; font-weight: 800; horizontal-alignment: center; vertical-alignment: center; overflow: elide; } }
                             }
-                            ThinStatRow { compact: root.short; label: "Статус API"; value: root.license-online ? "Получен" : "Офлайн"; value-color: root.license-online ? Palette.e700 : Palette.a700; }
-                            ThinStatRow { compact: root.short; label: "Действует до"; value: root.license-expires; }
-                            ThinStatRow { compact: root.short; label: "Станции"; value: root.license-stations; }
+                            ThinStatRow { compact: root.short; label: UiText.translate(UiText.language, "Статус API"); value: root.license-online ? UiText.translate(UiText.language, "Получен") : UiText.translate(UiText.language, "Офлайн"); value-color: root.license-online ? Palette.e700 : Palette.a700; }
+                            ThinStatRow { compact: root.short; label: UiText.translate(UiText.language, "Действует до"); value: UiText.translate(UiText.language, root.license-expires); }
+                            ThinStatRow { compact: root.short; label: UiText.translate(UiText.language, "Станции"); value: UiText.translate(UiText.language, root.license-stations); }
                             ThinStatRow { compact: root.short; label: "License ID"; value: root.license-id; }
-                            ThinStatRow { compact: root.short; label: "Подпись"; value: root.license-signature; value-color: root.license-active ? Palette.e700 : Palette.n700; }
+                            ThinStatRow { compact: root.short; label: UiText.translate(UiText.language, "Подпись"); value: UiText.translate(UiText.language, root.license-signature); value-color: root.license-active ? Palette.e700 : Palette.n700; }
                             ThinStatRow { compact: root.short; label: "Machine ID"; value: root.license-machine; }
-                            Text { text: "ДОСТУПНЫЕ ФУНКЦИИ"; color: Palette.n500; font-size: 10px; font-weight: 750; letter-spacing: 0.9px; }
+                            Text { text: UiText.translate(UiText.language, "ДОСТУПНЫЕ ФУНКЦИИ"); color: Palette.n500; font-size: 10px; font-weight: 750; letter-spacing: 0.9px; }
                             Rectangle {
                                 min-height: 110px;
                                 border-radius: 16px;
                                 border-width: 1px;
                                 border-color: Palette.n200;
                                 background: Palette.n50;
-                                Text { x: 14px; y: 14px; width: parent.width - 28px; text: root.license-features; color: Palette.n700; font-size: 12px; wrap: word-wrap; }
+                                Text { x: 14px; y: 14px; width: parent.width - 28px; text: UiText.translate(UiText.language, root.license-features); color: Palette.n700; font-size: 12px; wrap: word-wrap; }
                             }
                             Rectangle {
                                 min-height: 82px;
@@ -4570,8 +4571,8 @@ export component WeighingPrototype inherits Window {
                                 VerticalLayout {
                                     padding: 13px;
                                     spacing: 4px;
-                                    Text { text: root.license-active && !root.license-expired ? "ЛИЦЕНЗИЯ АКТИВНА" : root.license-expired ? "СРОК ЛИЦЕНЗИИ ИСТЁК" : "ДЕМОНСТРАЦИОННЫЙ РЕЖИМ"; color: root.license-active && !root.license-expired ? Palette.e700 : Palette.a700; font-size: 12px; font-weight: 800; }
-                                    Text { text: root.license-online ? "Статус получен с настроенного сервера." : "Показан последний доступный локальный статус интерфейса."; color: Palette.n600; font-size: 11px; wrap: word-wrap; }
+                                    Text { text: root.license-active && !root.license-expired ? UiText.translate(UiText.language, "ЛИЦЕНЗИЯ АКТИВНА") : root.license-expired ? UiText.translate(UiText.language, "СРОК ЛИЦЕНЗИИ ИСТЁК") : UiText.translate(UiText.language, "ДЕМОНСТРАЦИОННЫЙ РЕЖИМ"); color: root.license-active && !root.license-expired ? Palette.e700 : Palette.a700; font-size: 12px; font-weight: 800; }
+                                    Text { text: root.license-online ? UiText.translate(UiText.language, "Статус получен с настроенного сервера.") : UiText.translate(UiText.language, "Показан последний доступный локальный статус интерфейса."); color: Palette.n600; font-size: 11px; wrap: word-wrap; }
                                 }
                             }
                         }
@@ -4602,7 +4603,7 @@ export component WeighingPrototype inherits Window {
                         font-weight: 800;
                     }
                     Text {
-                        text: root.update-error == "" ? root.update-status : root.update-error;
+                        text: UiText.translate(UiText.language, root.update-error) == "" ? UiText.translate(UiText.language, root.update-status) : UiText.translate(UiText.language, root.update-error);
                         color: root.update-error == "" ? Palette.n500 : Palette.r600;
                         font-size: 12px;
                         overflow: elide;
@@ -4618,7 +4619,7 @@ export component WeighingPrototype inherits Window {
                     border-radius: 22px;
                     border-width: 1px;
                     border-color: root.update-error != "" ? Palette.r300 : root.update-available ? Palette.e300 : Palette.n200;
-                    background: white;
+                    background: Palette.surface;
 
                     VerticalLayout {
                         padding: root.short ? 18px : root.narrow ? 22px : 28px;
@@ -4670,7 +4671,7 @@ export component WeighingPrototype inherits Window {
 
                         Text {
                             text: root.update-busy
-                                ? root.update-status
+                                ? UiText.translate(UiText.language, root.update-status)
                                 : root.update-available
                                     ? root.update-available-label + ": " + root.update-available-version
                                     : root.update-current-message-label;
@@ -4692,7 +4693,7 @@ export component WeighingPrototype inherits Window {
                                 y: 10px;
                                 width: parent.width - 28px;
                                 height: parent.height - 20px;
-                                text: root.update-error;
+                                text: UiText.translate(UiText.language, root.update-error);
                                 color: Palette.r700;
                                 font-size: 12px;
                                 wrap: word-wrap;
@@ -4876,7 +4877,7 @@ export component WeighingPrototype inherits Window {
             border-radius: 30px;
             border-width: 1px;
             border-color: Palette.a300;
-            background: white;
+            background: Palette.surface;
             VerticalLayout {
                 padding: root.short ? 24px : 34px;
                 spacing: root.short ? 11px : 16px;
@@ -4913,9 +4914,9 @@ export component WeighingPrototype inherits Window {
                         horizontal-stretch: 1;
                         text: root.update-restore-back-label;
                         icon: @image-url("../assets/icons/x.png");
-                        normal-color: Palette.n600;
-                        hover-color: Palette.n500;
-                        pressed-color: Palette.n700;
+                        normal-color: Palette.solid-n600;
+                        hover-color: Palette.solid-n500;
+                        pressed-color: Palette.solid-n700;
                         border-radius: 16px;
                         clicked => { root.update-rollback-confirm-visible = false; }
                     }
@@ -4923,9 +4924,9 @@ export component WeighingPrototype inherits Window {
                         horizontal-stretch: 1;
                         text: root.update-restore-confirm-label;
                         icon: @image-url("../assets/icons/list-restart.png");
-                        normal-color: Palette.a600;
+                        normal-color: Palette.solid-a600;
                         hover-color: Palette.a500;
-                        pressed-color: Palette.a700;
+                        pressed-color: Palette.solid-a700;
                         border-radius: 16px;
                         enabled: !root.update-busy;
                         clicked => {
@@ -4950,7 +4951,7 @@ export component WeighingPrototype inherits Window {
             border-radius: 30px;
             border-width: 1px;
             border-color: root.confirm-print-action == "cancel" ? Palette.r300 : root.confirm-print-uncertain ? Palette.a300 : Palette.e300;
-            background: white;
+            background: Palette.surface;
             VerticalLayout {
                 padding: 34px;
                 spacing: 16px;
@@ -4960,7 +4961,7 @@ export component WeighingPrototype inherits Window {
                     icon-color: root.confirm-print-action == "cancel" ? Palette.r600 : root.confirm-print-uncertain ? Palette.a600 : Palette.e600;
                 }
                 Text {
-                    text: root.confirm-print-action == "cancel" ? "Отменить задание?" : "Повторить печать?";
+                    text: root.confirm-print-action == "cancel" ? UiText.translate(UiText.language, "Отменить задание?") : UiText.translate(UiText.language, "Повторить печать?");
                     color: Palette.n900;
                     font-size: 27px;
                     font-weight: 750;
@@ -4968,10 +4969,10 @@ export component WeighingPrototype inherits Window {
                 }
                 Text {
                     text: root.confirm-print-action == "cancel"
-                        ? "Задание #" + root.confirm-print-job-title + " будет удалено из активной очереди."
+                        ? UiText.translate(UiText.language, "Задание #") + root.confirm-print-job-title + UiText.translate(UiText.language, " будет удалено из активной очереди.")
                         : root.confirm-print-uncertain
-                            ? "Принтер мог уже принять задание #" + root.confirm-print-job-title + ". Повтор может создать дубликат этикетки."
-                            : "Задание #" + root.confirm-print-job-title + " будет поставлено в очередь повторно.";
+                            ? UiText.translate(UiText.language, "Принтер мог уже принять задание #") + root.confirm-print-job-title + UiText.translate(UiText.language, ". Повтор может создать дубликат этикетки.")
+                            : UiText.translate(UiText.language, "Задание #") + root.confirm-print-job-title + UiText.translate(UiText.language, " будет поставлено в очередь повторно.");
                     color: root.confirm-print-uncertain ? Palette.a700 : Palette.n600;
                     font-size: 17px;
                     wrap: word-wrap;
@@ -4982,21 +4983,21 @@ export component WeighingPrototype inherits Window {
                     spacing: 12px;
                     MainButton {
                         horizontal-stretch: 1;
-                        text: "НАЗАД";
+                        text: UiText.translate(UiText.language, "НАЗАД");
                         icon: @image-url("../assets/icons/x.png");
-                        normal-color: Palette.n600;
-                        hover-color: Palette.n500;
-                        pressed-color: Palette.n700;
+                        normal-color: Palette.solid-n600;
+                        hover-color: Palette.solid-n500;
+                        pressed-color: Palette.solid-n700;
                         border-radius: 16px;
                         clicked => { root.confirm-print-action-visible = false; }
                     }
                     MainButton {
                         horizontal-stretch: 1;
-                        text: root.confirm-print-action == "cancel" ? "ОТМЕНИТЬ" : "ПОВТОРИТЬ";
+                        text: root.confirm-print-action == "cancel" ? UiText.translate(UiText.language, "ОТМЕНИТЬ") : UiText.translate(UiText.language, "ПОВТОРИТЬ");
                         icon: root.confirm-print-action == "cancel" ? @image-url("../assets/icons/trash2-red.png") : @image-url("../assets/icons/list-restart.png");
-                        normal-color: root.confirm-print-action == "cancel" ? Palette.r600 : root.confirm-print-uncertain ? Palette.a600 : Palette.e600;
+                        normal-color: root.confirm-print-action == "cancel" ? Palette.solid-r600 : root.confirm-print-uncertain ? Palette.solid-a600 : Palette.e600;
                         hover-color: root.confirm-print-action == "cancel" ? Palette.r500 : root.confirm-print-uncertain ? Palette.a500 : Palette.e500;
-                        pressed-color: root.confirm-print-action == "cancel" ? Palette.r700 : root.confirm-print-uncertain ? Palette.a700 : Palette.e700;
+                        pressed-color: root.confirm-print-action == "cancel" ? Palette.solid-r700 : root.confirm-print-uncertain ? Palette.solid-a700 : Palette.solid-e700;
                         border-radius: 16px;
                         clicked => {
                             if root.confirm-print-action == "retry" {
@@ -5031,7 +5032,7 @@ export component WeighingPrototype inherits Window {
                 icon-color: white;
             }
             Text {
-                text: root.toast-text;
+                text: UiText.translate(UiText.language, root.toast-text);
                 color: white;
                 font-size: 15px;
                 font-weight: 600;
@@ -5054,7 +5055,7 @@ export component WeighingPrototype inherits Window {
             border-radius: 32px;
             border-width: 1px;
             border-color: Palette.n200;
-            background: white;
+            background: Palette.surface;
             drop-shadow-color: #00000080;
             drop-shadow-blur: 30px;
 
@@ -5149,7 +5150,7 @@ export component WeighingPrototype inherits Window {
                                         alignment: center;
                                         spacing: 3px;
                                         Text { text: product.name; color: Palette.n900; font-size: 15px; font-weight: 700; horizontal-alignment: center; overflow: elide; }
-                                        Text { text: product.details; color: Palette.n500; font-size: 11px; horizontal-alignment: center; overflow: elide; }
+                                        Text { text: UiText.translate(UiText.language, product.details); color: Palette.n500; font-size: 11px; horizontal-alignment: center; overflow: elide; }
                                     }
                                     Rectangle { width: 42px; vertical-stretch: 1; background: transparent; }
                                 }
@@ -5176,9 +5177,9 @@ export component WeighingPrototype inherits Window {
                     text: root.close-label;
                     icon: @image-url("../assets/icons/x.png");
                     border-radius: 16px;
-                    normal-color: Palette.n800;
-                    hover-color: Palette.n700;
-                    pressed-color: Palette.n900;
+                    normal-color: Palette.solid-n800;
+                    hover-color: Palette.solid-n700;
+                    pressed-color: Palette.solid-n900;
                     clicked => { root.fixed-product-modal-visible = false; root.touch-keyboard-visible = false; }
                 }
             }
@@ -5198,7 +5199,7 @@ export component WeighingPrototype inherits Window {
             border-radius: 28px;
             border-width: 1px;
             border-color: Palette.n200;
-            background: white;
+            background: Palette.surface;
             drop-shadow-color: #00000080;
             drop-shadow-blur: 30px;
 
@@ -5265,7 +5266,7 @@ export component WeighingPrototype inherits Window {
             border-radius: 32px;
             border-width: 1px;
             border-color: Palette.n200;
-            background: white;
+            background: Palette.surface;
             drop-shadow-color: #00000080;
             drop-shadow-blur: 30px;
 
@@ -5362,7 +5363,7 @@ export component WeighingPrototype inherits Window {
                                             overflow: elide;
                                         }
                                         Text {
-                                            text: product.details;
+                                            text: UiText.translate(UiText.language, product.details);
                                             color: Palette.n500;
                                             font-size: 12px;
                                             overflow: elide;
@@ -5400,9 +5401,9 @@ export component WeighingPrototype inherits Window {
                     text: root.close-label;
                     icon: @image-url("../assets/icons/x.png");
                     border-radius: 16px;
-                    normal-color: Palette.n800;
-                    hover-color: Palette.n700;
-                    pressed-color: Palette.n900;
+                    normal-color: Palette.solid-n800;
+                    hover-color: Palette.solid-n700;
+                    pressed-color: Palette.solid-n900;
                     clicked => { root.product-modal-visible = false; root.touch-keyboard-visible = false; }
                 }
             }
@@ -5419,13 +5420,13 @@ export component WeighingPrototype inherits Window {
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
             border-radius: 32px;
-            background: white;
+            background: Palette.surface;
 
             VerticalLayout {
                 padding: 24px;
                 spacing: 11px;
                 Text {
-                    text: "Номер партии";
+                    text: UiText.translate(UiText.language, "Номер партии");
                     color: Palette.n900;
                     font-size: 25px;
                     font-weight: 700;
@@ -5474,17 +5475,17 @@ export component WeighingPrototype inherits Window {
                     spacing: 10px;
                     MainButton {
                         horizontal-stretch: 1;
-                        text: "ОЧИСТИТЬ";
+                        text: UiText.translate(UiText.language, "ОЧИСТИТЬ");
                         icon: @image-url("../assets/icons/x.png");
                         border-radius: 16px;
-                        normal-color: Palette.n600;
-                        hover-color: Palette.n500;
-                        pressed-color: Palette.n700;
+                        normal-color: Palette.solid-n600;
+                        hover-color: Palette.solid-n500;
+                        pressed-color: Palette.solid-n700;
                         clicked => { root.batch-number = ""; }
                     }
                     MainButton {
                         horizontal-stretch: 1;
-                        text: "ГОТОВО";
+                        text: UiText.translate(UiText.language, "ГОТОВО");
                         icon: @image-url("../assets/icons/check-circle2.png");
                         border-radius: 16px;
                         clicked => { root.keypad-visible = false; }
@@ -5504,7 +5505,7 @@ export component WeighingPrototype inherits Window {
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
             border-radius: 32px;
-            background: white;
+            background: Palette.surface;
 
             VerticalLayout {
                 padding: root.short ? 18px : 24px;
@@ -5532,7 +5533,7 @@ export component WeighingPrototype inherits Window {
                     }
                     Text {
                         horizontal-stretch: 1;
-                        text: root.calendar-month-label;
+                        text: UiText.translate(UiText.language, root.calendar-month-label);
                         color: Palette.n900;
                         font-size: root.short ? 17px : 19px;
                         font-weight: 750;
@@ -5611,7 +5612,7 @@ export component WeighingPrototype inherits Window {
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
             border-radius: 32px;
-            background: white;
+            background: Palette.surface;
 
             VerticalLayout {
                 padding: 32px;
@@ -5622,14 +5623,14 @@ export component WeighingPrototype inherits Window {
                     icon-color: Palette.r500;
                 }
                 Text {
-                    text: "Удалить последнюю упаковку?";
+                    text: UiText.translate(UiText.language, "Удалить последнюю упаковку?");
                     color: Palette.n900;
                     font-size: 27px;
                     font-weight: 700;
                     horizontal-alignment: center;
                 }
                 Text {
-                    text: "Счётчик текущего короба и общий счётчик упаковок будут уменьшены на один.";
+                    text: UiText.translate(UiText.language, "Счётчик текущего короба и общий счётчик упаковок будут уменьшены на один.");
                     color: Palette.n500;
                     font-size: 17px;
                     wrap: word-wrap;
@@ -5640,22 +5641,22 @@ export component WeighingPrototype inherits Window {
                     spacing: 12px;
                     MainButton {
                         horizontal-stretch: 1;
-                        text: "ОТМЕНА";
+                        text: UiText.translate(UiText.language, "ОТМЕНА");
                         icon: @image-url("../assets/icons/x.png");
                         border-radius: 16px;
-                        normal-color: Palette.n600;
-                        hover-color: Palette.n500;
-                        pressed-color: Palette.n700;
+                        normal-color: Palette.solid-n600;
+                        hover-color: Palette.solid-n500;
+                        pressed-color: Palette.solid-n700;
                         clicked => { root.delete-modal-visible = false; }
                     }
                     MainButton {
                         horizontal-stretch: 1;
-                        text: "УДАЛИТЬ";
+                        text: UiText.translate(UiText.language, "УДАЛИТЬ");
                         icon: @image-url("../assets/icons/trash2-red.png");
                         border-radius: 16px;
-                        normal-color: Palette.r600;
+                        normal-color: Palette.solid-r600;
                         hover-color: Palette.r500;
-                        pressed-color: Palette.r700;
+                        pressed-color: Palette.solid-r700;
                         clicked => {
                             root.delete-modal-visible = false;
                             root.delete-last();
@@ -5678,7 +5679,7 @@ export component WeighingPrototype inherits Window {
             border-radius: 32px;
             border-width: 1px;
             border-color: Palette.n200;
-            background: white;
+            background: Palette.surface;
 
             VerticalLayout {
                 padding: 40px;
@@ -5702,14 +5703,14 @@ export component WeighingPrototype inherits Window {
                     }
                 }
                 Text {
-                    text: "Внимание";
+                    text: UiText.translate(UiText.language, "Внимание");
                     color: Palette.n900;
                     font-size: 30px;
                     font-weight: 700;
                     horizontal-alignment: center;
                 }
                 Text {
-                    text: root.alert-text;
+                    text: root.localized-alert-text;
                     color: Palette.n600;
                     font-size: 20px;
                     wrap: word-wrap;
@@ -5717,11 +5718,11 @@ export component WeighingPrototype inherits Window {
                 }
                 MainButton {
                     height: 64px;
-                    text: "ПОНЯТНО";
+                    text: UiText.translate(UiText.language, "ПОНЯТНО");
                     icon: @image-url("../assets/icons/check-circle2.png");
-                    normal-color: Palette.n800;
-                    hover-color: Palette.n700;
-                    pressed-color: Palette.n900;
+                    normal-color: Palette.solid-n800;
+                    hover-color: Palette.solid-n700;
+                    pressed-color: Palette.solid-n900;
                     border-radius: 16px;
                     clicked => { root.alert-visible = false; }
                 }
@@ -5732,7 +5733,7 @@ export component WeighingPrototype inherits Window {
     if root.operator-login-visible: Rectangle {
         width: parent.width;
         height: parent.height;
-        background: #f5f5f5fa;
+        background: Palette.n100;
         Rectangle {
             width: root.operator-dialog-width;
             height: root.operator-dialog-height;
@@ -5741,7 +5742,7 @@ export component WeighingPrototype inherits Window {
             border-radius: 32px;
             border-width: 1px;
             border-color: Palette.n200;
-            background: white;
+            background: Palette.surface;
             drop-shadow-color: #00000035;
             drop-shadow-blur: 32px;
             drop-shadow-offset-y: 10px;
@@ -5769,17 +5770,18 @@ export component WeighingPrototype inherits Window {
                     VerticalLayout {
                         alignment: center;
                         spacing: 4px;
-                        Text { text: "Выберите оператора"; color: Palette.n900; font-size: 28px; font-weight: 700; }
-                        Text { text: "Коснитесь имени для входа"; color: Palette.n500; font-size: 15px; }
+                        Text { text: root.ui-language == "en" ? "Choose an operator" : root.ui-language == "de" ? "Bediener auswählen" : root.ui-language == "uk" ? "Оберіть оператора" : "Выберите оператора"; color: Palette.n900; font-size: 28px; font-weight: 700; }
+                        Text { text: root.ui-language == "en" ? "Tap a name to sign in" : root.ui-language == "de" ? "Zum Anmelden einen Namen antippen" : root.ui-language == "uk" ? "Торкніться імені для входу" : "Коснитесь имени для входа"; color: Palette.n500; font-size: 15px; }
                     }
                 }
+                SettingsAction { text: root.preferences-title; clicked => { root.open-preferences(); } }
                 if root.operator-login-error != "": Rectangle {
                     height: 52px;
                     border-radius: 14px;
                     border-width: 1px;
                     border-color: Palette.r300;
                     background: Palette.r50;
-                    Text { text: root.operator-login-error; color: Palette.r700; font-size: 15px; horizontal-alignment: center; vertical-alignment: center; wrap: word-wrap; }
+                    Text { text: UiText.translate(UiText.language, root.operator-login-error); color: Palette.r700; font-size: 15px; horizontal-alignment: center; vertical-alignment: center; wrap: word-wrap; }
                 }
                 ScrollView {
                     vertical-stretch: 1;
@@ -5796,8 +5798,8 @@ export component WeighingPrototype inherits Window {
                                 alignment: center;
                                 spacing: 12px;
                                 VerticalIcon { icon-size: 44px; icon: @image-url("../assets/icons/user.png"); icon-color: Palette.n400; }
-                                Text { text: "Операторы ещё не загружены"; color: Palette.n700; font-size: 18px; font-weight: 600; horizontal-alignment: center; }
-                                Text { text: "Рабочий экран доступен без блокировки"; color: Palette.n500; font-size: 14px; horizontal-alignment: center; }
+                                Text { text: UiText.translate(UiText.language, "Операторы ещё не загружены"); color: Palette.n700; font-size: 18px; font-weight: 600; horizontal-alignment: center; }
+                                Text { text: UiText.translate(UiText.language, "Рабочий экран доступен без блокировки"); color: Palette.n500; font-size: 14px; horizontal-alignment: center; }
                             }
                         }
                         for operator[index] in root.operators: Rectangle {
@@ -5805,7 +5807,7 @@ export component WeighingPrototype inherits Window {
                             border-radius: 18px;
                             border-width: operator.is-last ? 2px : 1px;
                             border-color: operator.is-last ? Palette.e400 : Palette.n300;
-                            background: operator-row-touch.pressed ? Palette.e100 : operator-row-touch.has-hover ? Palette.e50 : operator.is-last ? #ecfdf580 : Palette.n50;
+                            background: operator-row-touch.pressed ? Palette.e100 : operator-row-touch.has-hover ? Palette.e50 : operator.is-last ? Palette.e50 : Palette.n50;
                             HorizontalLayout {
                                 padding-left: 18px;
                                 padding-right: 18px;
@@ -5826,10 +5828,10 @@ export component WeighingPrototype inherits Window {
                                     alignment: center;
                                     spacing: 3px;
                                     Text { text: operator.full-name; color: Palette.n900; font-size: 17px; font-weight: 700; overflow: elide; }
-                                    Text { text: operator.short-code == "" ? "Без кода" : "Код " + operator.short-code; color: Palette.n500; font-family: "Consolas"; font-size: 12px; }
+                                    Text { text: operator.short-code == "" ? UiText.translate(UiText.language, "Без кода") : UiText.translate(UiText.language, "Код ") + operator.short-code; color: Palette.n500; font-family: "Consolas"; font-size: 12px; }
                                 }
                                 Rectangle { horizontal-stretch: 1; }
-                                Text { text: operator.has-pin ? "PIN" : "ВХОД"; color: Palette.e600; font-size: 12px; font-weight: 700; vertical-alignment: center; }
+                                Text { text: operator.has-pin ? "PIN" : UiText.translate(UiText.language, "ВХОД"); color: Palette.e600; font-size: 12px; font-weight: 700; vertical-alignment: center; }
                             }
                             operator-row-touch := TouchArea {
                                 enabled: !root.operator-login-busy;
@@ -5839,12 +5841,12 @@ export component WeighingPrototype inherits Window {
                     }
                 }
                 if root.operators.length == 0: MainButton {
-                    text: "ПРОДОЛЖИТЬ БЕЗ ОПЕРАТОРА";
+                    text: UiText.translate(UiText.language, "ПРОДОЛЖИТЬ БЕЗ ОПЕРАТОРА");
                     icon: @image-url("../assets/icons/check-circle2.png");
                     border-radius: 16px;
-                    normal-color: Palette.n700;
-                    hover-color: Palette.n600;
-                    pressed-color: Palette.n800;
+                    normal-color: Palette.solid-n700;
+                    hover-color: Palette.solid-n600;
+                    pressed-color: Palette.solid-n800;
                     clicked => { root.continue-without-operator(); }
                 }
                 operator-exit-button := MainButton {
@@ -5852,9 +5854,9 @@ export component WeighingPrototype inherits Window {
                     text: root.exit-label;
                     icon: @image-url("../assets/icons/log-out-red.png");
                     border-radius: 16px;
-                    normal-color: Palette.r600;
+                    normal-color: Palette.solid-r600;
                     hover-color: Palette.r500;
-                    pressed-color: Palette.r700;
+                    pressed-color: Palette.solid-r700;
                     clicked => { root.quit-app(); }
                 }
             }
@@ -5873,11 +5875,11 @@ export component WeighingPrototype inherits Window {
             border-radius: 32px;
             border-width: 1px;
             border-color: Palette.n200;
-            background: white;
+            background: Palette.surface;
             VerticalLayout {
                 padding: 24px;
                 spacing: 10px;
-                Text { text: "Введите PIN"; color: Palette.n900; font-size: 26px; font-weight: 700; horizontal-alignment: center; }
+                Text { text: UiText.translate(UiText.language, "Введите PIN"); color: Palette.n900; font-size: 26px; font-weight: 700; horizontal-alignment: center; }
                 Text { text: root.selected-operator-name; color: Palette.n500; font-size: 16px; horizontal-alignment: center; overflow: elide; }
                 Rectangle {
                     height: 58px;
@@ -5915,14 +5917,14 @@ export component WeighingPrototype inherits Window {
                 }
                 Text {
                     height: 20px;
-                    text: root.operator-login-busy ? "Проверка PIN…" : root.operator-pin == "" ? "Коснитесь цифровой клавиши" : "Введено цифр: " + root.operator-pin-length;
+                    text: root.operator-login-busy ? UiText.translate(UiText.language, "Проверка PIN…") : root.operator-pin == "" ? UiText.translate(UiText.language, "Коснитесь цифровой клавиши") : UiText.translate(UiText.language, "Введено цифр: ") + root.operator-pin-length;
                     color: root.operator-login-busy ? Palette.a600 : Palette.n500;
                     font-size: 13px;
                     font-weight: root.operator-login-busy ? 700 : 500;
                     horizontal-alignment: center;
                     vertical-alignment: center;
                 }
-                if root.operator-login-error != "": Text { height: 30px; text: root.operator-login-error; color: Palette.r700; font-size: 14px; horizontal-alignment: center; wrap: word-wrap; }
+                if root.operator-login-error != "": Text { height: 30px; text: UiText.translate(UiText.language, root.operator-login-error); color: Palette.r700; font-size: 14px; horizontal-alignment: center; wrap: word-wrap; }
                 HorizontalLayout {
                     spacing: 9px;
                     KeyButton { horizontal-stretch: 1; enabled: !root.operator-login-busy; text: "1"; clicked => { root.operator-pin += "1"; root.operator-login-error = ""; } }
@@ -5943,24 +5945,24 @@ export component WeighingPrototype inherits Window {
                 }
                 HorizontalLayout {
                     spacing: 9px;
-                    KeyButton { horizontal-stretch: 1; enabled: !root.operator-login-busy; text: "ОЧИСТИТЬ"; clicked => { root.operator-pin = ""; root.operator-login-error = ""; } }
+                    KeyButton { horizontal-stretch: 1; enabled: !root.operator-login-busy; text: UiText.translate(UiText.language, "ОЧИСТИТЬ"); clicked => { root.operator-pin = ""; root.operator-login-error = ""; } }
                     KeyButton { horizontal-stretch: 1; enabled: !root.operator-login-busy; text: "0"; clicked => { root.operator-pin += "0"; root.operator-login-error = ""; } }
                 }
                 HorizontalLayout {
                     spacing: 10px;
                     MainButton {
                         horizontal-stretch: 1;
-                        text: "ОТМЕНА";
+                        text: UiText.translate(UiText.language, "ОТМЕНА");
                         icon: @image-url("../assets/icons/x.png");
                         border-radius: 16px;
-                        normal-color: Palette.n600;
-                        hover-color: Palette.n500;
-                        pressed-color: Palette.n700;
+                        normal-color: Palette.solid-n600;
+                        hover-color: Palette.solid-n500;
+                        pressed-color: Palette.solid-n700;
                         clicked => { root.operator-pin = ""; root.operator-pin-visible = false; root.operator-login-error = ""; }
                     }
                     MainButton {
                         horizontal-stretch: 1;
-                        text: "ВОЙТИ";
+                        text: UiText.translate(UiText.language, "ВОЙТИ");
                         icon: @image-url("../assets/icons/check-circle2.png");
                         border-radius: 16px;
                         enabled: root.operator-pin != "" && !root.operator-login-busy;
@@ -5976,7 +5978,7 @@ export component WeighingPrototype inherits Window {
         Rectangle {
             width: min(parent.width - 48px, 800px); height: min(parent.height - 48px, 640px);
             x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
-            border-radius: 18px; background: white;
+            border-radius: 18px; background: Palette.surface;
             VerticalLayout { padding: 20px; spacing: 12px;
                 HorizontalLayout { spacing: 12px;
                     Text { min-width: 0px; horizontal-stretch: 1; text: root.settings-picker-target == "scale-protocol" ? root.form-choose-protocol : root.form-choose-device; color: Palette.n900; font-size: 22px; font-weight: 700; wrap: word-wrap; vertical-alignment: center; }
@@ -6007,7 +6009,7 @@ export component WeighingPrototype inherits Window {
                             if root.settings-picker-protocols.length == 0: SettingsNotice { text: root.form-no-results; }
                             for protocol in root.settings-picker-protocols: SettingsSelect {
                                 label: protocol.default-baud-rate + " baud · " + protocol.serial-format;
-                                value: protocol.name; hint: protocol.description; option: true; selected: protocol.id == root.scale-settings-protocol;
+                                value: protocol.name; hint: UiText.translate(UiText.language, protocol.description); option: true; selected: protocol.id == root.scale-settings-protocol;
                                 clicked => { root.select-settings-device(protocol.id, protocol.name, protocol.description, protocol.default-baud-rate); }
                             }
                         }
@@ -6022,7 +6024,7 @@ export component WeighingPrototype inherits Window {
         Rectangle {
             width: min(parent.width - 48px, 590px); height: discard-content.min-height;
             x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
-            border-radius: 18px; background: white;
+            border-radius: 18px; background: Palette.surface;
             discard-content := VerticalLayout { padding: 24px; spacing: 18px;
                 Text { min-width: 0px; text: root.form-discard-title; color: Palette.n900; font-size: 22px; font-weight: 700; wrap: word-wrap; }
                 SettingsNotice { text: root.form-discard-text; warning: true; }
@@ -6047,7 +6049,7 @@ export component WeighingPrototype inherits Window {
             border-radius: 30px;
             border-width: 1px;
             border-color: Palette.n200;
-            background: white;
+            background: Palette.surface;
             drop-shadow-color: #00000080;
             drop-shadow-blur: 30px;
 
@@ -6069,7 +6071,7 @@ export component WeighingPrototype inherits Window {
                     horizontal-alignment: center;
                 }
                 Text {
-                    text: root.settings-input-caption;
+                    text: UiText.translate(UiText.language, root.settings-input-caption);
                     color: Palette.n600;
                     font-size: 11px;
                     font-weight: 750;
@@ -6120,6 +6122,38 @@ export component WeighingPrototype inherits Window {
                         root.settings-input-draft = "";
                     }
                 }
+            }
+        }
+    }
+
+    // Accessible from every page; opening this panel never discards device drafts.
+    if root.preferences-visible: Rectangle {
+        width: parent.width; height: parent.height; background: #00000099;
+        TouchArea { clicked => { root.preferences-visible = false; } }
+        Rectangle {
+            width: min(600px, parent.width - 48px); height: 410px;
+            x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+            background: Palette.surface; border-color: Palette.n300; border-width: 1px; border-radius: 20px;
+            TouchArea { }
+            VerticalLayout {
+                padding: 24px; spacing: 14px;
+                Text { text: root.preferences-title; font-size: 24px; font-weight: 750; color: Palette.n900; }
+                Text { text: root.preferences-language-label; font-size: 14px; color: Palette.n600; }
+                HorizontalLayout {
+                    spacing: 8px;
+                    SettingsTab { text: "Русский"; selected: root.ui-language == "ru"; clicked => { root.change-ui-language("ru"); } }
+                    SettingsTab { text: "English"; selected: root.ui-language == "en"; clicked => { root.change-ui-language("en"); } }
+                    SettingsTab { text: "Deutsch"; selected: root.ui-language == "de"; clicked => { root.change-ui-language("de"); } }
+                    SettingsTab { text: "Українська"; selected: root.ui-language == "uk"; clicked => { root.change-ui-language("uk"); } }
+                }
+                Text { text: root.preferences-theme-label; font-size: 14px; color: Palette.n600; }
+                HorizontalLayout {
+                    spacing: 8px;
+                    SettingsTab { text: root.preferences-light-label; selected: !root.dark-theme; clicked => { root.change-ui-theme(false); } }
+                    SettingsTab { text: root.preferences-dark-label; selected: root.dark-theme; clicked => { root.change-ui-theme(true); } }
+                }
+                Text { text: root.preferences-error == "" ? root.preferences-hint : root.preferences-error; color: root.preferences-error == "" ? Palette.n500 : Palette.r600; font-size: 13px; wrap: word-wrap; }
+                SettingsAction { primary: true; text: root.keyboard-done-label; clicked => { root.preferences-visible = false; } }
             }
         }
     }

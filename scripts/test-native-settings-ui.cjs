@@ -55,3 +55,17 @@ assert.match(printerForm, /root\.settings-driver-name/);
 // Existing printer activation policy is unchanged by the UI reorganization.
 assert.match(runtime, /active: true,\s*name: ui\.get_settings_name\(\)/);
 console.log('Native settings: 4 sections, 8 labeled keyboard fields; no editable printer name or label parameters, bounded scrolling, draft protection and existing print confirmations verified');
+
+const palette = fs.readFileSync('src-tauri/slint/ui/palette.slint', 'utf8');
+assert.match(ui, /root\.open-preferences\(\)/);
+for (const language of ['ru', 'en', 'de', 'uk']) assert.ok(ui.includes(`root.change-ui-language("${language}")`));
+assert.match(ui, /root\.change-ui-theme\(true\)/);
+assert.match(ui, /root\.change-ui-theme\(false\)/);
+assert.match(ui, /WidgetPalette\.color-scheme/);
+assert.match(palette, /in-out property <bool> dark/);
+assert.match(controls, /import \{ Palette \} from "palette.slint"/);
+assert.match(runtime, /initialize_ui_preferences\(&ui, preferences_state\)/);
+assert.match(checks, /preferences-save-failure-retains-current-values/);
+console.log('Interface preferences: visible language/theme controls, shared dark palette, persisted selections and failure checks verified');
+
+require('./test-native-locales.cjs');

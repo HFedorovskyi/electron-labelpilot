@@ -7,10 +7,22 @@ fn main() {
     #[cfg(feature = "desktop")]
     tauri_build::build();
 
+    // The standalone Slint binary does not run Tauri's resource builder.
+    // Embed the same brand icon so Explorer and taskbar fallbacks agree.
+    #[cfg(all(windows, feature = "slint-ui", not(feature = "desktop")))]
+    {
+        println!("cargo:rerun-if-changed=../build/icon.ico");
+        tauri_winres::WindowsResource::new()
+            .set_icon("../build/icon.ico")
+            .compile_for(&["labelpilot-slint"])
+            .expect("failed to embed LabelPilot Windows icon");
+    }
+
     #[cfg(feature = "slint-ui")]
     {
         println!("cargo:rerun-if-changed=slint/ui/weighing.slint");
         println!("cargo:rerun-if-changed=slint/ui/settings-controls.slint");
+        println!("cargo:rerun-if-changed=slint/ui/palette.slint");
         println!("cargo:rerun-if-changed=slint/assets");
         let config = slint_build::CompilerConfiguration::new()
             .embed_resources(slint_build::EmbedResourcesKind::EmbedFiles);

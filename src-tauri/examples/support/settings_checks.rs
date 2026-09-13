@@ -292,3 +292,45 @@ pub fn verify() -> Result<Vec<String>, slint::PlatformError> {
     checks.push("queue-model-filters-all-states".into());
     Ok(checks)
 }
+
+/// Real callbacks, isolated preferences file, restart and write-error behavior.
+pub fn verify_preferences(directory: &std::path::Path) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    use labelpilot_tauri_lib::slint_runtime::initialize_ui_preferences;
+    std::fs::create_dir_all(directory)?;
+    std::fs::write(directory.join("printer-config.json"), br#"{"language":"ru","fixture":"preserve"}"#)?;
+    let before = std::fs::read(directory.join("printer-config.json"))?;
+    let ui = WeighingPrototype::new()?;
+    initialize_ui_preferences(&ui, Some(directory.to_path_buf()));
+    ui.set_settings_dirty(true);
+    ui.set_scale_settings_dirty(true);
+    ui.set_settings_ip("192.0.2.123".into());
+    ui.invoke_open_preferences();
+    assert!(ui.get_preferences_visible());
+    for language in ["ru", "en", "de", "uk"] {
+        ui.invoke_change_ui_language(language.into());
+        assert_eq!(ui.get_ui_language(), language);
+        for dark in [false, true] {
+            ui.invoke_change_ui_theme(dark);
+            assert_eq!(ui.get_dark_theme(), dark);
+            let restarted = WeighingPrototype::new()?;
+            initialize_ui_preferences(&restarted, Some(directory.to_path_buf()));
+            assert_eq!(restarted.get_ui_language(), language);
+            assert_eq!(restarted.get_dark_theme(), dark);
+        }
+    }
+    assert!(ui.get_settings_dirty() && ui.get_scale_settings_dirty());
+    assert_eq!(ui.get_settings_ip(), "192.0.2.123");
+    assert_eq!(std::fs::read(directory.join("printer-config.json"))?, before);
+    ui.invoke_change_ui_language("xx".into());
+    assert_eq!(ui.get_ui_language(), "uk");
+    let occupied = directory.join("occupied");
+    std::fs::write(&occupied, b"file, not a directory")?;
+    let failed = WeighingPrototype::new()?;
+    initialize_ui_preferences(&failed, Some(occupied));
+    failed.invoke_change_ui_theme(true);
+    assert!(!failed.get_dark_theme());
+    failed.invoke_change_ui_language("en".into());
+    assert_eq!(failed.get_ui_language(), "ru");
+    assert!(!failed.get_preferences_error().is_empty());
+    Ok(vec!["preferences-visible".into(), "four-languages-two-themes-live".into(), "preferences-survive-restart".into(), "preferences-preserve-device-drafts-and-files".into(), "preferences-save-failure-retains-current-values".into()])
+}

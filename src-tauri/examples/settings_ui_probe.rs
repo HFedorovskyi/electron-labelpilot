@@ -19,6 +19,8 @@ struct Fixture {
     advanced: bool,
     dirty: bool,
     language: String,
+    dark: bool,
+    preferences: bool,
     empty: bool,
     scroll: bool,
     section: i32,
@@ -29,6 +31,8 @@ struct Fixture {
     keyboard: bool,
     discard: bool,
     long_text: bool,
+    locale_audit: bool,
+    alert: bool,
 }
 impl Default for Fixture {
     fn default() -> Self {
@@ -38,6 +42,8 @@ impl Default for Fixture {
             advanced: false,
             dirty: false,
             language: "ru".into(),
+            dark: false,
+            preferences: false,
             empty: false,
             scroll: false,
             section: 0,
@@ -48,6 +54,8 @@ impl Default for Fixture {
             keyboard: false,
             discard: false,
             long_text: false,
+            locale_audit: false,
+            alert: false,
         }
     }
 }
@@ -73,7 +81,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if std::env::var_os("SLINT_BACKEND").is_none() {
         std::env::set_var("SLINT_BACKEND", "winit-skia-opengl");
     }
-    let callback_checks = settings_checks::verify()?;
+    let mut callback_checks = settings_checks::verify()?;
+    callback_checks.extend(settings_checks::verify_preferences(&path.with_extension("preferences-data"))?);
     let ui = WeighingPrototype::new()?;
     ui.set_kiosk_mode(false);
     ui.set_compact(width < 1280.0);
@@ -85,7 +94,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     ui.set_operator_name("Оператор".into());
     ui.set_station_number("02".into());
     ui.set_server_online(true);
-    ui.set_ui_language(f.language.clone().into());
+    labelpilot_tauri_lib::slint_runtime::initialize_ui_preferences(&ui, None);
+    ui.invoke_change_ui_language(f.language.clone().into());
+    ui.invoke_change_ui_theme(f.dark);
+    if f.preferences { ui.invoke_open_preferences(); }
     ui.set_update_current_version(env!("CARGO_PKG_VERSION").into());
     ui.set_active_page(f.page);
     ui.set_settings_active(true);
@@ -186,8 +198,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         ["failed", "uncertain", "queued", "accepted"].into_iter().enumerate().map(|(i, state)| PrintQueueRow {
         job_id: format!("fixture-{i}").into(), short_id: format!("0000{i}").into(), state: state.into(),
         state_label: ["Ошибка", "Не подтверждено", "В очереди", "Принято"][i].into(),
-        printer_name: "Принтер этикеток — производственная линия № 2".into(), route: "Упаковка".into(),
-        action: "Печать".into(), payload: "ZPL · 58 × 40 мм".into(), attempts: 1,
+        printer_name: "Принтер этикеток — производственная линия № 2".into(), route: "ZPL / TCP".into(),
+        action: "Печать".into(), payload: "58.0 KiB".into(), attempts: 1,
         updated: "08.09.2026 14:32:08".into(), error: if i < 2 { "Нет подтверждения от принтера. Проверьте подключение кабеля, наличие этикеток и состояние оборудования перед повторной отправкой задания.".into() } else { "".into() },
         can_retry: i < 2, can_cancel: i < 3, uncertain: i == 1, good: i == 3, warning: i == 1,
     }).collect::<Vec<_>>()
@@ -269,6 +281,61 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    if f.locale_audit {
+        ui.set_settings_active((1..=4).contains(&f.page));
+        ui.set_product_name("МӘРМӘР СИЫР / СТЕЙК НЬЮ-ЙОРК".into());
+        ui.set_product_article("22171111".into());
+        ui.set_scale_status("Весы: подключены".into());
+        ui.set_printer_status("Принтер: недоступен".into());
+        ui.set_fixed_status("Товар готов · установите упаковку на весы".into());
+        ui.set_fixed_product_name("МӘРМӘР СИЫР / СТЕЙК НЬЮ-ЙОРК".into());
+        ui.set_queue_status("424 заданий · обновлено 08:12:14".into());
+        ui.set_settings_status("Системные устройства обновлены · 08:11:37".into());
+        ui.set_license_status("Связь установлена · проверено 08:11:13".into());
+        ui.set_license_server_online(true);
+        ui.set_license_server_configured(true);
+        ui.set_license_server_compatible(true);
+        ui.set_license_server_version("1.1.32".into());
+        ui.set_license_min_client_version("1.3.12".into());
+        ui.set_license_station_name("Station 192.0.2.20".into());
+        ui.set_license_active(true);
+        ui.set_license_expires("Бессрочно".into());
+        ui.set_license_stations("1 · без лимита".into());
+        ui.set_license_features("Функции не указаны".into());
+        ui.set_license_signature("Обычный режим".into());
+        ui.set_update_status("Установлена актуальная версия".into());
+        let error = "Операция repeat: TCP printer connect 127.0.0.1:9100: Подключение не установлено, т.к. конечный компьютер отверг запрос на подключение. (os error 10061)";
+        ui.set_alert_text(error.into());
+        ui.set_alert_visible(f.alert);
+        let jobs = ui.get_durable_jobs();
+        if let Some(mut job) = jobs.row_data(0) {
+            job.state_label = "НЕЯСНО".into();
+            job.updated = "1 мин назад".into();
+            job.action = "Этикетка".into();
+            job.route = "ZPL / TCP".into();
+            job.payload = "58.0 KiB".into();
+            job.error = error.into();
+            job.uncertain = true;
+            job.warning = true;
+            jobs.set_row_data(0, job);
+        }
+        for (language, expected) in [
+            ("de", "424 Aufträge · aktualisiert 08:12:14"),
+            ("en", "424 jobs · updated 08:12:14"),
+            ("uk", "424 завдань · оновлено 08:12:14"),
+            ("ru", "424 заданий · обновлено 08:12:14"),
+            ("de", "424 Aufträge · aktualisiert 08:12:14"),
+        ] {
+            ui.invoke_change_ui_language(language.into());
+            assert_eq!(ui.get_localized_queue_status().as_str(), expected);
+            assert_eq!(ui.get_queue_status().as_str(), "424 заданий · обновлено 08:12:14");
+            assert_eq!(ui.get_product_name().as_str(), "МӘРМӘР СИЫР / СТЕЙК НЬЮ-ЙОРК");
+        }
+        assert!(ui.get_localized_alert_text().contains("Verbindung abgelehnt (os error 10061)"));
+        ui.invoke_change_ui_language(f.language.clone().into());
+        callback_checks.push("live-locales-de-en-uk-ru-de-preserve-model-data".into());
+    }
+
     ui.window().set_size(slint::LogicalSize::new(width, height));
     ui.window()
         .set_position(slint::LogicalPosition::new(-20000.0, -20000.0));
@@ -307,7 +374,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 image::ColorType::Rgba8,
             )
             .map_err(|e| e.to_string())?;
-            let meta = json!({"page": f.page, "connection": f.connection, "section": f.section, "picker": f.picker, "language": f.language, "logical_size": [width, height], "physical_size": [pixels.width(), pixels.height()], "scale_factor": ui.window().scale_factor(), "flags": {"query": f.query, "filter": f.filter, "busy": f.busy, "keyboard": f.keyboard, "discard": f.discard, "long_text": f.long_text}, "runtime_started": false, "callback_checks": callback_checks});
+            let meta = json!({"page": f.page, "connection": f.connection, "section": f.section, "picker": f.picker, "language": f.language, "dark": f.dark, "preferences": f.preferences, "logical_size": [width, height], "physical_size": [pixels.width(), pixels.height()], "scale_factor": ui.window().scale_factor(), "flags": {"query": f.query, "filter": f.filter, "busy": f.busy, "keyboard": f.keyboard, "discard": f.discard, "long_text": f.long_text}, "runtime_started": false, "callback_checks": callback_checks});
             std::fs::write(
                 path.with_extension("json"),
                 serde_json::to_vec_pretty(&meta).map_err(|e| e.to_string())?,
