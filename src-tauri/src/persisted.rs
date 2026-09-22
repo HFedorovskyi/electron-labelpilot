@@ -246,8 +246,10 @@ impl PersistedState {
 
 fn default_scale() -> Value {
     json!({
-        "type": "simulator",
-        "protocolId": "simulator",
+        "type": "serial",
+        "protocolId": "generic",
+        "path": "",
+        "baudRate": 9600,
         "pollingInterval": 250,
         "stabilityCount": 4
     })
@@ -269,8 +271,12 @@ fn default_device(id: &str, name: &str) -> Value {
         "connection": "windows_driver",
         "protocol": "image",
         "compatibilityMode": "auto",
+        "zplCompression": "none",
         "port": 9100,
-        "baudRate": 9600,
+        "baudRate": 115200,
+        "flowControl": "hardware",
+        "parity": "none",
+        "dataBits": 8,
         "dpi": 203
     })
 }
@@ -313,6 +319,56 @@ fn normalize_printer(value: Option<Value>) -> Value {
         // Connection framing is selected by the transport. This legacy operator
         // switch caused EOF-driven bridges to release many labels at box close.
         device.remove("persistentConnection");
+        let zpl_compression = device
+            .get("zplCompression")
+            .and_then(Value::as_str)
+            .map(|value| value.trim().to_ascii_lowercase())
+            .or_else(|| {
+                device
+                    .get("z64")
+                    .and_then(Value::as_bool)
+                    .map(|enabled| if enabled { "z64" } else { "ascii-rle" }.to_owned())
+            })
+            .unwrap_or_else(|| {
+                let full_profile =
+                    device.get("detectedProfileId").and_then(Value::as_str) == Some("zpl-full");
+                let advanced =
+                    device.get("compatibilityMode").and_then(Value::as_str) == Some("advanced");
+                if full_profile || advanced {
+                    "z64"
+                } else {
+                    "none"
+                }
+                .to_owned()
+            });
+        device.insert("zplCompression".to_owned(), Value::String(zpl_compression));
+        if device.get("connection").and_then(Value::as_str) == Some("serial") {
+            let raster_protocol = device.get("protocol").and_then(Value::as_str) != Some("browser");
+            let baud_rate = device
+                .get("baudRate")
+                .and_then(Value::as_u64)
+                .unwrap_or(if raster_protocol { 115_200 } else { 9_600 });
+            device.insert("baudRate".to_owned(), json!(baud_rate));
+            let flow_control = device
+                .get("flowControl")
+                .and_then(Value::as_str)
+                .map(|value| value.trim().to_ascii_lowercase())
+                .unwrap_or_else(|| {
+                    if raster_protocol && baud_rate >= 115_200 {
+                        "hardware".to_owned()
+                    } else {
+                        "none".to_owned()
+                    }
+                });
+            device.insert("flowControl".to_owned(), Value::String(flow_control));
+            let parity = device
+                .get("parity")
+                .and_then(Value::as_str)
+                .map(|value| value.trim().to_ascii_lowercase())
+                .unwrap_or_else(|| "none".to_owned());
+            device.insert("parity".to_owned(), Value::String(parity));
+            device.entry("dataBits".to_owned()).or_insert(json!(8));
+        }
         if let Some(boundary) = device
             .get("tcpJobBoundary")
             .and_then(Value::as_str)
@@ -400,6 +456,8 @@ fn validate_printer(value: &Value) -> Result<(), String> {
             "compatibilityMode",
             &["auto", "compatible", "advanced"],
         )?;
+        optional_enum(device, "flowControl", &["none", "hardware", "software"])?;
+        optional_enum(device, "parity", &["none", "even", "odd"])?;
         for field in [
             "detectedProfileId",
             "detectedEndpointKey",
@@ -422,7 +480,14 @@ fn validate_printer(value: &Value) -> Result<(), String> {
         ] {
             optional_number(device, field)?;
         }
+        optional_integer(device, "dataBits")?;
+        if let Some(data_bits) = device.get("dataBits").and_then(Value::as_u64) {
+            if !(5..=8).contains(&data_bits) {
+                return Err(format!("{role}.dataBits must be in 5..8"));
+            }
+        }
         optional_enum(device, "ramCache", &["auto", "on", "off"])?;
+        optional_enum(device, "zplCompression", &["none", "ascii-rle", "z64"])?;
         optional_boolean(device, "z64")?;
         optional_enum(device, "tcpJobBoundary", &["stream", "eof"])?;
     }
@@ -765,14 +830,19 @@ mod tests {
             for dark in [false, true] {
                 state.save_ui_preferences(language, dark).unwrap();
                 let restarted = PersistedState::for_data_dir(directory.0.clone());
-                assert_eq!(restarted.load_ui_preferences().unwrap(),
-                    json!({"language":language, "theme": if dark {"dark"} else {"light"}}));
+                assert_eq!(
+                    restarted.load_ui_preferences().unwrap(),
+                    json!({"language":language, "theme": if dark {"dark"} else {"light"}})
+                );
                 assert_eq!(fs::read(directory.0.join(PRINTER_FILE)).unwrap(), before);
             }
         }
         let before = fs::read(directory.0.join("ui-preferences.json")).unwrap();
         assert!(state.save_ui_preferences("invalid", true).is_err());
-        assert_eq!(fs::read(directory.0.join("ui-preferences.json")).unwrap(), before);
+        assert_eq!(
+            fs::read(directory.0.join("ui-preferences.json")).unwrap(),
+            before
+        );
     }
 
     #[test]
@@ -783,7 +853,9 @@ mod tests {
         assert!(state.load_ui_preferences().is_err());
         let file = directory.0.join("not-a-directory");
         fs::write(&file, b"occupied").unwrap();
-        assert!(PersistedState::for_data_dir(file).save_ui_preferences("en", true).is_err());
+        assert!(PersistedState::for_data_dir(file)
+            .save_ui_preferences("en", true)
+            .is_err());
     }
 
     #[test]
@@ -816,6 +888,61 @@ mod tests {
         assert!(saved["packPrinter"].get("persistentConnection").is_none());
         assert!(saved["boxPrinter"].get("persistentConnection").is_none());
         assert_eq!(saved["packPrinter"]["tcpJobBoundary"], "eof");
+    }
+
+    #[test]
+    fn printer_config_migrates_serial_defaults_without_overwriting_legacy_baud() {
+        let mut printer = default_printer();
+        printer["packPrinter"] = json!({
+            "id": "new-raster",
+            "active": true,
+            "name": "New raster serial",
+            "connection": "serial",
+            "protocol": "epl",
+            "serialPort": "COM4"
+        });
+        printer["boxPrinter"] = json!({
+            "id": "legacy",
+            "active": true,
+            "name": "Legacy serial",
+            "connection": "serial",
+            "protocol": "zpl",
+            "serialPort": "COM5",
+            "baudRate": 9600
+        });
+
+        let normalized = normalize_printer(Some(printer));
+        assert_eq!(normalized["packPrinter"]["baudRate"], 115_200);
+        assert_eq!(normalized["packPrinter"]["flowControl"], "hardware");
+        assert_eq!(normalized["packPrinter"]["parity"], "none");
+        assert_eq!(normalized["packPrinter"]["dataBits"], 8);
+        assert_eq!(normalized["boxPrinter"]["baudRate"], 9_600);
+        assert_eq!(normalized["boxPrinter"]["flowControl"], "none");
+        assert_eq!(normalized["packPrinter"]["zplCompression"], "none");
+        validate_printer(&normalized).unwrap();
+    }
+
+    #[test]
+    fn printer_config_migrates_legacy_z64_without_enabling_vendor_extensions() {
+        let mut printer = default_printer();
+        printer["packPrinter"] = json!({
+            "id": "legacy-rle", "active": true, "name": "Legacy RLE",
+            "connection": "tcp", "protocol": "image", "z64": false
+        });
+        printer["boxPrinter"] = json!({
+            "id": "legacy-z64", "active": true, "name": "Legacy Z64",
+            "connection": "tcp", "protocol": "image", "z64": true
+        });
+        printer["palletPrinter"] = json!({
+            "id": "generic", "active": true, "name": "Generic emulator",
+            "connection": "tcp", "protocol": "image"
+        });
+
+        let normalized = normalize_printer(Some(printer));
+        assert_eq!(normalized["packPrinter"]["zplCompression"], "ascii-rle");
+        assert_eq!(normalized["boxPrinter"]["zplCompression"], "z64");
+        assert_eq!(normalized["palletPrinter"]["zplCompression"], "none");
+        validate_printer(&normalized).unwrap();
     }
 
     #[test]

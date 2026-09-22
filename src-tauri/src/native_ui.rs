@@ -265,10 +265,14 @@ pub struct NativePrinterRoleSettings {
     pub port: i32,
     pub serial_port: String,
     pub baud_rate: i32,
+    pub flow_control: String,
+    pub parity: String,
+    pub data_bits: i32,
     pub driver_name: String,
     pub dpi: i32,
     pub ram_cache: String,
-    pub z64: bool,
+    pub zpl_compression: String,
+    pub confirmed_print: bool,
     pub darkness: Option<f64>,
     pub print_speed: Option<f64>,
     pub gap_mm: Option<f64>,
@@ -288,10 +292,14 @@ pub struct NativePrinterRoleSettingsInput {
     pub port: i32,
     pub serial_port: String,
     pub baud_rate: i32,
+    pub flow_control: String,
+    pub parity: String,
+    pub data_bits: i32,
     pub driver_name: String,
     pub dpi: i32,
     pub ram_cache: String,
-    pub z64: bool,
+    pub zpl_compression: String,
+    pub confirmed_print: bool,
     pub darkness: Option<f64>,
     pub print_speed: Option<f64>,
     pub gap_mm: Option<f64>,
@@ -489,7 +497,8 @@ impl NativeUiRuntime {
             .build()
             .map_err(|error| format!("failed to build native UI HTTP client: {error}"))?;
         #[cfg(feature = "slint-ui")]
-        let production_printer = NativePrintService::new(persisted.data_dir().to_path_buf());
+        let production_printer =
+            NativePrintService::new(persisted.data_dir().to_path_buf(), &printer)?;
         let recovered_print_jobs = printer.recover_pending_with_sink(events.clone())?;
         if recovered_print_jobs > 0 {
             events.emit(
@@ -624,7 +633,7 @@ impl NativeUiRuntime {
             })
             .collect::<Vec<_>>();
         let protocol_id =
-            value_string(config.get("protocolId")).unwrap_or_else(|| "simulator".to_owned());
+            value_string(config.get("protocolId")).unwrap_or_else(|| "generic".to_owned());
         let selected_protocol = protocols
             .iter()
             .find(|protocol| protocol.id == protocol_id)
@@ -651,7 +660,7 @@ impl NativeUiRuntime {
         };
         Ok(NativeScaleSettingsSnapshot {
             connection_type: value_string(config.get("type"))
-                .unwrap_or_else(|| "simulator".to_owned()),
+                .unwrap_or_else(|| "serial".to_owned()),
             protocol_id,
             protocol_name: selected_protocol
                 .map(|protocol| protocol.name.clone())
@@ -878,16 +887,25 @@ impl NativeUiRuntime {
     ) -> Result<NativePrinterCapability, String> {
         let mut config = self.build_printer_config(&input, auto_print_on_stable, true)?;
         let role = validated_printer_role(&input.role)?;
-        let device = config
+        let mut device = config
             .get(role)
             .cloned()
             .ok_or_else(|| format!("отсутствует конфигурация {role}"))?;
         let endpoint_key = printer_endpoint_key(&device);
         let protocol = detected_protocol(&device);
         let dpi = normalized_dpi(value_i64(device.get("dpi")).unwrap_or(203) as i32);
-        let recommended_profile = compatible_profile(&protocol).to_owned();
+        let compatible_profile = compatible_profile(&protocol).to_owned();
+        if matches!(protocol.as_str(), "zpl" | "image") {
+            device["capabilityProbe"] = Value::Bool(true);
+        }
         match query_printer_status_routed(self.events.clone(), &self.printer, device) {
             Ok(report) => {
+                let recommended_profile = if protocol == "zpl" && report.supports_utf8_text {
+                    "zpl-full".to_owned()
+                } else {
+                    compatible_profile.clone()
+                };
+                let detected_dpi = report.detected_dpi.map(i32::from).unwrap_or(dpi);
                 let details = if report.details.is_empty() {
                     "Транспорт доступен".to_owned()
                 } else {
@@ -909,6 +927,13 @@ impl NativeUiRuntime {
                             Value::String(endpoint_key.clone()),
                         );
                         target.insert("detectedProfileAt".to_owned(), json!(unix_ms()));
+                        if report.supports_z64 {
+                            target.insert(
+                                "zplCompression".to_owned(),
+                                Value::String("z64".to_owned()),
+                            );
+                            target.insert("z64".to_owned(), Value::Bool(true));
+                        }
                     }
                     if input.connection == "tcp" {
                         let boundary = detected_tcp_job_boundary(
@@ -926,7 +951,7 @@ impl NativeUiRuntime {
                     status: report.status,
                     details,
                     protocol,
-                    dpi,
+                    dpi: detected_dpi,
                     recommended_profile,
                     endpoint_key,
                 })
@@ -939,7 +964,7 @@ impl NativeUiRuntime {
                 details: error,
                 protocol,
                 dpi,
-                recommended_profile,
+                recommended_profile: compatible_profile,
                 endpoint_key,
             }),
         }
@@ -977,6 +1002,11 @@ impl NativeUiRuntime {
             .get_mut(role)
             .and_then(Value::as_object_mut)
             .ok_or_else(|| format!("конфигурация {role} повреждена"))?;
+        let switching_to_serial = input.connection == "serial"
+            && value_string(device.get("connection")).as_deref() != Some("serial");
+        let had_detected_zpl_full = value_string(device.get("detectedProfileId")).as_deref()
+            == Some("zpl-full")
+            && printer_zpl_graphic_encoding(&Value::Object(device.clone())) == "z64";
         let previous_signature = printer_detection_signature(&Value::Object(device.clone()));
         if device
             .get("id")
@@ -998,10 +1028,53 @@ impl NativeUiRuntime {
         set_optional_string(device, "serialPort", &input.serial_port);
         set_optional_string(device, "driverName", &input.driver_name);
         device.insert("port".to_owned(), json!(input.port));
-        device.insert("baudRate".to_owned(), json!(input.baud_rate));
+        let baud_rate = if switching_to_serial {
+            115_200
+        } else {
+            input.baud_rate
+        };
+        device.insert("baudRate".to_owned(), json!(baud_rate));
+        if input.connection == "serial" {
+            set_string(
+                device,
+                "flowControl",
+                if switching_to_serial {
+                    "hardware"
+                } else {
+                    &input.flow_control
+                },
+            );
+            set_string(
+                device,
+                "parity",
+                if switching_to_serial {
+                    "none"
+                } else {
+                    &input.parity
+                },
+            );
+            device.insert(
+                "dataBits".to_owned(),
+                json!(if switching_to_serial {
+                    8
+                } else {
+                    input.data_bits
+                }),
+            );
+        }
         device.insert("dpi".to_owned(), json!(input.dpi));
         set_string(device, "ramCache", &input.ram_cache);
-        device.insert("z64".to_owned(), Value::Bool(input.z64));
+        set_string(device, "zplCompression", &input.zpl_compression);
+        let supports_confirmation = matches!(input.connection.as_str(), "tcp" | "serial")
+            && matches!(input.protocol.as_str(), "zpl" | "image" | "tspl");
+        device.insert(
+            "confirmedPrint".to_owned(),
+            Value::Bool(input.confirmed_print && supports_confirmation),
+        );
+        device.insert(
+            "z64".to_owned(),
+            Value::Bool(input.zpl_compression == "z64"),
+        );
         // Connection lifetime is transport-owned. Old operator-selected values are
         // removed so a saved role cannot reintroduce delayed EOF-driven printing.
         device.remove("persistentConnection");
@@ -1012,6 +1085,10 @@ impl NativeUiRuntime {
         set_optional_number(device, "heightMm", input.height_mm);
         let current_signature = printer_detection_signature(&Value::Object(device.clone()));
         if current_signature != previous_signature {
+            if had_detected_zpl_full {
+                set_string(device, "zplCompression", "none");
+                device.insert("z64".to_owned(), Value::Bool(false));
+            }
             device.remove("detectedProfileId");
             device.remove("detectedEndpointKey");
             device.remove("detectedProfileAt");
@@ -1648,8 +1725,11 @@ impl NativeUiRuntime {
     }
     #[cfg(feature = "slint-ui")]
     pub fn delete_latest_production_pack(&self, product_id: i64) -> Result<i64, String> {
-        self.production_printer()?
-            .delete_latest_pack(self.operational()?, product_id)
+        self.production_printer()?.delete_latest_pack(
+            self.operational()?,
+            &self.printer,
+            product_id,
+        )
     }
     pub fn disconnect_printers(&self) {
         self.printer.disconnect_all();
@@ -1855,11 +1935,18 @@ fn printer_role_settings(
         ip: value_string(device.get("ip")).unwrap_or_default(),
         port: value_i64(device.get("port")).unwrap_or(9_100) as i32,
         serial_port: value_string(device.get("serialPort")).unwrap_or_default(),
-        baud_rate: value_i64(device.get("baudRate")).unwrap_or(9_600) as i32,
+        baud_rate: printer_serial_baud_rate(&device) as i32,
+        flow_control: printer_serial_flow_control(&device),
+        parity: value_string(device.get("parity")).unwrap_or_else(|| "none".to_owned()),
+        data_bits: value_i64(device.get("dataBits")).unwrap_or(8) as i32,
         driver_name: value_string(device.get("driverName")).unwrap_or_default(),
         dpi: normalized_dpi(value_i64(device.get("dpi")).unwrap_or(203) as i32),
         ram_cache: value_string(device.get("ramCache")).unwrap_or_else(|| "auto".to_owned()),
-        z64: device.get("z64").and_then(Value::as_bool).unwrap_or(false),
+        zpl_compression: printer_zpl_graphic_encoding(&device),
+        confirmed_print: device
+            .get("confirmedPrint")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         darkness: value_f64(device.get("darkness")),
         print_speed: value_f64(device.get("printSpeed")),
         gap_mm: value_f64(device.get("gapMm")),
@@ -1900,11 +1987,26 @@ fn validate_printer_settings_input(
     if !matches!(input.ram_cache.as_str(), "auto" | "on" | "off") {
         return Err("неподдерживаемый режим RAM-кэша".to_owned());
     }
+    if !matches!(input.zpl_compression.as_str(), "none" | "ascii-rle" | "z64") {
+        return Err("кодирование ZPL: none, ascii-rle или z64".to_owned());
+    }
     if !(1..=65_535).contains(&input.port) {
         return Err("TCP-порт должен быть в диапазоне 1–65535".to_owned());
     }
     if !(300..=921_600).contains(&input.baud_rate) {
         return Err("скорость Serial должна быть в диапазоне 300–921600".to_owned());
+    }
+    if !matches!(
+        input.flow_control.as_str(),
+        "none" | "hardware" | "software"
+    ) {
+        return Err("управление потоком Serial: none, hardware или software".to_owned());
+    }
+    if !matches!(input.parity.as_str(), "none" | "even" | "odd") {
+        return Err("чётность Serial: none, even или odd".to_owned());
+    }
+    if !(5..=8).contains(&input.data_bits) {
+        return Err("число бит данных Serial должно быть в диапазоне 5–8".to_owned());
     }
     if !matches!(input.dpi, 203 | 300 | 600) {
         return Err("поддерживаются 203, 300 или 600 DPI".to_owned());
@@ -2018,11 +2120,14 @@ fn printer_endpoint_key(device: &Value) -> String {
             value_i64(device.get("port")).unwrap_or(9_100)
         ),
         Some("serial") => format!(
-            "serial:{}:{}",
+            "serial:{}:{}:{}:{}:{}:1",
             value_string(device.get("serialPort"))
                 .unwrap_or_default()
                 .to_ascii_uppercase(),
-            value_i64(device.get("baudRate")).unwrap_or(9_600)
+            printer_serial_baud_rate(device),
+            value_i64(device.get("dataBits")).unwrap_or(8),
+            value_string(device.get("parity")).unwrap_or_else(|| "none".to_owned()),
+            printer_serial_flow_control(device),
         ),
         _ => format!(
             "spooler:{}",
@@ -2031,6 +2136,34 @@ fn printer_endpoint_key(device: &Value) -> String {
                 .to_ascii_lowercase()
         ),
     }
+}
+
+fn printer_uses_raster_serial_defaults(device: &Value) -> bool {
+    value_string(device.get("protocol")).as_deref() != Some("browser")
+}
+
+fn printer_serial_baud_rate(device: &Value) -> i64 {
+    value_i64(device.get("baudRate")).unwrap_or_else(|| {
+        if printer_uses_raster_serial_defaults(device) {
+            115_200
+        } else {
+            9_600
+        }
+    })
+}
+
+fn printer_serial_flow_control(device: &Value) -> String {
+    value_string(device.get("flowControl"))
+        .map(|value| value.trim().to_ascii_lowercase())
+        .unwrap_or_else(|| {
+            if printer_uses_raster_serial_defaults(device)
+                && printer_serial_baud_rate(device) >= 115_200
+            {
+                "hardware".to_owned()
+            } else {
+                "none".to_owned()
+            }
+        })
 }
 
 fn detected_tcp_job_boundary(host: &str, supports_bidirectional_status: bool) -> &'static str {
@@ -2118,6 +2251,23 @@ fn effective_profile_id(device: &Value) -> String {
     }
 }
 
+fn printer_zpl_graphic_encoding(device: &Value) -> String {
+    if let Some(value) = value_string(device.get("zplCompression")) {
+        let value = value.trim().to_ascii_lowercase();
+        if matches!(value.as_str(), "none" | "ascii-rle" | "z64") {
+            return value;
+        }
+    }
+    if let Some(z64) = device.get("z64").and_then(Value::as_bool) {
+        return if z64 { "z64" } else { "ascii-rle" }.to_owned();
+    }
+    if effective_profile_id(device) == "zpl-full" {
+        "z64".to_owned()
+    } else {
+        "none".to_owned()
+    }
+}
+
 fn probe_printer_role(
     printer: &PrinterTransportState,
     events: &RuntimeEventSink,
@@ -2193,8 +2343,19 @@ fn printer_endpoint(device: &Value) -> String {
             value_i64(device.get("port")).unwrap_or(9_100)
         ),
         Some("serial") => format!(
-            "serial:{}",
-            value_string(device.get("serialPort")).unwrap_or_else(|| "?".to_owned())
+            "serial:{} · {} · {}{}1 · {}",
+            value_string(device.get("serialPort")).unwrap_or_else(|| "?".to_owned()),
+            printer_serial_baud_rate(device),
+            value_i64(device.get("dataBits")).unwrap_or(8),
+            value_string(device.get("parity"))
+                .and_then(|value| value.chars().next())
+                .unwrap_or('n')
+                .to_ascii_uppercase(),
+            match printer_serial_flow_control(device).as_str() {
+                "hardware" => "RTS/CTS",
+                "software" => "XON/XOFF",
+                _ => "no flow",
+            }
         ),
         Some("windows_driver") => format!(
             "spooler:{}",
@@ -2949,7 +3110,8 @@ mod tests {
 
         let initial_snapshot = runtime.scale_settings_snapshot().unwrap();
         assert_eq!(initial_snapshot.protocols.len(), 20);
-        assert_eq!(initial_snapshot.connection_type, "simulator");
+        assert_eq!(initial_snapshot.connection_type, "serial");
+        assert_eq!(initial_snapshot.protocol_id, "generic");
 
         let simulator = NativeScaleSettingsInput {
             connection_type: "simulator".to_owned(),
@@ -3040,10 +3202,14 @@ mod tests {
             port: i32::from(port),
             serial_port: String::new(),
             baud_rate: 9_600,
+            flow_control: "none".to_owned(),
+            parity: "none".to_owned(),
+            data_bits: 8,
             driver_name: String::new(),
             dpi: 300,
             ram_cache: "auto".to_owned(),
-            z64: false,
+            zpl_compression: "none".to_owned(),
+            confirmed_print: false,
             darkness: Some(12.0),
             print_speed: Some(6.0),
             gap_mm: Some(2.0),
@@ -3092,6 +3258,7 @@ mod tests {
         assert_eq!(reloaded["packPrinter"]["id"], "pack_default");
         assert_eq!(reloaded["packPrinter"]["darkness"], 12.0);
         assert_eq!(reloaded["packPrinter"]["dpi"], 300);
+        assert_eq!(reloaded["packPrinter"]["zplCompression"], "none");
         assert!(reloaded["packPrinter"].get("detectedProfileId").is_none());
         assert!(reloaded["packPrinter"]
             .get("persistentConnection")
@@ -3158,11 +3325,11 @@ mod tests {
             b"^XA^FO20,20^FDnative queue test^FS^XZ".to_vec(),
         );
         assert!(send.is_err());
-        let uncertain = runtime.printer_queue_snapshot(100).unwrap();
-        assert_eq!(uncertain.summary.total, 1);
-        assert_eq!(uncertain.summary.uncertain, 1);
-        assert_eq!(uncertain.jobs[0].state, "uncertain");
-        let job_id = uncertain.jobs[0].job_id.clone();
+        let failed = runtime.printer_queue_snapshot(100).unwrap();
+        assert_eq!(failed.summary.total, 1);
+        assert_eq!(failed.summary.failed, 1);
+        assert_eq!(failed.jobs[0].state, "failed");
+        let job_id = failed.jobs[0].job_id.clone();
 
         let cancelled = runtime.cancel_print_job(&job_id).unwrap();
         assert_eq!(cancelled.state, "cancelled");
@@ -3177,7 +3344,7 @@ mod tests {
 
         assert!(runtime.retry_print_job(&job_id).is_err());
         let retried = runtime.printer_queue_snapshot(100).unwrap();
-        assert_eq!(retried.summary.uncertain, 1);
+        assert_eq!(retried.summary.failed, 1);
         assert!(retried.jobs[0].attempt_count >= 2);
 
         let diagnostics = runtime.probe_configured_printers().unwrap();
@@ -3272,6 +3439,7 @@ mod tests {
             "port": port,
             "dpi": 203,
             "persistentConnection": false,
+            "batchStatusPolling": false,
             "compatibilityMode": "compatible"
         });
         persisted

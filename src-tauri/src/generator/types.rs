@@ -62,6 +62,12 @@ pub(super) struct GenerationConfig {
     #[serde(default)]
     baud_rate: Option<u32>,
     #[serde(default)]
+    flow_control: Option<String>,
+    #[serde(default)]
+    parity: Option<String>,
+    #[serde(default)]
+    data_bits: Option<u8>,
+    #[serde(default)]
     driver_name: Option<String>,
 }
 
@@ -418,6 +424,15 @@ impl ParsedInput {
                     if tspl_text_requires_bitmap(element, &value) {
                         reasons.push(format!("{}:complex-text", element.id));
                     }
+                    if self.profile.id == "generic-tspl-safe"
+                        && matches!(element.text_align.as_deref(), Some("center" | "right"))
+                    {
+                        // Legacy TSPL firmware does not consistently accept the
+                        // optional TEXT alignment parameter. Font 0 is
+                        // proportional, so guessing a manual X offset would not
+                        // preserve layout fidelity; the raster path can.
+                        reasons.push(format!("{}:legacy-text-alignment", element.id));
+                    }
                 }
                 "barcode" => {
                     let value = interpolate(
@@ -486,6 +501,34 @@ fn validate_config(config: &GenerationConfig) -> Result<(), String> {
         .is_some_and(|dpi| !matches!(dpi, 203 | 300 | 600))
     {
         return Err("printer dpi must be 203, 300 or 600".to_owned());
+    }
+    if config
+        .baud_rate
+        .is_some_and(|baud| !(300..=4_000_000).contains(&baud))
+    {
+        return Err("serial printer baud rate must be in 300..4000000".to_owned());
+    }
+    if config.flow_control.as_deref().is_some_and(|value| {
+        !matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "none" | "hardware" | "software"
+        )
+    }) {
+        return Err("serial printer flowControl must be none, hardware, or software".to_owned());
+    }
+    if config.parity.as_deref().is_some_and(|value| {
+        !matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "none" | "even" | "odd"
+        )
+    }) {
+        return Err("serial printer parity must be none, even, or odd".to_owned());
+    }
+    if config
+        .data_bits
+        .is_some_and(|bits| !(5..=8).contains(&bits))
+    {
+        return Err("serial printer dataBits must be in 5..8".to_owned());
     }
     for (name, value) in [
         ("widthMm", config.width_mm),
@@ -594,15 +637,44 @@ fn physical_endpoint_key(config: &GenerationConfig) -> String {
             config.ip.as_deref().unwrap_or(""),
             config.port.unwrap_or(9100)
         ),
-        "serial" => format!(
-            "serial:{}:{}",
-            config
-                .serial_port
+        "serial" => {
+            let raster_protocol = matches!(
+                config.protocol.as_str(),
+                "zpl" | "tspl" | "epl" | "cpcl" | "dpl" | "sbpl" | "image"
+            );
+            let baud_rate =
+                config
+                    .baud_rate
+                    .unwrap_or(if raster_protocol { 115_200 } else { 9_600 });
+            let flow_control = config
+                .flow_control
                 .as_deref()
-                .unwrap_or("")
-                .to_ascii_uppercase(),
-            config.baud_rate.unwrap_or(9600)
-        ),
+                .map(|value| value.trim().to_ascii_lowercase())
+                .unwrap_or_else(|| {
+                    if raster_protocol && baud_rate >= 115_200 {
+                        "hardware".to_owned()
+                    } else {
+                        "none".to_owned()
+                    }
+                });
+            let parity = config
+                .parity
+                .as_deref()
+                .map(|value| value.trim().to_ascii_lowercase())
+                .unwrap_or_else(|| "none".to_owned());
+            format!(
+                "serial:{}:{}:{}:{}:{}:1",
+                config
+                    .serial_port
+                    .as_deref()
+                    .unwrap_or("")
+                    .to_ascii_uppercase(),
+                baud_rate,
+                config.data_bits.unwrap_or(8),
+                parity,
+                flow_control,
+            )
+        }
         _ => format!("spooler:{}", config.driver_name.as_deref().unwrap_or("")),
     }
 }
@@ -631,6 +703,54 @@ pub(super) fn interpolate(template: &str, data: &Map<String, Value>) -> String {
             })
         })
         .into_owned()
+}
+
+#[cfg(test)]
+mod serial_endpoint_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn config(value: Value) -> GenerationConfig {
+        serde_json::from_value(value).unwrap()
+    }
+
+    #[test]
+    fn serial_endpoint_key_uses_raster_defaults_and_all_framing_fields() {
+        let defaults = config(json!({
+            "protocol": "tspl",
+            "connection": "serial",
+            "serialPort": "com4"
+        }));
+        assert_eq!(
+            physical_endpoint_key(&defaults),
+            "serial:COM4:115200:8:none:hardware:1"
+        );
+
+        let configured = config(json!({
+            "protocol": "zpl",
+            "connection": "serial",
+            "serialPort": "COM5",
+            "baudRate": 115200,
+            "dataBits": 7,
+            "parity": "Even",
+            "flowControl": "Software"
+        }));
+        assert_eq!(
+            physical_endpoint_key(&configured),
+            "serial:COM5:115200:7:even:software:1"
+        );
+
+        let legacy = config(json!({
+            "protocol": "epl",
+            "connection": "serial",
+            "serialPort": "COM6",
+            "baudRate": 9600
+        }));
+        assert_eq!(
+            physical_endpoint_key(&legacy),
+            "serial:COM6:9600:8:none:none:1"
+        );
+    }
 }
 
 fn js_value_string(value: &Value) -> String {

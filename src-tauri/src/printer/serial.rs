@@ -3,7 +3,48 @@ use super::{
     WRITE_TIMEOUT,
 };
 use serialport::{DataBits, FlowControl, Parity, SerialPort, StopBits};
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+fn configured_data_bits(config: &PrinterDeviceConfig) -> DataBits {
+    match config.data_bits() {
+        5 => DataBits::Five,
+        6 => DataBits::Six,
+        7 => DataBits::Seven,
+        _ => DataBits::Eight,
+    }
+}
+
+fn configured_parity(config: &PrinterDeviceConfig) -> Parity {
+    match config.parity() {
+        "even" => Parity::Even,
+        "odd" => Parity::Odd,
+        _ => Parity::None,
+    }
+}
+
+fn configured_flow_control(config: &PrinterDeviceConfig) -> FlowControl {
+    match config.flow_control() {
+        "hardware" => FlowControl::Hardware,
+        "software" => FlowControl::Software,
+        _ => FlowControl::None,
+    }
+}
+
+pub(super) fn open_configured(
+    config: &PrinterDeviceConfig,
+    timeout: Duration,
+) -> serialport::Result<Box<dyn SerialPort>> {
+    serialport::new(
+        config.serial_port.as_deref().unwrap_or_default(),
+        config.baud_rate(),
+    )
+    .timeout(timeout)
+    .data_bits(configured_data_bits(config))
+    .parity(configured_parity(config))
+    .stop_bits(StopBits::One)
+    .flow_control(configured_flow_control(config))
+    .open()
+}
 
 #[derive(Default)]
 pub(super) struct SerialConnection {
@@ -85,17 +126,19 @@ impl SerialConnection {
         let port = self.port.as_mut().expect("connected serial port");
         let result = port
             .set_timeout(super::status::STATUS_IO_TIMEOUT)
-            .map_err(|error| TransportFailure {
-                message: format!("serial printer status timeout: {error}"),
-                timed_out: false,
+            .map_err(|error| {
+                TransportFailure::not_started(
+                    format!("serial printer status timeout: {error}"),
+                    false,
+                )
             })
             .and_then(|_| super::status::query_stream_report(config, port));
         if let Err(error) = port.set_timeout(WRITE_TIMEOUT) {
             self.close();
-            return Err(TransportFailure {
-                message: format!("serial printer write timeout restore: {error}"),
-                timed_out: false,
-            });
+            return Err(TransportFailure::not_started(
+                format!("serial printer write timeout restore: {error}"),
+                false,
+            ));
         }
         result
     }
@@ -110,17 +153,22 @@ impl SerialConnection {
         }
         let path = config.serial_port.as_deref().unwrap_or_default();
         let baud_rate = config.baud_rate();
-        let port = serialport::new(path, baud_rate)
-            .timeout(WRITE_TIMEOUT)
-            .data_bits(DataBits::Eight)
-            .parity(Parity::None)
-            .stop_bits(StopBits::One)
-            .flow_control(FlowControl::None)
-            .open()
-            .map_err(|error| TransportFailure {
-                message: format!("serial printer open {path}@{baud_rate}: {error}"),
-                timed_out: false,
-            })?;
+        let port = open_configured(config, WRITE_TIMEOUT).map_err(|error| {
+            TransportFailure::not_started(
+                format!(
+                    "serial printer open {path}@{baud_rate} {}{}1 {} flow control: {error}",
+                    config.data_bits(),
+                    config
+                        .parity()
+                        .chars()
+                        .next()
+                        .unwrap_or('n')
+                        .to_ascii_uppercase(),
+                    config.flow_control(),
+                ),
+                false,
+            )
+        })?;
         self.port = Some(port);
         self.endpoint = Some(endpoint);
         Ok(())
@@ -135,5 +183,45 @@ impl SerialConnection {
         self.port.take();
         self.endpoint = None;
         self.last_write = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn config(value: serde_json::Value) -> PrinterDeviceConfig {
+        PrinterDeviceConfig::from_value(value).unwrap()
+    }
+
+    #[test]
+    fn maps_configured_serial_framing_and_flow_control() {
+        let configured = config(json!({
+            "id": "configured",
+            "connection": "serial",
+            "protocol": "zpl",
+            "serialPort": "COM8",
+            "baudRate": 115200,
+            "dataBits": 7,
+            "parity": "even",
+            "flowControl": "software"
+        }));
+        assert_eq!(configured_data_bits(&configured), DataBits::Seven);
+        assert_eq!(configured_parity(&configured), Parity::Even);
+        assert_eq!(configured_flow_control(&configured), FlowControl::Software);
+
+        let raster_default = config(json!({
+            "id": "default",
+            "connection": "serial",
+            "protocol": "epl",
+            "serialPort": "COM9"
+        }));
+        assert_eq!(configured_data_bits(&raster_default), DataBits::Eight);
+        assert_eq!(configured_parity(&raster_default), Parity::None);
+        assert_eq!(
+            configured_flow_control(&raster_default),
+            FlowControl::Hardware
+        );
     }
 }

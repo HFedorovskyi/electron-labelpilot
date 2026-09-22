@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { printTauriLabel } from './tauriPrintOrchestrator';
 import { queryTauriPrinterStatus, warmupTauriRawPrinter } from './tauriBridge';
+import { printerProfileEndpointKey, type PrinterProfileSelection } from '../../shared/printerProfiles';
 
 type JsonObject = Record<string, unknown>;
 
@@ -35,14 +36,7 @@ function compatibleProfileFor(protocol: DetectablePrinterProtocol): string {
 }
 
 function printerEndpointKey(config: JsonObject): string {
-    const connection = String(config.connection ?? '');
-    if (connection === 'tcp') {
-        return 'tcp:' + String(config.ip ?? '').toLowerCase() + ':' + Number(config.port ?? 9100);
-    }
-    if (connection === 'serial') {
-        return 'serial:' + String(config.serialPort ?? '').toUpperCase() + ':' + Number(config.baudRate ?? 9600);
-    }
-    return 'spooler:' + String(config.driverName ?? '<default>').toLowerCase();
+    return printerProfileEndpointKey(config as unknown as PrinterProfileSelection);
 }
 
 function normalizedDpi(config: JsonObject): 203 | 300 | 600 {
@@ -59,7 +53,16 @@ export async function detectTauriPrinterCapabilities(value: unknown): Promise<Js
     const endpointKey = printerEndpointKey(config);
     const connection = String(config.connection ?? '');
     try {
-        const statusReport = await queryTauriPrinterStatus(config);
+        const statusReport = await queryTauriPrinterStatus({
+            ...config,
+            capabilityProbe: protocol === 'zpl',
+        });
+        const recommendedProfileId = protocol === 'zpl' && statusReport.supportsUtf8Text
+            ? 'zpl-full'
+            : protocol
+                ? compatibleProfileFor(protocol)
+                : undefined;
+        const detectedDpi = statusReport.detectedDpi ?? normalizedDpi(config);
         return {
             detected: protocol !== undefined,
             cached: false,
@@ -68,19 +71,26 @@ export async function detectTauriPrinterCapabilities(value: unknown): Promise<Js
                 ? (statusReport.supportsBidirectionalStatus ? 'high' : 'medium')
                 : 'none',
             ...(protocol ? { protocol } : {}),
-            dpi: normalizedDpi(config),
-            dotsPerMm: normalizedDpi(config) / 25.4,
+            dpi: detectedDpi,
+            dotsPerMm: detectedDpi / 25.4,
+            manufacturer: statusReport.manufacturer,
+            model: statusReport.model,
+            firmware: statusReport.firmware,
+            linkOsVersion: statusReport.linkOsVersion,
+            supportsUtf8Text: statusReport.supportsUtf8Text,
+            supportsZ64: statusReport.supportsZ64,
             status: statusReport.status === 'reachable' ? 'ready' : statusReport.status,
             statusDetails: statusReport.details,
             supportsBidirectionalStatus: statusReport.supportsBidirectionalStatus,
             ...(protocol ? {
-                recommendedProfileId: compatibleProfileFor(protocol),
+                recommendedProfileId,
                 endpointKey,
             } : {}),
             evidence: [
                 'transport:' + connection,
                 'configured-protocol:' + String(config.protocol ?? ''),
                 'status-response-bytes:' + statusReport.responseBytes,
+                ...statusReport.capabilityEvidence,
             ],
             detectedAt,
             expiresAt: detectedAt + 15 * 60_000,

@@ -273,11 +273,20 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
             const match = ws.match(/(\d+\.\d+)/);
             if (match) { setWeight(match[1]); weightRef.current = match[1]; }
         });
-        const removeStatusListener = window.desktopBridge.on('scale-status', (s: any) => setStatus(s));
+        const applyScaleStatus = (value: unknown) => {
+            const next = String(value || 'disconnected');
+            setStatus(next);
+            if (next !== 'connected') {
+                setWeight('0.000');
+                weightRef.current = '0.000';
+                setIsStable(false);
+            }
+        };
+        const removeStatusListener = window.desktopBridge.on('scale-status', applyScaleStatus);
         const removeErrorListener = window.desktopBridge.on('scale-error', (msg: string) => {
             setAlertMessage(`${t('ws.errorPrefix')}: ${msg}`);
         });
-        window.desktopBridge.invoke('get-scale-status').then((s: string) => { if (s) setStatus(s); });
+        window.desktopBridge.invoke('get-scale-status').then((s: string) => { if (s) applyScaleStatus(s); });
         const removeUpdateListener = window.desktopBridge.on('data-updated', () => {
             loadProducts();
             setSyncVersion(prev => prev + 1);
@@ -408,10 +417,17 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
     const handlePrint = async (isAuto = false) => {
         if (isPrintingRef.current) return;
         isPrintingRef.current = true;
+        let productionCommitted = false;
         try {
             if (!labelDoc) return;
             if (subMode === 'scale') {
-                const wGrams = parseFloat(weightRef.current) * 1000;
+                const measured = parseFloat(weightRef.current);
+                if (status !== 'connected' || !isStable || !Number.isFinite(measured) || measured <= 0.010) {
+                    setAlertMessage(t('ws.waitStableToPrint'));
+                    return;
+                }
+                if (!isAuto && printerConfig.autoPrintOnStable) autoPrintFiredRef.current = true;
+                const wGrams = measured * 1000;
                 const min = selectedProduct?.min_weight_grams || 0;
                 const max = selectedProduct?.max_weight_grams || Infinity;
                 if (wGrams < min || wGrams > max) {
@@ -464,6 +480,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                 printerConfig: printerConfig.packPrinter || undefined
             });
             if (!recordResult.success) throw new Error('Database recording failed');
+            productionCommitted = true;
             const actualBoxNumber = recordResult.boxNumber;
             const actualBoxId = recordResult.boxId;
             if (recordResult.newBoxCreated) setTotalBoxes(prev => prev + 1);
@@ -514,7 +531,10 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
         } catch (err) {
             console.error('Print Error:', err);
             setAlertMessage(`${t('ws.errorPrefix')}: ${err instanceof Error ? err.message : String(err)}`);
-        } finally { isPrintingRef.current = false; }
+        } finally {
+            if (isAuto && !productionCommitted) autoPrintFiredRef.current = false;
+            isPrintingRef.current = false;
+        }
     };
 
     // --- BOX LABEL PRINT HELPER ---
@@ -908,7 +928,7 @@ const FixedWeightStation = ({ activeTab }: { activeTab?: string }) => {
                 {subMode === 'scale' ? (
                     <>
                         <button onClick={() => handlePrint()}
-                            disabled={!selectedProduct || !labelDoc || status !== 'connected' || !inRange}
+                            disabled={!selectedProduct || !labelDoc || status !== 'connected' || !isStable || !inRange || !(parseFloat(weight) > 0.010)}
                             className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 transition-all rounded-3xl font-bold text-xl flex items-center justify-center gap-3 border-t border-white/10 shadow-[0_10px_40px_-10px_rgba(16,185,129,0.5)] disabled:opacity-40 disabled:pointer-events-none disabled:shadow-none">
                             <Printer className="w-6 h-6" /> {t('ws.print')}
                         </button>

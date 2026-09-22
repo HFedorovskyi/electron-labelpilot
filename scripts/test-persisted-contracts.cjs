@@ -20,6 +20,23 @@ const fixture = JSON.parse(fs.readFileSync(
 assert.deepEqual(normalizeScaleConfig(fixture.scale.input), fixture.scale.expected);
 assert.deepEqual(normalizeNumberingConfig(fixture.numbering.input), fixture.numbering.expected);
 assert.deepEqual(normalizePrinterConfig(fixture.printer.input), fixture.printer.expected);
+const migratedSerial = normalizePrinterConfig({
+    packPrinter: { id: 'new', active: true, name: 'New', connection: 'serial', protocol: 'epl', serialPort: 'COM4' },
+    boxPrinter: { id: 'old', active: true, name: 'Old', connection: 'serial', protocol: 'zpl', serialPort: 'COM5', baudRate: 9600 },
+});
+assert.equal(migratedSerial.packPrinter.baudRate, 115200);
+assert.equal(migratedSerial.packPrinter.flowControl, 'hardware');
+assert.equal(migratedSerial.packPrinter.parity, 'none');
+assert.equal(migratedSerial.packPrinter.dataBits, 8);
+assert.equal(migratedSerial.boxPrinter.baudRate, 9600);
+assert.equal(migratedSerial.boxPrinter.flowControl, 'none');
+assert.equal(migratedSerial.packPrinter.zplCompression, 'none');
+assert.equal(normalizePrinterConfig({
+    packPrinter: { id: 'legacy', active: true, name: 'Legacy', connection: 'tcp', protocol: 'image', z64: false },
+}).packPrinter.zplCompression, 'ascii-rle');
+assert.equal(normalizePrinterConfig({
+    packPrinter: { id: 'full', active: true, name: 'Full', connection: 'tcp', protocol: 'image', detectedProfileId: 'zpl-full' },
+}).packPrinter.zplCompression, 'z64');
 
 const rust = fs.readFileSync(path.join(root, 'src-tauri', 'src', 'persisted.rs'), 'utf8');
 assert.match(rust, /LABELPILOT_DATA_DIR/);

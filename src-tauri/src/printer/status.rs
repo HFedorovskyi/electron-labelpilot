@@ -1,6 +1,5 @@
 use super::{resolve_address, spooler, PrinterDeviceConfig, TransportFailure};
 use serde::{Deserialize, Serialize};
-use serialport::{DataBits, FlowControl, Parity, StopBits};
 use std::io::{self, Read, Write};
 use std::net::TcpStream;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -40,9 +39,18 @@ pub struct PrinterStatusReport {
     pub status: String,
     pub details: Vec<String>,
     pub supports_bidirectional_status: bool,
+    pub queued_formats: Option<u32>,
     pub response_bytes: usize,
     pub response_preview: Option<String>,
     pub raw_response_hex: Option<String>,
+    pub manufacturer: Option<String>,
+    pub model: Option<String>,
+    pub firmware: Option<String>,
+    pub link_os_version: Option<String>,
+    pub detected_dpi: Option<u16>,
+    pub supports_utf8_text: bool,
+    pub supports_z64: bool,
+    pub capability_evidence: Vec<String>,
     pub queried_at_ms: u64,
 }
 
@@ -51,21 +59,31 @@ pub(super) fn query(config: &PrinterDeviceConfig) -> Result<PrinterStatusReport,
         "tcp" => query_tcp(config),
         "serial" => query_serial(config),
         "windows_driver" => query_spooler(config),
-        other => Err(TransportFailure {
-            message: format!("unsupported printer connection: {other}"),
-            timed_out: false,
-        }),
+        other => Err(TransportFailure::not_started(
+            format!("unsupported printer connection: {other}"),
+            false,
+        )),
     }
     .map_err(|error| error.message)?;
     Ok(report(config, observation))
 }
 
+#[derive(Default)]
 struct StatusObservation {
     reachable: bool,
     status: &'static str,
     details: Vec<String>,
     supports_bidirectional_status: bool,
+    queued_formats: Option<u32>,
     response: Vec<u8>,
+    manufacturer: Option<String>,
+    model: Option<String>,
+    firmware: Option<String>,
+    link_os_version: Option<String>,
+    detected_dpi: Option<u16>,
+    supports_utf8_text: bool,
+    supports_z64: bool,
+    capability_evidence: Vec<String>,
 }
 
 fn query_tcp(config: &PrinterDeviceConfig) -> Result<StatusObservation, TransportFailure> {
@@ -88,20 +106,15 @@ fn query_tcp(config: &PrinterDeviceConfig) -> Result<StatusObservation, Transpor
 
 fn query_serial(config: &PrinterDeviceConfig) -> Result<StatusObservation, TransportFailure> {
     let path = config.serial_port.as_deref().unwrap_or_default();
-    let mut port = serialport::new(path, config.baud_rate())
-        .timeout(STATUS_IO_TIMEOUT)
-        .data_bits(DataBits::Eight)
-        .parity(Parity::None)
-        .stop_bits(StopBits::One)
-        .flow_control(FlowControl::None)
-        .open()
-        .map_err(|error| TransportFailure {
-            message: format!(
+    let mut port = super::serial::open_configured(config, STATUS_IO_TIMEOUT).map_err(|error| {
+        TransportFailure::not_started(
+            format!(
                 "serial printer status open {path}@{}: {error}",
                 config.baud_rate()
             ),
-            timed_out: false,
-        })?;
+            false,
+        )
+    })?;
     query_stream(config, &mut port)
 }
 
@@ -119,6 +132,7 @@ fn query_stream<T: StatusStream>(
             )],
             supports_bidirectional_status: false,
             response: Vec::new(),
+            ..StatusObservation::default()
         });
     };
     stream
@@ -126,7 +140,11 @@ fn query_stream<T: StatusStream>(
         .and_then(|_| stream.flush())
         .map_err(|error| transport_error("printer status command write", error))?;
     let response = read_bounded_response(stream, &config.protocol)?;
-    Ok(parse_protocol_response(&config.protocol, response))
+    let mut observation = parse_protocol_response(&config.protocol, response);
+    if config.capability_probe && matches!(config.protocol.as_str(), "zpl" | "image") {
+        enrich_zpl_capabilities(stream, &mut observation);
+    }
+    Ok(observation)
 }
 
 /// Runs the protocol status handshake on an already-open stream (the print
@@ -194,6 +212,182 @@ fn read_bounded_response_until<T: StatusStream>(
     Ok(response)
 }
 
+fn enrich_zpl_capabilities<T: StatusStream>(stream: &mut T, observation: &mut StatusObservation) {
+    if let Ok(response) = query_capability_value(stream, b"~HI\r\n") {
+        if let Some((model, firmware, dpi)) = parse_host_identification(&response) {
+            observation.model = Some(model.clone());
+            observation.firmware = Some(firmware.clone());
+            observation.detected_dpi = dpi;
+            observation
+                .capability_evidence
+                .push("zpl-host-identification".to_owned());
+            if is_zebra_model(&model) {
+                observation.manufacturer = Some("Zebra Technologies".to_owned());
+                observation
+                    .details
+                    .push(format!("Zebra {model}, firmware {firmware}"));
+                if supports_zpl_unicode_firmware(&firmware) {
+                    observation.supports_utf8_text = true;
+                    observation.supports_z64 = true;
+                    observation
+                        .capability_evidence
+                        .push("zebra-firmware-unicode".to_owned());
+                    observation.details.push(format!(
+                        "Zebra firmware {firmware}: ^CI28/Z64 capability detected"
+                    ));
+                }
+            } else {
+                observation.details.push(format!(
+                    "ZPL-compatible device {model}, firmware {firmware}; conservative profile retained"
+                ));
+                observation
+                    .capability_evidence
+                    .push("zpl-compatible-emulator".to_owned());
+            }
+        }
+    }
+    if observation.manufacturer.is_some() {
+        if let Ok(response) =
+            query_capability_value(stream, b"! U1 getvar \"appl.link_os_version\"\r\n")
+        {
+            if let Some(version) = parse_link_os_version(&response) {
+                observation.link_os_version = Some(version.clone());
+                observation.supports_utf8_text = true;
+                observation.supports_z64 = true;
+                observation
+                    .details
+                    .push(format!("Link-OS {version}: UTF-8/Z64 capability detected"));
+                observation
+                    .capability_evidence
+                    .push("sgd-appl.link_os_version".to_owned());
+            }
+        }
+    }
+}
+
+fn is_zebra_model(model: &str) -> bool {
+    let model = model.trim().to_ascii_uppercase();
+    model.contains("ZEBRA")
+        || [
+            "ZD", "ZT", "ZQ", "ZE", "ZR", "GK", "GX", "GC", "GT", "QL", "RW", "P4T", "S4M", "ZM",
+            "XI", "105SL", "110XI", "140XI", "170XI", "220XI", "LP ", "TLP ",
+        ]
+        .iter()
+        .any(|prefix| model.starts_with(prefix))
+}
+
+/// Zebra documents ^CI28 support from V50.14.x/V60.14.x onward. Later
+/// firmware families inherit it; older or nonstandard version strings stay safe.
+fn supports_zpl_unicode_firmware(firmware: &str) -> bool {
+    let version = firmware
+        .trim()
+        .trim_start_matches(|character: char| !character.is_ascii_digit());
+    let mut parts = version.split('.');
+    let Some(major) = parts.next().and_then(|value| value.parse::<u16>().ok()) else {
+        return false;
+    };
+    let minor = parts
+        .next()
+        .and_then(|value| {
+            value
+                .chars()
+                .take_while(|character| character.is_ascii_digit())
+                .collect::<String>()
+                .parse::<u16>()
+                .ok()
+        })
+        .unwrap_or(0);
+    major > 60 || matches!(major, 50 | 60) && minor >= 14
+}
+
+fn query_capability_value<T: StatusStream>(
+    stream: &mut T,
+    command: &[u8],
+) -> Result<Vec<u8>, TransportFailure> {
+    stream
+        .write_all(command)
+        .and_then(|_| stream.flush())
+        .map_err(|error| transport_error("printer capability command write", error))?;
+    let deadline = Instant::now() + STATUS_IO_TIMEOUT;
+    let mut response = Vec::with_capacity(128);
+    let mut buffer = [0_u8; 256];
+    loop {
+        let remaining = 1024_usize.saturating_sub(response.len());
+        let remaining_time = deadline.saturating_duration_since(Instant::now());
+        if remaining == 0 || remaining_time.is_zero() {
+            break;
+        }
+        stream
+            .set_status_read_timeout(remaining_time)
+            .map_err(|error| transport_error("printer capability read timeout", error))?;
+        let read_limit = buffer.len().min(remaining);
+        match stream.read(&mut buffer[..read_limit]) {
+            Ok(0) => break,
+            Ok(read) => {
+                response.extend_from_slice(&buffer[..read]);
+                if response.contains(&b'\n') {
+                    break;
+                }
+            }
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+                ) =>
+            {
+                break
+            }
+            Err(error) => return Err(transport_error("printer capability response read", error)),
+        }
+    }
+    Ok(response)
+}
+
+fn parse_host_identification(response: &[u8]) -> Option<(String, String, Option<u16>)> {
+    let text = String::from_utf8_lossy(response);
+    let fields = text
+        .trim_matches(|character: char| character.is_ascii_whitespace() || character.is_control())
+        .split(',')
+        .map(str::trim)
+        .collect::<Vec<_>>();
+    if fields.len() < 4
+        || fields[0].is_empty()
+        || fields[1].is_empty()
+        || fields[0].len() > 64
+        || fields[1].len() > 64
+    {
+        return None;
+    }
+    let dots_per_mm = fields[2]
+        .trim_end_matches(|character: char| character.is_ascii_alphabetic())
+        .parse::<u16>()
+        .ok();
+    let dpi = match dots_per_mm {
+        Some(8) => Some(203),
+        Some(12) => Some(300),
+        Some(24) => Some(600),
+        _ => None,
+    };
+    Some((fields[0].to_owned(), fields[1].to_owned(), dpi))
+}
+
+fn parse_link_os_version(response: &[u8]) -> Option<String> {
+    let value = String::from_utf8_lossy(response)
+        .trim_matches(|character: char| {
+            character.is_ascii_whitespace() || character.is_control() || character == '"'
+        })
+        .to_owned();
+    (!value.is_empty()
+        && value.len() <= 32
+        && value.bytes().any(|byte| byte.is_ascii_digit())
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
+        && !value.eq_ignore_ascii_case("unknown"))
+    .then_some(value)
+}
+
 fn response_complete(protocol: &str, response: &[u8]) -> bool {
     match protocol {
         "tspl" => !response.is_empty(),
@@ -230,6 +424,7 @@ fn unknown_status(response: Vec<u8>, reason: &str) -> StatusObservation {
         details: vec![reason.to_owned()],
         supports_bidirectional_status: false,
         response,
+        ..StatusObservation::default()
     }
 }
 
@@ -328,7 +523,9 @@ fn parse_zpl_response(response: Vec<u8>) -> StatusObservation {
         status,
         details,
         supports_bidirectional_status: true,
+        queued_formats: first[4].parse().ok(),
         response,
+        ..StatusObservation::default()
     }
 }
 
@@ -362,6 +559,7 @@ fn parse_tspl_response(response: Vec<u8>) -> StatusObservation {
         details,
         supports_bidirectional_status: true,
         response,
+        ..StatusObservation::default()
     }
 }
 
@@ -393,6 +591,7 @@ fn parse_text_response(response: Vec<u8>) -> StatusObservation {
         details,
         supports_bidirectional_status: status != "unknown",
         response,
+        ..StatusObservation::default()
     }
 }
 
@@ -415,6 +614,7 @@ fn query_spooler(config: &PrinterDeviceConfig) -> Result<StatusObservation, Tran
         details,
         supports_bidirectional_status: true,
         response: flags.to_le_bytes().to_vec(),
+        ..StatusObservation::default()
     })
 }
 
@@ -484,9 +684,18 @@ fn report(config: &PrinterDeviceConfig, observation: StatusObservation) -> Print
         status: observation.status.to_owned(),
         details: observation.details,
         supports_bidirectional_status: observation.supports_bidirectional_status,
+        queued_formats: observation.queued_formats,
         response_bytes: observation.response.len(),
         response_preview: preview,
         raw_response_hex,
+        manufacturer: observation.manufacturer,
+        model: observation.model,
+        firmware: observation.firmware,
+        link_os_version: observation.link_os_version,
+        detected_dpi: observation.detected_dpi,
+        supports_utf8_text: observation.supports_utf8_text,
+        supports_z64: observation.supports_z64,
+        capability_evidence: observation.capability_evidence,
         queried_at_ms: unix_ms(),
     }
 }
@@ -510,13 +719,11 @@ fn response_preview(response: &[u8]) -> Option<String> {
 }
 
 fn transport_error(context: &str, error: io::Error) -> TransportFailure {
-    TransportFailure {
-        message: format!("{context}: {error}"),
-        timed_out: matches!(
-            error.kind(),
-            io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
-        ),
-    }
+    let timed_out = matches!(
+        error.kind(),
+        io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+    );
+    TransportFailure::not_started(format!("{context}: {error}"), timed_out)
 }
 
 fn unix_ms() -> u64 {
@@ -554,14 +761,68 @@ mod tests {
             let mut command = [0_u8; 16];
             let read = stream.read(&mut command).unwrap();
             assert_eq!(&command[..read], b"~HS\r\n");
-            stream.write_all(b"\x02030,1,0,0250,000,0,0,0,000,0,0,0\x03\r\n\x02001,0,1,0,0,2,0,0,00000000,1,000\x03\r\n\x021234,0\x03\r\n").unwrap();
+            stream.write_all(b"\x02030,1,0,0250,007,0,0,0,000,0,0,0\x03\r\n\x02001,0,1,0,0,2,0,0,00000000,1,000\x03\r\n\x021234,0\x03\r\n").unwrap();
         });
         let report = query(&tcp_config(port, "zpl")).unwrap();
         server.join().unwrap();
         assert!(report.reachable);
         assert_eq!(report.status, "head-open");
+        assert_eq!(report.queued_formats, Some(7));
         assert!(report.supports_bidirectional_status);
         assert!(report.response_bytes <= MAX_STATUS_RESPONSE_BYTES);
+    }
+
+    #[test]
+    fn capability_probe_identifies_link_os_zebra_and_dpi() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut status_command = [0_u8; 5];
+            stream.read_exact(&mut status_command).unwrap();
+            assert_eq!(&status_command, b"~HS\r\n");
+            stream.write_all(b"\x02030,0,0,0250,000,0,0,0,000,0,0,0\x03\r\n\x02001,0,0,0,0,2,0,0,00000000,0,000\x03\r\n\x021234,0\x03\r\n").unwrap();
+
+            let mut identity_command = [0_u8; 5];
+            stream.read_exact(&mut identity_command).unwrap();
+            assert_eq!(&identity_command, b"~HI\r\n");
+            stream
+                .write_all(b"ZD421-203dpi ZPL,V99.20.17Z,8,65536KB,\r\n")
+                .unwrap();
+
+            let command = b"! U1 getvar \"appl.link_os_version\"\r\n";
+            let mut link_os_command = vec![0_u8; command.len()];
+            stream.read_exact(&mut link_os_command).unwrap();
+            assert_eq!(link_os_command, command);
+            stream.write_all(b"\"6.8.1\"\r\n").unwrap();
+        });
+        let mut config = tcp_config(port, "zpl");
+        config.capability_probe = true;
+        let report = query(&config).unwrap();
+        server.join().unwrap();
+        assert_eq!(report.manufacturer.as_deref(), Some("Zebra Technologies"));
+        assert_eq!(report.model.as_deref(), Some("ZD421-203dpi ZPL"));
+        assert_eq!(report.firmware.as_deref(), Some("V99.20.17Z"));
+        assert_eq!(report.link_os_version.as_deref(), Some("6.8.1"));
+        assert_eq!(report.detected_dpi, Some(203));
+        assert!(report.supports_utf8_text);
+        assert!(report.supports_z64);
+        assert!(parse_link_os_version(b"unknown SGD 123").is_none());
+        assert!(parse_link_os_version(b"?").is_none());
+    }
+
+    #[test]
+    fn zebra_firmware_detection_is_conservative_for_zpl_emulators() {
+        assert!(is_zebra_model("ZD421-203dpi ZPL"));
+        assert!(is_zebra_model("Zebra ZT411"));
+        assert!(!is_zebra_model("Xprinter XP-420B"));
+        assert!(!is_zebra_model("Godex G500"));
+        assert!(supports_zpl_unicode_firmware("V50.14.3Z"));
+        assert!(supports_zpl_unicode_firmware("V60.14.0Z"));
+        assert!(supports_zpl_unicode_firmware("V99.20.17Z"));
+        assert!(!supports_zpl_unicode_firmware("V50.13.9Z"));
+        assert!(!supports_zpl_unicode_firmware("V60.13.9Z"));
+        assert!(!supports_zpl_unicode_firmware("1.2.3"));
     }
 
     #[test]

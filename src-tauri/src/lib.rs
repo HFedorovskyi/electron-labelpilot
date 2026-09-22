@@ -46,6 +46,8 @@ mod native_raster;
 pub mod native_ui;
 #[cfg(feature = "slint-ui")]
 pub mod slint_runtime;
+#[cfg(feature = "slint-ui")]
+pub mod zpl_emulator_probe;
 
 #[cfg(feature = "desktop")]
 use commands::RuntimeState;

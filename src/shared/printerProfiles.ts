@@ -1,5 +1,6 @@
 export type PrinterCompatibilityMode = 'auto' | 'compatible' | 'advanced';
 export type PrinterProfileLanguage = 'zpl' | 'tspl' | 'epl' | 'cpcl' | 'dpl' | 'sbpl' | 'driver';
+export type ZplGraphicEncoding = 'none' | 'ascii-rle' | 'z64';
 export type PrinterProfileId =
     | 'generic-zpl-safe'
     | 'zpl-full'
@@ -28,6 +29,7 @@ export interface PrinterCompatibilityProfile {
     tier: 'compatible' | 'advanced' | 'driver';
     features: PrinterProfileFeatures;
     commandTerminator: '' | '\n' | '\r' | '\r\n';
+    zplGraphicEncoding: ZplGraphicEncoding;
 }
 
 const ZPL_1D = ['code128', 'gs1-128', 'ean13', 'ean8', 'upca', 'upce', 'code39', 'interleaved2of5'] as const;
@@ -51,6 +53,7 @@ export const PRINTER_COMPATIBILITY_PROFILES: Readonly<Record<PrinterProfileId, P
             bidirectionalStatus: false,
         },
         commandTerminator: '\n',
+        zplGraphicEncoding: 'none',
     },
     'zpl-full': {
         id: 'zpl-full',
@@ -67,6 +70,7 @@ export const PRINTER_COMPATIBILITY_PROFILES: Readonly<Record<PrinterProfileId, P
             bidirectionalStatus: true,
         },
         commandTerminator: '\n',
+        zplGraphicEncoding: 'z64',
     },
     'generic-tspl-safe': {
         id: 'generic-tspl-safe',
@@ -83,6 +87,7 @@ export const PRINTER_COMPATIBILITY_PROFILES: Readonly<Record<PrinterProfileId, P
             bidirectionalStatus: false,
         },
         commandTerminator: '\r\n',
+        zplGraphicEncoding: 'none',
     },
     'tspl2-full': {
         id: 'tspl2-full',
@@ -99,6 +104,7 @@ export const PRINTER_COMPATIBILITY_PROFILES: Readonly<Record<PrinterProfileId, P
             bidirectionalStatus: true,
         },
         commandTerminator: '\r\n',
+        zplGraphicEncoding: 'none',
     },
     'generic-epl-raster': {
         id: 'generic-epl-raster',
@@ -115,6 +121,7 @@ export const PRINTER_COMPATIBILITY_PROFILES: Readonly<Record<PrinterProfileId, P
             bidirectionalStatus: false,
         },
         commandTerminator: '\n',
+        zplGraphicEncoding: 'none',
     },
     'generic-cpcl-raster': {
         id: 'generic-cpcl-raster',
@@ -131,6 +138,7 @@ export const PRINTER_COMPATIBILITY_PROFILES: Readonly<Record<PrinterProfileId, P
             bidirectionalStatus: false,
         },
         commandTerminator: '\r\n',
+        zplGraphicEncoding: 'none',
     },
     'generic-dpl-raster': {
         id: 'generic-dpl-raster',
@@ -147,6 +155,7 @@ export const PRINTER_COMPATIBILITY_PROFILES: Readonly<Record<PrinterProfileId, P
             bidirectionalStatus: false,
         },
         commandTerminator: '\r',
+        zplGraphicEncoding: 'none',
     },
     'generic-sbpl-raster': {
         id: 'generic-sbpl-raster',
@@ -163,6 +172,7 @@ export const PRINTER_COMPATIBILITY_PROFILES: Readonly<Record<PrinterProfileId, P
             bidirectionalStatus: false,
         },
         commandTerminator: '',
+        zplGraphicEncoding: 'none',
     },
     'windows-driver': {
         id: 'windows-driver',
@@ -179,6 +189,7 @@ export const PRINTER_COMPATIBILITY_PROFILES: Readonly<Record<PrinterProfileId, P
             bidirectionalStatus: false,
         },
         commandTerminator: '\n',
+        zplGraphicEncoding: 'none',
     },
 };
 
@@ -192,13 +203,42 @@ export interface PrinterProfileSelection {
     port?: number;
     serialPort?: string;
     baudRate?: number;
+    flowControl?: 'none' | 'hardware' | 'software';
+    parity?: 'none' | 'even' | 'odd';
+    dataBits?: 5 | 6 | 7 | 8;
+    zplCompression?: ZplGraphicEncoding;
+    /** Legacy graphics switch retained while persisted profiles migrate. */
+    z64?: boolean;
     driverName?: string;
+}
+
+export function usesRasterSerialDefaults(protocol: PrinterProfileSelection['protocol']): boolean {
+    return protocol !== 'browser';
+}
+
+export function effectiveSerialBaudRate(selection: PrinterProfileSelection): number {
+    return selection.baudRate ?? (usesRasterSerialDefaults(selection.protocol) ? 115200 : 9600);
+}
+
+export function effectiveSerialFlowControl(selection: PrinterProfileSelection): 'none' | 'hardware' | 'software' {
+    if (selection.flowControl) return selection.flowControl;
+    return usesRasterSerialDefaults(selection.protocol) && effectiveSerialBaudRate(selection) >= 115200
+        ? 'hardware'
+        : 'none';
 }
 
 export function printerProfileEndpointKey(selection: PrinterProfileSelection): string {
     if (selection.connection === 'tcp') return `tcp:${selection.ip || ''}:${selection.port || 9100}`;
     if (selection.connection === 'serial') {
-        return `serial:${(selection.serialPort || '').toUpperCase()}:${selection.baudRate || 9600}`;
+        return [
+            'serial',
+            (selection.serialPort || '').toUpperCase(),
+            effectiveSerialBaudRate(selection),
+            selection.dataBits ?? 8,
+            selection.parity ?? 'none',
+            effectiveSerialFlowControl(selection),
+            1,
+        ].join(':');
     }
     return `spooler:${selection.driverName || ''}`;
 }
@@ -242,4 +282,15 @@ export function resolvePrinterProfile(selection: PrinterProfileSelection): Print
     return detected?.language === language
         ? detected
         : PRINTER_COMPATIBILITY_PROFILES[compatibleProfileId(language)];
+}
+
+export function effectiveZplGraphicEncoding(selection: PrinterProfileSelection): ZplGraphicEncoding {
+    if (selection.zplCompression === 'none'
+        || selection.zplCompression === 'ascii-rle'
+        || selection.zplCompression === 'z64') {
+        return selection.zplCompression;
+    }
+    if (selection.z64 === true) return 'z64';
+    if (selection.z64 === false) return 'ascii-rle';
+    return resolvePrinterProfile(selection).zplGraphicEncoding;
 }

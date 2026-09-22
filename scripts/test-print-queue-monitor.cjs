@@ -7,6 +7,7 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const read = relative => fs.readFileSync(path.join(root, relative), 'utf8');
 const component = read('src/renderer/components/PrintQueueMonitor.tsx');
+const startupModal = read('src/renderer/components/StartupUnresolvedPrintModal.tsx');
 const app = read('src/renderer/App.tsx');
 const sidebar = read('src/renderer/components/Sidebar.tsx');
 const bridge = read('src/renderer/platform/tauriBridge.ts');
@@ -20,6 +21,8 @@ const i18n = read('src/shared/i18n_data.ts');
 
 assert.match(app, /lazy\(\(\) => import\('\.\/components\/PrintQueueMonitor'\)\)/);
 assert.match(app, /activeTab === 'printQueue'/);
+assert.match(app, /StartupUnresolvedPrintModal/);
+assert.match(app, /onReviewQueue=\{\(\) => selectTab\('printQueue'\)\}/);
 assert.match(sidebar, /id: 'printQueue'/);
 assert.match(sidebar, /labelKey: 'sidebar\.printQueue'/);
 assert.match(component, /data-testid="print-queue-monitor"/);
@@ -35,6 +38,10 @@ assert.match(component, /min-h-12/);
 assert.match(component, /lg:grid-cols-3/);
 assert.match(component, /queryTauriPrinterStatus\(config\)/);
 assert.doesNotMatch(component, /setInterval\([^)]*queryTauriPrinterStatus/s);
+assert.match(startupModal, /UNRESOLVED_STATES/);
+assert.match(startupModal, /getTauriDurablePrintJobs\(state, 5_000\)/);
+assert.match(startupModal, /role="dialog" aria-modal="true"/);
+assert.match(startupModal, /queue\.startupUnresolvedTitle/);
 
 for (const marker of [
     'desktop_printer_query_status',
@@ -43,12 +50,12 @@ for (const marker of [
 ]) {
     assert.ok(bridge.includes(marker), `Renderer status bridge marker missing: ${marker}`);
 }
-assert.match(compatibility, /const statusReport = await queryTauriPrinterStatus\(config\)/);
+assert.match(compatibility, /const statusReport = await queryTauriPrinterStatus\(\{\s*\.\.\.config,\s*capabilityProbe:/s);
 assert.match(compatibility, /supportsBidirectionalStatus: statusReport\.supportsBidirectionalStatus/);
 assert.match(commands, /pub async fn desktop_printer_query_status/);
 assert.match(commands, /query_printer_status_routed\(RuntimeEventSink::tauri\(app\), &printer, payload\)/);
 assert.match(printer, /query_printer_status_with_sink/);
-assert.match(printer, /worker_holds_serial/);
+assert.match(printer, /worker_holds_connection/);
 assert.match(runtime, /commands::desktop_printer_query_status/);
 
 assert.match(status, /STATUS_CONNECT_TIMEOUT: Duration = Duration::from_millis\(1_500\)/);
@@ -74,6 +81,10 @@ const translationKeys = [
     'queue.checkPrinters',
     'queue.retryUncertainTitle',
     'queue.retryUncertainText',
+    'queue.startupUnresolvedTitle',
+    'queue.startupUnresolvedText',
+    'queue.startupAcknowledge',
+    'queue.startupReview',
     'queue.state.queued',
     'queue.state.rendering',
     'queue.state.sending',
@@ -87,6 +98,6 @@ for (const key of translationKeys) {
     assert.equal(count, 4, `${key} must exist exactly once in RU/EN/DE/UK`);
 }
 
-console.log('Operator print queue: lazy touch UI, 200-row bound, event refresh + visible-only 5s reconciliation');
+console.log('Operator print queue: lazy touch UI plus mandatory startup unresolved list, event refresh + visible-only 5s reconciliation');
 console.log('Recovery controls: failed retry/cancel and explicit duplicate warning for uncertain jobs');
 console.log('Status queries: bounded ZPL/TSPL bidirectional probes, generic transport reachability, Win32 spooler flags');

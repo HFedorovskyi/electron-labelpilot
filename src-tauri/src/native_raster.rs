@@ -2,10 +2,12 @@ use crate::generator::GenerationPayload;
 use ab_glyph::{point, Font, Glyph, GlyphId, PxScale, ScaleFont};
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
+use flate2::write::ZlibEncoder;
+use flate2::Compression;
 use image::{DynamicImage, GenericImageView, ImageReader, Limits, Rgba};
 use rxing::{BarcodeFormat, EncodeHints, MultiFormatWriter, Writer};
 use serde_json::{Map, Value};
-use std::io::Cursor;
+use std::io::{Cursor, Write};
 use std::time::Instant;
 
 const MAX_BITMAP_PIXELS: usize = 9_000_000;
@@ -13,7 +15,19 @@ const MAX_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
 const MAX_IMAGE_SOURCE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_IMAGE_SOURCE_PIXELS: u64 = 16_000_000;
 const MAX_BARCODE_VALUE_BYTES: usize = 4_096;
+const MAX_ZPL_RASTER_REGIONS: usize = 64;
+const ZPL_RASTER_ROW_GAP: usize = 4;
+const ZPL_RASTER_COLUMN_GAP_BYTES: usize = 8;
 const RXING_CODE128_FNC1: char = '\u{00f1}';
+
+#[derive(Clone, Debug)]
+pub struct RasterRegion {
+    pub x_dots: usize,
+    pub y_dots: usize,
+    pub height_dots: usize,
+    pub bytes_per_row: usize,
+    pub mono: Vec<u8>,
+}
 
 #[derive(Clone, Debug)]
 pub struct RasterizedLabel {
@@ -24,6 +38,9 @@ pub struct RasterizedLabel {
     pub height_mm: f64,
     pub mono: Vec<u8>,
     pub native_zpl_commands: Vec<String>,
+    /// Some means the renderer was allowed to separate ZPL-native fields from
+    /// tightly cropped bitmap regions. An empty vector is a native-only label.
+    pub zpl_raster_regions: Option<Vec<RasterRegion>>,
     pub render_micros: u64,
 }
 
@@ -70,6 +87,15 @@ pub fn render(payload: &GenerationPayload) -> Result<RasterizedLabel, String> {
         let element = object(raw, "label element")?;
         match string(element.get("type")).unwrap_or_default() {
             "text" => draw_text(&mut mono, bytes_per_row, geometry, element, data)?,
+            "rect" if supports_zpl_commands => {
+                if let Some(command) = zpl_rect(element, geometry) {
+                    if !command.is_empty() {
+                        native_zpl_commands.push(command);
+                    }
+                } else {
+                    draw_rect(&mut mono, bytes_per_row, geometry, element);
+                }
+            }
             "rect" => draw_rect(&mut mono, bytes_per_row, geometry, element),
             "table" => {
                 draw_table(&mut mono, bytes_per_row, geometry, element, data)?;
@@ -82,6 +108,8 @@ pub fn render(payload: &GenerationPayload) -> Result<RasterizedLabel, String> {
             other => return Err(format!("unsupported native raster element: {other}")),
         }
     }
+    let zpl_raster_regions = supports_zpl_commands
+        .then(|| zpl_raster_regions(&mono, bytes_per_row, geometry.height_dots));
     Ok(RasterizedLabel {
         width_dots: geometry.width_dots,
         height_dots: geometry.height_dots,
@@ -90,6 +118,7 @@ pub fn render(payload: &GenerationPayload) -> Result<RasterizedLabel, String> {
         height_mm: geometry.height_mm,
         mono,
         native_zpl_commands,
+        zpl_raster_regions,
         render_micros: started.elapsed().as_micros().min(u64::MAX as u128) as u64,
     })
 }
@@ -965,6 +994,42 @@ fn draw_rect(mono: &mut [u8], stride: usize, geometry: Geometry, element: &Map<S
     }
 }
 
+fn zpl_rect(element: &Map<String, Value>, geometry: Geometry) -> Option<String> {
+    if finite(element.get("borderRadius")).unwrap_or(0.0) != 0.0
+        || finite(element.get("rotation")).unwrap_or(0.0) != 0.0
+    {
+        return None;
+    }
+    let x = scaled(element, "x", geometry.scale_x).round() as i32;
+    let y = scaled(element, "y", geometry.scale_y).round() as i32;
+    let width = scaled(element, "w", geometry.scale_x).round().max(1.0) as i32;
+    let height = scaled(element, "h", geometry.scale_y).round().max(1.0) as i32;
+    if x < 0
+        || y < 0
+        || x.saturating_add(width) > geometry.width_dots as i32
+        || y.saturating_add(height) > geometry.height_dots as i32
+    {
+        return None;
+    }
+    let filled = string(element.get("fill"))
+        .is_some_and(|fill| fill != "transparent" && fill != "#ffffff" && fill != "white");
+    let border = (finite(element.get("borderWidth")).unwrap_or(0.0) as f32
+        * geometry.scale_x.min(geometry.scale_y))
+    .round()
+    .max(0.0) as i32;
+    if !filled && border == 0 {
+        return Some(String::new());
+    }
+    let thickness = if filled {
+        height
+    } else {
+        border.min(width).min(height)
+    };
+    Some(format!(
+        "^FO{x},{y}^GB{width},{height},{thickness},B,0^FS\n"
+    ))
+}
+
 fn zpl_barcode(
     element: &Map<String, Value>,
     data: &Map<String, Value>,
@@ -1680,9 +1745,120 @@ fn image_pixel_is_black(pixel: Rgba<u8>) -> bool {
     let luminance = f32::from(red) * 0.299 + f32::from(green) * 0.587 + f32::from(blue) * 0.114;
     alpha > 32 && luminance < 180.0
 }
+
+fn zpl_raster_regions(mono: &[u8], stride: usize, height: usize) -> Vec<RasterRegion> {
+    if stride == 0 || height == 0 || mono.is_empty() {
+        return Vec::new();
+    }
+    let mut bands = Vec::new();
+    let mut band_start = None;
+    let mut last_ink_row = 0;
+    for row in 0..height {
+        let has_ink = mono[row * stride..(row + 1) * stride]
+            .iter()
+            .any(|byte| *byte != 0);
+        if has_ink {
+            if band_start.is_none() {
+                band_start = Some(row);
+            }
+            last_ink_row = row;
+        } else if let Some(start) = band_start {
+            if row.saturating_sub(last_ink_row) > ZPL_RASTER_ROW_GAP {
+                bands.push((start, last_ink_row + 1));
+                band_start = None;
+            }
+        }
+    }
+    if let Some(start) = band_start {
+        bands.push((start, last_ink_row + 1));
+    }
+
+    let mut regions = Vec::new();
+    for (top, bottom) in bands {
+        let mut column_start = None;
+        let mut last_ink_column = 0;
+        for column in 0..stride {
+            let has_ink = (top..bottom).any(|row| mono[row * stride + column] != 0);
+            if has_ink {
+                if column_start.is_none() {
+                    column_start = Some(column);
+                }
+                last_ink_column = column;
+            } else if let Some(left) = column_start {
+                if column.saturating_sub(last_ink_column) > ZPL_RASTER_COLUMN_GAP_BYTES {
+                    regions.push(crop_raster_region(
+                        mono,
+                        stride,
+                        left,
+                        last_ink_column + 1,
+                        top,
+                        bottom,
+                    ));
+                    column_start = None;
+                }
+            }
+        }
+        if let Some(left) = column_start {
+            regions.push(crop_raster_region(
+                mono,
+                stride,
+                left,
+                last_ink_column + 1,
+                top,
+                bottom,
+            ));
+        }
+        if regions.len() > MAX_ZPL_RASTER_REGIONS {
+            return tight_raster_region(mono, stride, height)
+                .into_iter()
+                .collect();
+        }
+    }
+    regions
+}
+
+fn crop_raster_region(
+    mono: &[u8],
+    stride: usize,
+    left: usize,
+    right: usize,
+    top: usize,
+    bottom: usize,
+) -> RasterRegion {
+    let bytes_per_row = right - left;
+    let mut cropped = Vec::with_capacity(bytes_per_row * (bottom - top));
+    for row in top..bottom {
+        cropped.extend_from_slice(&mono[row * stride + left..row * stride + right]);
+    }
+    RasterRegion {
+        x_dots: left * 8,
+        y_dots: top,
+        height_dots: bottom - top,
+        bytes_per_row,
+        mono: cropped,
+    }
+}
+
+fn tight_raster_region(mono: &[u8], stride: usize, height: usize) -> Option<RasterRegion> {
+    let mut top = height;
+    let mut bottom = 0;
+    let mut left = stride;
+    let mut right = 0;
+    for row in 0..height {
+        for column in 0..stride {
+            if mono[row * stride + column] != 0 {
+                top = top.min(row);
+                bottom = bottom.max(row + 1);
+                left = left.min(column);
+                right = right.max(column + 1);
+            }
+        }
+    }
+    (top < bottom && left < right)
+        .then(|| crop_raster_region(mono, stride, left, right, top, bottom))
+}
+
 fn encode_zpl(bitmap: &RasterizedLabel, config: &Map<String, Value>) -> Result<Vec<u8>, String> {
-    let total = bitmap.mono.len();
-    let compressed = compress_zpl(&bitmap.mono, bitmap.bytes_per_row, bitmap.height_dots);
     let mut stream = format!(
         "^XA\n^PW{}\n^LL{}\n^PON\n",
         bitmap.width_dots, bitmap.height_dots
@@ -1693,10 +1869,30 @@ fn encode_zpl(bitmap: &RasterizedLabel, config: &Map<String, Value>) -> Result<V
     if let Some(value) = finite(config.get("printSpeed")) {
         stream.push_str(&format!("^PR{value}\n"));
     }
-    stream.push_str(&format!(
-        "^FO0,0^GFA,{total},{total},{},{}^FS\n",
-        bitmap.bytes_per_row, compressed
-    ));
+    match &bitmap.zpl_raster_regions {
+        Some(regions) => {
+            for region in regions {
+                append_zpl_graphic(
+                    &mut stream,
+                    region.x_dots,
+                    region.y_dots,
+                    &region.mono,
+                    region.bytes_per_row,
+                    region.height_dots,
+                    config,
+                )?;
+            }
+        }
+        None => append_zpl_graphic(
+            &mut stream,
+            0,
+            0,
+            &bitmap.mono,
+            bitmap.bytes_per_row,
+            bitmap.height_dots,
+            config,
+        )?,
+    }
     for command in &bitmap.native_zpl_commands {
         stream.push_str(command);
     }
@@ -1704,58 +1900,167 @@ fn encode_zpl(bitmap: &RasterizedLabel, config: &Map<String, Value>) -> Result<V
     Ok(stream.into_bytes())
 }
 
-fn compress_zpl(mono: &[u8], stride: usize, height: usize) -> String {
-    let mut output = String::new();
-    let mut previous = String::new();
-    for row in 0..height {
-        let bytes = &mono[row * stride..(row + 1) * stride];
-        let hex = bytes
-            .iter()
-            .map(|byte| format!("{byte:02X}"))
-            .collect::<String>();
-        if row > 0 && hex == previous {
-            output.push(':');
-        } else if bytes.iter().all(|byte| *byte == 0) {
-            output.push(',');
-        } else if bytes.iter().all(|byte| *byte == 0xff) {
-            output.push('!');
-        } else {
-            output.push_str(&compress_row(&hex));
-        }
-        previous = hex;
+fn append_zpl_graphic(
+    stream: &mut String,
+    x: usize,
+    y: usize,
+    mono: &[u8],
+    bytes_per_row: usize,
+    height: usize,
+    config: &Map<String, Value>,
+) -> Result<(), String> {
+    if mono.is_empty() {
+        return Ok(());
     }
-    output
+    let total = mono.len();
+    let graphic = match zpl_graphic_encoding(config) {
+        ZplGraphicEncoding::None => encode_zpl_hex(mono),
+        ZplGraphicEncoding::AsciiRle => compress_zpl(mono, bytes_per_row, height),
+        ZplGraphicEncoding::Z64 => encode_z64(mono)?,
+    };
+    stream.push_str(&format!(
+        "^FO{x},{y}^GFA,{total},{total},{bytes_per_row},{graphic}^FS\n"
+    ));
+    Ok(())
 }
 
-fn compress_row(row: &str) -> String {
-    let chars: Vec<char> = row.chars().collect();
-    let mut output = String::new();
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ZplGraphicEncoding {
+    None,
+    AsciiRle,
+    Z64,
+}
+
+fn zpl_graphic_encoding(config: &Map<String, Value>) -> ZplGraphicEncoding {
+    if let Some(value) = config
+        .get("zplCompression")
+        .and_then(Value::as_str)
+        .map(|value| value.trim().to_ascii_lowercase())
+    {
+        return match value.as_str() {
+            "ascii-rle" => ZplGraphicEncoding::AsciiRle,
+            "z64" => ZplGraphicEncoding::Z64,
+            _ => ZplGraphicEncoding::None,
+        };
+    }
+
+    // Preserve the old boolean contract for already-deployed station configs.
+    if let Some(value) = config.get("z64").and_then(Value::as_bool) {
+        return if value {
+            ZplGraphicEncoding::Z64
+        } else {
+            ZplGraphicEncoding::AsciiRle
+        };
+    }
+
+    let detected_full = config.get("detectedProfileId").and_then(Value::as_str) == Some("zpl-full");
+    let advanced = config.get("compatibilityMode").and_then(Value::as_str) == Some("advanced");
+    if detected_full || advanced {
+        ZplGraphicEncoding::Z64
+    } else {
+        // Raw ASCII hex is the broadest common denominator among real Zebra
+        // printers and third-party ZPL emulations.
+        ZplGraphicEncoding::None
+    }
+}
+
+fn encode_zpl_hex(mono: &[u8]) -> String {
+    let mut output = Vec::with_capacity(mono.len().saturating_mul(2));
+    for byte in mono {
+        output.extend_from_slice(&ZPL_HEX_PAIRS[*byte as usize]);
+    }
+    String::from_utf8(output).expect("ZPL hex output is ASCII")
+}
+
+fn encode_z64(mono: &[u8]) -> Result<String, String> {
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+    encoder
+        .write_all(mono)
+        .map_err(|error| format!("compress Z64 graphic: {error}"))?;
+    let compressed = encoder
+        .finish()
+        .map_err(|error| format!("finish Z64 graphic: {error}"))?;
+    let encoded = BASE64_STANDARD.encode(compressed);
+    let crc = crc16_ccitt(encoded.as_bytes());
+    Ok(format!(":Z64:{encoded}:{crc:04X}"))
+}
+
+fn crc16_ccitt(bytes: &[u8]) -> u16 {
+    let mut crc = 0_u16;
+    for byte in bytes {
+        crc ^= u16::from(*byte) << 8;
+        for _ in 0..8 {
+            crc = if crc & 0x8000 != 0 {
+                (crc << 1) ^ 0x1021
+            } else {
+                crc << 1
+            };
+        }
+    }
+    crc
+}
+
+const fn zpl_hex_pairs() -> [[u8; 2]; 256] {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let mut pairs = [[0_u8; 2]; 256];
+    let mut value = 0;
+    while value < pairs.len() {
+        pairs[value] = [HEX[value >> 4], HEX[value & 0x0f]];
+        value += 1;
+    }
+    pairs
+}
+
+const ZPL_HEX_PAIRS: [[u8; 2]; 256] = zpl_hex_pairs();
+
+fn compress_zpl(mono: &[u8], stride: usize, height: usize) -> String {
+    let mut output = Vec::with_capacity(mono.len().saturating_mul(2));
+    let mut hex = Vec::with_capacity(stride.saturating_mul(2));
+    for row in 0..height {
+        let bytes = &mono[row * stride..(row + 1) * stride];
+        let repeats_previous = row > 0 && bytes == &mono[(row - 1) * stride..row * stride];
+        if repeats_previous {
+            output.push(b':');
+        } else if bytes.iter().all(|byte| *byte == 0) {
+            output.push(b',');
+        } else if bytes.iter().all(|byte| *byte == 0xff) {
+            output.push(b'!');
+        } else {
+            hex.clear();
+            for byte in bytes {
+                hex.extend_from_slice(&ZPL_HEX_PAIRS[usize::from(*byte)]);
+            }
+            compress_row(&hex, &mut output);
+        }
+    }
+    // All tokens emitted above are fixed ASCII bytes.
+    String::from_utf8(output).expect("ZPL compressor emitted non-ASCII data")
+}
+
+fn compress_row(row: &[u8], output: &mut Vec<u8>) {
     let mut index = 0;
-    while index < chars.len() {
+    while index < row.len() {
         let mut count = 1;
-        while index + count < chars.len() && chars[index + count] == chars[index] {
+        while index + count < row.len() && row[index + count] == row[index] {
             count += 1;
         }
         if count >= 2 {
-            output.push_str(&repeat_count(count));
+            append_repeat_count(output, count);
         }
-        output.push(chars[index]);
+        output.push(row[index]);
         index += count;
     }
-    output
 }
 
-fn repeat_count(mut count: usize) -> String {
-    let mut result = String::new();
+fn append_repeat_count(output: &mut Vec<u8>, mut count: usize) {
     while count >= 20 {
         let high = (count / 20).min(20);
-        result.push(char::from_u32('f' as u32 + high as u32).unwrap());
+        output.push(b'f' + high as u8);
         count -= high * 20;
     }
     if count > 0 {
-        result.push(char::from_u32('F' as u32 + count as u32).unwrap());
+        output.push(b'F' + count as u8);
     }
-    result
 }
 
 fn encode_tspl(bitmap: &RasterizedLabel, config: &Map<String, Value>) -> Result<Vec<u8>, String> {
@@ -1786,7 +2091,9 @@ fn encode_epl(bitmap: &RasterizedLabel, config: &Map<String, Value>) -> Result<V
         bitmap.width_dots, bitmap.height_dots, gap, bitmap.bytes_per_row, bitmap.height_dots
     )
     .into_bytes();
-    bytes.extend_from_slice(&bitmap.mono);
+    // EPL2 GW uses 0 for a printed dot and 1 for an unprinted dot, opposite
+    // to the renderer's canonical 1 = black representation.
+    bytes.extend(bitmap.mono.iter().map(|byte| !*byte));
     bytes.extend_from_slice(b"\nP1\n");
     Ok(bytes)
 }
@@ -1810,7 +2117,7 @@ fn encode_dpl(bitmap: &RasterizedLabel, config: &Map<String, Value>) -> Result<V
         return Err("DPL raster dimensions must be in 1..9999 dots".to_owned());
     }
     let name = format!("LP{:08X}", fnv1a(bitmap));
-    let bmp = encode_bmp8(
+    let bmp = encode_bmp1(
         bitmap,
         finite(config.get("dpi")).unwrap_or(203.0).round() as u32,
     )?;
@@ -1820,12 +2127,12 @@ fn encode_dpl(bitmap: &RasterizedLabel, config: &Map<String, Value>) -> Result<V
     Ok(output)
 }
 
-fn encode_bmp8(bitmap: &RasterizedLabel, dpi: u32) -> Result<Vec<u8>, String> {
-    let row_bytes = (bitmap.width_dots + 3) & !3;
+fn encode_bmp1(bitmap: &RasterizedLabel, dpi: u32) -> Result<Vec<u8>, String> {
+    let row_bytes = bitmap.width_dots.div_ceil(32) * 4;
     let pixel_bytes = row_bytes
         .checked_mul(bitmap.height_dots)
         .ok_or("DPL BMP size overflow")?;
-    let pixel_offset = 14 + 40 + 256 * 4;
+    let pixel_offset = 14 + 40 + 2 * 4;
     let file_size = pixel_offset + pixel_bytes;
     if file_size > MAX_OUTPUT_BYTES - 256 {
         return Err("DPL BMP exceeds output limit".to_owned());
@@ -1838,30 +2145,23 @@ fn encode_bmp8(bitmap: &RasterizedLabel, dpi: u32) -> Result<Vec<u8>, String> {
     put_u32(&mut bmp, 18, bitmap.width_dots as u32);
     put_u32(&mut bmp, 22, bitmap.height_dots as u32);
     put_u16(&mut bmp, 26, 1);
-    put_u16(&mut bmp, 28, 8);
+    put_u16(&mut bmp, 28, 1);
     put_u32(&mut bmp, 34, pixel_bytes as u32);
     let ppm = ((dpi as f64) / 0.0254).round().max(1.0) as u32;
     put_u32(&mut bmp, 38, ppm);
     put_u32(&mut bmp, 42, ppm);
-    put_u32(&mut bmp, 46, 256);
+    put_u32(&mut bmp, 46, 2);
     put_u32(&mut bmp, 50, 2);
-    for value in 0..256 {
-        let at = 54 + value * 4;
-        bmp[at] = value as u8;
-        bmp[at + 1] = value as u8;
-        bmp[at + 2] = value as u8;
-    }
+    // Palette index 0 is black and index 1 is white. The canonical raster uses
+    // 1 for black, hence the byte inversion while copying rows.
+    bmp[58..61].fill(255);
     for sy in 0..bitmap.height_dots {
         let target = pixel_offset + (bitmap.height_dots - 1 - sy) * row_bytes;
-        for x in 0..bitmap.width_dots {
-            bmp[target + x] =
-                if bitmap.mono[sy * bitmap.bytes_per_row + (x >> 3)] & (0x80 >> (x & 7)) != 0 {
-                    0
-                } else {
-                    255
-                };
+        bmp[target..target + row_bytes].fill(0xff);
+        let source = &bitmap.mono[sy * bitmap.bytes_per_row..(sy + 1) * bitmap.bytes_per_row];
+        for (offset, byte) in source.iter().enumerate() {
+            bmp[target + offset] = !byte;
         }
-        bmp[target + bitmap.width_dots..target + row_bytes].fill(255);
     }
     Ok(bmp)
 }
@@ -2031,6 +2331,61 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn raster_encoders_apply_protocol_specific_pixel_polarity() {
+        let bitmap = RasterizedLabel {
+            width_dots: 16,
+            height_dots: 2,
+            bytes_per_row: 2,
+            width_mm: 2.0,
+            height_mm: 2.0,
+            mono: vec![0x80, 0x00, 0xff, 0x55],
+            native_zpl_commands: Vec::new(),
+            zpl_raster_regions: None,
+            render_micros: 0,
+        };
+        let config = Map::new();
+
+        let tspl = encode_tspl(&bitmap, &config).unwrap();
+        let tspl_marker = b"BITMAP 0,0,2,2,0,";
+        let tspl_data_start = tspl
+            .windows(tspl_marker.len())
+            .position(|window| window == tspl_marker)
+            .unwrap()
+            + tspl_marker.len();
+        assert_eq!(
+            &tspl[tspl_data_start..tspl_data_start + bitmap.mono.len()],
+            bitmap.mono.as_slice()
+        );
+
+        let epl = encode_epl(&bitmap, &config).unwrap();
+        let epl_marker = b"GW0,0,2,2,";
+        let epl_data_start = epl
+            .windows(epl_marker.len())
+            .position(|window| window == epl_marker)
+            .unwrap()
+            + epl_marker.len();
+        assert_eq!(
+            &epl[epl_data_start..epl_data_start + bitmap.mono.len()],
+            &[0x7f, 0xff, 0x00, 0xaa]
+        );
+
+        let dpl = encode_dpl(&bitmap, &config).unwrap();
+        let bmp_offset = dpl.windows(2).position(|window| window == b"BM").unwrap();
+        let u16_at =
+            |offset: usize| u16::from_le_bytes(dpl[offset..offset + 2].try_into().unwrap());
+        let u32_at =
+            |offset: usize| u32::from_le_bytes(dpl[offset..offset + 4].try_into().unwrap());
+        assert_eq!(u32_at(bmp_offset + 10), 62);
+        assert_eq!(u16_at(bmp_offset + 28), 1);
+        assert_eq!(u32_at(bmp_offset + 46), 2);
+        assert_eq!(u32_at(bmp_offset + 2), 62 + 4 * bitmap.height_dots as u32);
+        assert_eq!(
+            &dpl[bmp_offset + 62..bmp_offset + 66],
+            &[0x00, 0xaa, 0xff, 0xff]
+        );
+    }
+
+    #[test]
     fn renders_unicode_inter_text_and_ean13_to_zpl_bitmap() {
         let payload = GenerationPayload {
             config: json!({"protocol":"image","dpi":300}),
@@ -2048,6 +2403,183 @@ mod tests {
         assert!(zpl.ends_with(b"^XZ"));
         assert!(String::from_utf8(zpl).unwrap().contains("^BEN"));
     }
+
+    #[test]
+    fn hybrid_zpl_crops_separated_text_regions_and_keeps_square_boxes_native() {
+        let payload = GenerationPayload {
+            config: json!({"connection":"tcp","protocol":"image","dpi":300}),
+            doc: json!({"canvas":{"width":600,"height":400,"widthCm":5.08,"heightCm":3.3867,"dpi":300},"elements":[
+                {"id":"frame","type":"rect","x":4,"y":4,"w":592,"h":392,"fill":"transparent","borderWidth":2},
+                {"id":"top","type":"text","x":30,"y":25,"w":240,"h":45,"text":"Партия {{batch}}","fontFamily":"Inter","fontSize":22},
+                {"id":"bottom","type":"text","x":330,"y":325,"w":240,"h":45,"text":"Вес {{weight}} кг","fontFamily":"Inter","fontSize":22}
+            ]}),
+            data: json!({"batch":"А-26","weight":"12.500"}),
+        };
+        let bitmap = render(&payload).unwrap();
+        assert_eq!(bitmap.native_zpl_commands.len(), 1);
+        assert!(bitmap.native_zpl_commands[0].contains("^GB"));
+        let regions = bitmap.zpl_raster_regions.as_ref().unwrap();
+        assert!(regions.len() >= 2);
+        assert!(
+            regions
+                .iter()
+                .map(|region| region.mono.len())
+                .sum::<usize>()
+                < bitmap.mono.len() / 3
+        );
+        let mut reconstructed = vec![0_u8; bitmap.mono.len()];
+        for region in regions {
+            let left = region.x_dots / 8;
+            for row in 0..region.height_dots {
+                let source =
+                    &region.mono[row * region.bytes_per_row..(row + 1) * region.bytes_per_row];
+                let destination_start = (region.y_dots + row) * bitmap.bytes_per_row + left;
+                reconstructed[destination_start..destination_start + region.bytes_per_row]
+                    .copy_from_slice(source);
+            }
+        }
+        assert_eq!(reconstructed, bitmap.mono);
+        let stream = String::from_utf8(encode("image", &bitmap, &payload.config).unwrap()).unwrap();
+        assert!(stream.contains("^GB"));
+        assert_eq!(stream.matches("^GFA").count(), regions.len());
+        assert!(!stream.contains("^FO0,0^GFA"));
+    }
+
+    #[test]
+    fn zpl_ascii_compression_preserves_row_tokens_without_string_formatting() {
+        fn legacy(mono: &[u8], stride: usize, height: usize) -> String {
+            fn repeat_count(mut count: usize) -> String {
+                let mut result = String::new();
+                while count >= 20 {
+                    let high = (count / 20).min(20);
+                    result.push(char::from_u32('f' as u32 + high as u32).unwrap());
+                    count -= high * 20;
+                }
+                if count > 0 {
+                    result.push(char::from_u32('F' as u32 + count as u32).unwrap());
+                }
+                result
+            }
+            fn compress_row(row: &str) -> String {
+                let chars: Vec<char> = row.chars().collect();
+                let mut output = String::new();
+                let mut index = 0;
+                while index < chars.len() {
+                    let mut count = 1;
+                    while index + count < chars.len() && chars[index + count] == chars[index] {
+                        count += 1;
+                    }
+                    if count >= 2 {
+                        output.push_str(&repeat_count(count));
+                    }
+                    output.push(chars[index]);
+                    index += count;
+                }
+                output
+            }
+            let mut output = String::new();
+            let mut previous = String::new();
+            for row in 0..height {
+                let bytes = &mono[row * stride..(row + 1) * stride];
+                let hex = bytes
+                    .iter()
+                    .map(|byte| format!("{byte:02X}"))
+                    .collect::<String>();
+                if row > 0 && hex == previous {
+                    output.push(':');
+                } else if bytes.iter().all(|byte| *byte == 0) {
+                    output.push(',');
+                } else if bytes.iter().all(|byte| *byte == 0xff) {
+                    output.push('!');
+                } else {
+                    output.push_str(&compress_row(&hex));
+                }
+                previous = hex;
+            }
+            output
+        }
+
+        let mono = [0x00, 0x00, 0xff, 0xff, 0xaa, 0xaa, 0xaa, 0xaa];
+        assert_eq!(compress_zpl(&mono, 2, 4), ",!JA:");
+        let mut state = 0x1234_5678_u32;
+        for stride in [1, 2, 7, 31, 128] {
+            for height in [1, 2, 9, 33] {
+                let mut sample = vec![0_u8; stride * height];
+                for byte in &mut sample {
+                    state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                    *byte = (state >> 24) as u8;
+                }
+                if height > 1 {
+                    let (first, rest) = sample.split_at_mut(stride);
+                    rest[..stride].copy_from_slice(first);
+                }
+                assert_eq!(
+                    compress_zpl(&sample, stride, height),
+                    legacy(&sample, stride, height)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn z64_round_trips_and_uses_crc16_ccitt_over_base64() {
+        use flate2::read::ZlibDecoder;
+        use std::io::Read;
+
+        assert_eq!(crc16_ccitt(b"123456789"), 0x31c3);
+        let mono = (0..4096)
+            .map(|index| (index % 251) as u8)
+            .collect::<Vec<_>>();
+        let graphic = encode_z64(&mono).unwrap();
+        let encoded_and_crc = graphic.strip_prefix(":Z64:").unwrap();
+        let (encoded, crc) = encoded_and_crc.rsplit_once(':').unwrap();
+        assert_eq!(crc, format!("{:04X}", crc16_ccitt(encoded.as_bytes())));
+        let compressed = BASE64_STANDARD.decode(encoded).unwrap();
+        let mut decoded = Vec::new();
+        ZlibDecoder::new(compressed.as_slice())
+            .read_to_end(&mut decoded)
+            .unwrap();
+        assert_eq!(decoded, mono);
+    }
+
+    #[test]
+    fn zpl_graphic_encoding_modes_are_exact_and_legacy_compatible() {
+        let bitmap = RasterizedLabel {
+            width_dots: 32,
+            height_dots: 2,
+            bytes_per_row: 4,
+            width_mm: 4.0,
+            height_mm: 1.0,
+            mono: vec![0; 8],
+            native_zpl_commands: Vec::new(),
+            zpl_raster_regions: None,
+            render_micros: 0,
+        };
+
+        let raw = json!({"zplCompression": "none"});
+        let stream =
+            String::from_utf8(encode_zpl(&bitmap, raw.as_object().unwrap()).unwrap()).unwrap();
+        assert!(stream.contains("^GFA,8,8,4,0000000000000000"));
+
+        let rle = json!({"zplCompression": "ascii-rle"});
+        let stream =
+            String::from_utf8(encode_zpl(&bitmap, rle.as_object().unwrap()).unwrap()).unwrap();
+        assert!(stream.contains("^GFA,8,8,4,,:"));
+
+        for config in [json!({"zplCompression": "z64"}), json!({"z64": true})] {
+            let stream =
+                String::from_utf8(encode_zpl(&bitmap, config.as_object().unwrap()).unwrap())
+                    .unwrap();
+            assert!(stream.contains(":Z64:"));
+        }
+
+        let legacy_rle = json!({"z64": false});
+        let stream =
+            String::from_utf8(encode_zpl(&bitmap, legacy_rle.as_object().unwrap()).unwrap())
+                .unwrap();
+        assert!(stream.contains("^GFA,8,8,4,,:"));
+    }
+
     fn tiny_png_data_uri() -> String {
         use image::{ImageFormat, RgbaImage};
         let image = RgbaImage::from_fn(4, 3, |x, y| {

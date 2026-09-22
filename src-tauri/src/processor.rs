@@ -62,6 +62,26 @@ pub fn process_sync(
     let envelope = validate_sync_envelope(value)?;
     check_compatibility(client_version, envelope.min_client_version)?;
 
+    let mut connection = open_database(persisted)?;
+    process_sync_with_envelope(persisted, &mut connection, envelope)
+}
+
+pub(crate) fn process_sync_with_connection(
+    persisted: &PersistedState,
+    connection: &mut Connection,
+    client_version: &str,
+    value: &Value,
+) -> Result<SyncOutcome, String> {
+    let envelope = validate_sync_envelope(value)?;
+    check_compatibility(client_version, envelope.min_client_version)?;
+    process_sync_with_envelope(persisted, connection, envelope)
+}
+
+fn process_sync_with_envelope(
+    persisted: &PersistedState,
+    connection: &mut Connection,
+    envelope: SyncEnvelope<'_>,
+) -> Result<SyncOutcome, String> {
     let padded_number = format!("{:02}", envelope.station_number);
     if let Some(identity) = persisted.load_identity() {
         if let Some(current_uuid) = identity.get("station_uuid").and_then(Value::as_str) {
@@ -78,7 +98,6 @@ pub fn process_sync(
         }
     }
 
-    let mut connection = open_database(persisted)?;
     connection
         .execute_batch("PRAGMA foreign_keys = OFF;")
         .map_err(|error| format!("failed to suspend foreign key checks: {error}"))?;
@@ -126,6 +145,19 @@ pub fn process_sync(
 }
 
 pub fn process_print_job(persisted: &PersistedState, value: &Value) -> Result<PrintJob, String> {
+    let job = parse_print_job(value)?;
+    let connection = open_database(persisted)?;
+    persist_print_job(&connection, job)
+}
+
+pub(crate) fn process_print_job_with_connection(
+    connection: &Connection,
+    value: &Value,
+) -> Result<PrintJob, String> {
+    persist_print_job(connection, parse_print_job(value)?)
+}
+
+fn parse_print_job(value: &Value) -> Result<PrintJob, String> {
     let object = value
         .as_object()
         .ok_or_else(|| "Invalid print job format: root must be an object".to_owned())?;
@@ -161,8 +193,10 @@ pub fn process_print_job(persisted: &PersistedState, value: &Value) -> Result<Pr
     if job.quantity <= 0.0 || !job.quantity.is_finite() {
         return Err("Job quantity must be positive".to_owned());
     }
+    Ok(job)
+}
 
-    let connection = open_database(persisted)?;
+fn persist_print_job(connection: &Connection, job: PrintJob) -> Result<PrintJob, String> {
     connection
         .execute(
             r#"
@@ -193,6 +227,12 @@ pub fn process_print_job(persisted: &PersistedState, value: &Value) -> Result<Pr
 
 pub fn export_full_snapshot(persisted: &PersistedState) -> Result<Value, String> {
     let connection = open_database(persisted)?;
+    export_full_snapshot_with_connection(&connection)
+}
+
+pub(crate) fn export_full_snapshot_with_connection(
+    connection: &Connection,
+) -> Result<Value, String> {
     Ok(json!({
         "barcodes": query_table(&connection, "barcodes")?,
         "labels": query_table(&connection, "labels")?,
@@ -318,7 +358,7 @@ pub(crate) fn open_database(persisted: &PersistedState) -> Result<Connection, St
         .execute_batch(
             r#"
             PRAGMA journal_mode = WAL;
-            PRAGMA synchronous = NORMAL;
+            PRAGMA synchronous = FULL;
             PRAGMA temp_store = MEMORY;
             PRAGMA foreign_keys = ON;
 
@@ -374,13 +414,15 @@ pub(crate) fn open_database(persisted: &PersistedState) -> Result<Connection, St
             );
             CREATE TABLE IF NOT EXISTS pack (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, number TEXT NOT NULL,
+                sequence_number INTEGER UNIQUE,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 box_id INTEGER NOT NULL REFERENCES boxes(id),
                 nomenclature_id INTEGER NOT NULL REFERENCES nomenclature(id),
                 weight_netto REAL NOT NULL,
                 weight_brutto REAL NOT NULL, barcode_value TEXT, station_number TEXT,
                 status TEXT NOT NULL, production_date TEXT, expiration_date TEXT,
-                batch TEXT, operator_uuid TEXT, operator_name TEXT, deleted_at TEXT
+                batch TEXT, operator_uuid TEXT, operator_name TEXT, deleted_at TEXT,
+                delivery_job_id TEXT REFERENCES printer_delivery_jobs(job_id) ON DELETE SET NULL
             );
             CREATE TABLE IF NOT EXISTS print_errors (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -468,6 +510,33 @@ pub(crate) fn open_database(persisted: &PersistedState) -> Result<Connection, St
     ensure_column(&connection, "pack", "operator_uuid", "TEXT")?;
     ensure_column(&connection, "pack", "operator_name", "TEXT")?;
     ensure_column(&connection, "pack", "deleted_at", "TEXT")?;
+    ensure_column(&connection, "pack", "sequence_number", "INTEGER")?;
+    ensure_column(
+        &connection,
+        "pack",
+        "delivery_job_id",
+        "TEXT REFERENCES printer_delivery_jobs(job_id) ON DELETE SET NULL",
+    )?;
+    connection
+        .execute(
+            "UPDATE pack SET sequence_number = id WHERE sequence_number IS NULL",
+            [],
+        )
+        .map_err(|error| format!("failed to backfill pack sequence numbers: {error}"))?;
+    connection
+        .execute_batch(
+            r#"
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_pack_number_unique ON pack(number);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_pack_sequence_unique ON pack(sequence_number);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_pack_delivery_job_unique
+                ON pack(delivery_job_id) WHERE delivery_job_id IS NOT NULL;
+            "#,
+        )
+        .map_err(|error| {
+            format!(
+                "failed to enforce unique pack traceability fields; resolve existing duplicate pack numbers before startup: {error}"
+            )
+        })?;
     connection
         .execute_batch(include_str!("operational_counters.sql"))
         .map_err(|error| format!("failed to initialize operational counters: {error}"))?;
@@ -928,6 +997,17 @@ mod tests {
                 "min_client_version": "1.3.0"
             }
         })
+    }
+
+    #[test]
+    fn operational_database_uses_full_synchronous_durability() {
+        let directory = TestDirectory::new("full-sync");
+        let persisted = PersistedState::for_data_dir(directory.0.clone());
+        let connection = open_database(&persisted).expect("open operational database");
+        let synchronous: i64 = connection
+            .query_row("PRAGMA synchronous", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(synchronous, 2, "SQLite FULL synchronous mode");
     }
 
     #[test]

@@ -31,7 +31,8 @@ fn sample_data() -> Value {
 fn config(port: u16, dpi: u32) -> Value {
     json!({"id":"benchmark", "active":true, "name":"Local benchmark sink",
         "connection":"tcp", "protocol":"image", "ip":"127.0.0.1", "port":port,
-        "dpi":dpi, "persistentConnection":true, "tcpJobBoundary":"stream"})
+        "dpi":dpi, "persistentConnection":true, "tcpJobBoundary":"stream",
+        "batchStatusPolling":false})
 }
 
 #[test]
@@ -44,10 +45,12 @@ fn benchmark_production_pipeline() {
     let fixture: Value = serde_json::from_slice(&fs::read(fixture_path).unwrap()).unwrap();
     let labels = fixture["labels"].as_array().unwrap();
     assert!(!labels.is_empty());
+    let printer = PrinterTransportState::new();
     let service = NativePrintService::new(
         std::env::temp_dir().join(format!("lp-bench-render-{}", Uuid::new_v4())),
-    );
-    let printer = PrinterTransportState::new();
+        &printer,
+    )
+    .unwrap();
     native_raster::warmup_static_assets();
     let mut preparations = Vec::new();
     for label in labels {

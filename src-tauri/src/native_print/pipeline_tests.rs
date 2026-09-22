@@ -64,7 +64,7 @@ impl Fixture {
         let session = SessionState::new(directory.0.clone());
         assert_eq!(session.set(&operational, "op-a", "").unwrap()["ok"], true);
         let printer = PrinterTransportState::with_database(&persisted.database_path()).unwrap();
-        let service = NativePrintService::new(directory.0.clone());
+        let service = NativePrintService::new(directory.0.clone(), &printer).unwrap();
         Self {
             service,
             persisted,
@@ -141,7 +141,8 @@ fn request() -> PackPrintRequest {
 fn device(port: u16) -> Value {
     json!({"id":"pipeline","active":true,"name":"Loopback test sink","connection":"tcp",
         "protocol":"zpl","ip":"127.0.0.1","port":port,"dpi":203,
-        "compatibilityMode":"compatible","persistentConnection":true,"tcpJobBoundary":"stream"})
+        "compatibilityMode":"compatible","persistentConnection":true,"tcpJobBoundary":"stream",
+        "batchStatusPolling":false})
 }
 fn sink_port(persisted: &PersistedState) -> u16 {
     persisted.load_printer_config()["packPrinter"]["port"]
@@ -411,14 +412,50 @@ fn pipeline_transport_failure_discards_prefetch_and_exposes_the_committed_job() 
     assert!(result.last_print.is_none());
     assert_eq!(fixture.scalar("SELECT COUNT(*) FROM pack"), 1);
     assert_eq!(
+        fixture.scalar("SELECT COUNT(*) FROM pack WHERE status='Pending'"),
+        1
+    );
+    assert_eq!(
         fixture.scalar("SELECT COUNT(*) FROM printer_delivery_jobs"),
         1
     );
     assert_eq!(
-        fixture.scalar("SELECT COUNT(*) FROM printer_delivery_jobs WHERE state='uncertain'"),
+        fixture.scalar("SELECT COUNT(*) FROM printer_delivery_jobs WHERE state='failed'"),
         1
     );
     assert_eq!(fixture.service.performance_summary().failed_total, 1);
+    let box_id = fixture.scalar("SELECT box_id FROM pack LIMIT 1");
+    let close_error = fixture
+        .operational
+        .close_box(CloseBoxPayload {
+            box_id,
+            weight_netto: 1.0,
+            weight_brutto: 1.5,
+        })
+        .unwrap_err();
+    assert!(close_error.contains("ожидают подтверждения печати"));
+    fixture
+        .printer
+        .cancel_durable_with_sink(
+            RuntimeEventSink::detached(),
+            failure.job_id.as_deref().unwrap(),
+        )
+        .unwrap();
+    assert_eq!(
+        fixture.scalar("SELECT COUNT(*) FROM pack WHERE status='Deleted'"),
+        1
+    );
+    assert_eq!(
+        fixture
+            .operational
+            .close_box(CloseBoxPayload {
+                box_id,
+                weight_netto: 0.0,
+                weight_brutto: 0.0,
+            })
+            .unwrap()["success"],
+        true
+    );
     assert!(result
         .status_message()
         .contains("принято 0 из 3 · учтено 1"));
@@ -530,7 +567,10 @@ fn pipeline_stale_counter_snapshot_is_reprepared_before_atomic_commit() {
         .prepare_pack(
             &snapshot,
             &fixture.printer,
-            fixture.operational.latest_counters(Some(1)).unwrap(),
+            fixture
+                .operational
+                .latest_counter_snapshot(Some(1))
+                .unwrap(),
         )
         .unwrap();
     fixture.external_pack(1);
@@ -546,6 +586,14 @@ fn pipeline_stale_counter_snapshot_is_reprepared_before_atomic_commit() {
         .unwrap()
         .unwrap();
     assert_eq!(committed.stale_retries, 1);
+    assert_eq!(
+        committed.after_counters,
+        fixture
+            .operational
+            .latest_counter_snapshot(Some(1))
+            .unwrap(),
+        "derived post-insert counters must match the committed database state"
+    );
     assert_eq!(fixture.scalar("SELECT COUNT(*) FROM pack"), 2);
     assert_eq!(
         fixture.scalar("SELECT COUNT(*) FROM printer_delivery_jobs"),
@@ -582,7 +630,10 @@ fn pipeline_repeated_counter_conflicts_are_bounded_and_never_create_own_outbox()
         .prepare_pack(
             &snapshot,
             &fixture.printer,
-            fixture.operational.latest_counters(Some(1)).unwrap(),
+            fixture
+                .operational
+                .latest_counter_snapshot(Some(1))
+                .unwrap(),
         )
         .unwrap();
     let checks = AtomicUsize::new(0);
@@ -620,7 +671,10 @@ fn pipeline_cancellation_is_rechecked_after_stale_repreparation() {
         .prepare_pack(
             &snapshot,
             &fixture.printer,
-            fixture.operational.latest_counters(Some(1)).unwrap(),
+            fixture
+                .operational
+                .latest_counter_snapshot(Some(1))
+                .unwrap(),
         )
         .unwrap();
     let checks = AtomicUsize::new(0);
@@ -757,7 +811,9 @@ fn pipeline_serializes_other_production_mutations_but_releases_on_completion() {
                         )
                         .unwrap_err(),
                     f.service.repeat_last(&f.printer, &none).unwrap_err(),
-                    f.service.delete_latest_pack(&f.operational, 1).unwrap_err(),
+                    f.service
+                        .delete_latest_pack(&f.operational, &f.printer, 1)
+                        .unwrap_err(),
                 ];
                 assert!(errors.iter().all(|error| error.contains("другая операция")));
                 assert_eq!(f.scalar("SELECT COUNT(*) FROM pack"), 0);

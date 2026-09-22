@@ -10,6 +10,8 @@
     "expected": {
       "type": "tcp",
       "protocolId": "industrial-tcp",
+      "path": "",
+      "baudRate": 9600,
       "pollingInterval": 250,
       "stabilityCount": 4,
       "host": "192.0.2.10",
@@ -68,6 +70,7 @@
         "name": "Fixture TCP",
         "connection": "tcp",
         "protocol": "zpl",
+        "zplCompression": "none",
         "ramCache": "auto",
         "futureOption": "preserved"
       },
@@ -78,8 +81,12 @@
         "connection": "windows_driver",
         "protocol": "image",
         "compatibilityMode": "auto",
+        "zplCompression": "none",
         "port": 9100,
-        "baudRate": 9600,
+        "baudRate": 115200,
+        "flowControl": "hardware",
+        "parity": "none",
+        "dataBits": 8,
         "dpi": 203
       },
       "palletPrinter": {
@@ -89,8 +96,12 @@
         "connection": "windows_driver",
         "protocol": "image",
         "compatibilityMode": "auto",
+        "zplCompression": "none",
         "port": 9100,
-        "baudRate": 9600,
+        "baudRate": 115200,
+        "flowControl": "hardware",
+        "parity": "none",
+        "dataBits": 8,
         "dpi": 203
       },
       "autoPrintOnStable": true,

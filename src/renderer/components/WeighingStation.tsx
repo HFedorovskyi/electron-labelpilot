@@ -390,7 +390,16 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
             else { setWeight(weightStr); weightRef.current = weightStr; }
         });
 
-        const removeStatusListener = window.desktopBridge.on('scale-status', (s: any) => setStatus(s));
+        const applyScaleStatus = (value: unknown) => {
+            const next = String(value || 'disconnected');
+            setStatus(next);
+            if (next !== 'connected') {
+                setWeight('0.000');
+                weightRef.current = '0.000';
+                setIsStable(false);
+            }
+        };
+        const removeStatusListener = window.desktopBridge.on('scale-status', applyScaleStatus);
         const removeErrorListener = window.desktopBridge.on('scale-error', (msg: string) => {
             if (msg.includes('|')) {
                 const [code, context] = msg.split('|');
@@ -407,7 +416,7 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
         });
 
         window.desktopBridge.invoke('get-scale-status').then((s: string) => {
-            if (s) setStatus(s);
+            if (s) applyScaleStatus(s);
         });
 
         const removeUpdateListener = window.desktopBridge.on('data-updated', () => {
@@ -803,11 +812,20 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
     const handlePrint = async (isAuto = false) => {
         if (isPrintingRef.current) return;
         isPrintingRef.current = true;
+        let productionCommitted = false;
 
         try {
             if (!labelDoc) {
                 console.warn('Cannot print: No label template selected');
                 return;
+            }
+            const measuredWeight = parseFloat(weightRef.current);
+            if (status !== 'connected' || !isStable || !Number.isFinite(measuredWeight) || measuredWeight <= 0.010) {
+                setAlertMessage(t('ws.waitStableToPrint'));
+                return;
+            }
+            if (!isAuto && printerConfig.autoPrintOnStable) {
+                autoPrintFiredRef.current = true;
             }
 
             const boxLimit = selectedProduct?.close_box_counter || 999999;
@@ -874,6 +892,7 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
             });
 
             if (!recordResult.success) throw new Error('Database recording failed');
+            productionCommitted = true;
 
             // 3. Update UI state with ACTUAL box info from DB
             const actualBoxNumber = recordResult.boxNumber;
@@ -1008,6 +1027,7 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
             console.error('Print Error:', err);
             setAlertMessage(`${t('ws.errorPrefix')}: ${err instanceof Error ? err.message : String(err)}`);
         } finally {
+            if (isAuto && !productionCommitted) autoPrintFiredRef.current = false;
             isPrintingRef.current = false;
         }
     };
@@ -1151,7 +1171,7 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
             <div className="col-span-4 space-y-4 flex flex-col overflow-y-auto min-h-0">
                 <button
                     onClick={() => handlePrint()}
-                    disabled={!selectedProduct || status !== 'connected' || !labelDoc}
+                    disabled={!selectedProduct || status !== 'connected' || !isStable || !labelDoc || !(parseFloat(weight) > 0.010)}
                     className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 transition-all rounded-3xl font-bold text-xl shadow-[0_10px_40px_-10px_rgba(16,185,129,0.5)] flex items-center justify-center gap-3 border-t border-white/10 disabled:opacity-40 disabled:pointer-events-none disabled:shadow-none"
                 >
                     <Printer className="w-6 h-6" />

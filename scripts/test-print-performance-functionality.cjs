@@ -8,6 +8,7 @@ const generator = read('src-tauri/src/generator/mod.rs');
 const nativePrint = read('src-tauri/src/native_print.rs');
 const operational = read('src-tauri/src/operational.rs');
 const runtime = read('src-tauri/src/slint_runtime.rs');
+const weighingUi = read('src-tauri/slint/ui/weighing.slint');
 const printer = read('src-tauri/src/printer.rs');
 const persisted = read('src-tauri/src/persisted.rs');
 
@@ -27,8 +28,15 @@ const packBody = read('src-tauri/src/native_print/pack.rs');
 assert.match(packBody, /let numbering = persisted\.load_numbering_config\(\);/);
 assert.equal((packBody.match(/load_numbering_config\(\)/g) || []).length, 1);
 assert.match(packBody, /product_box_tare_kg\(operational, &product\)/);
-assert.match(packBody, /next_boxes_in_pallet\(&counters\)/);
-assert.match(nativePrint, /fn next_boxes_in_pallet\([\s\S]*?i64::from\(integer\(counters\.get\("currentBoxId"\)\)\.is_none\(\)\)/);
+assert.match(packBody, /next_boxes_in_pallet\(/);
+const autoCloseBody = packBody.slice(
+  packBody.indexOf('    fn auto_close_pack('),
+  packBody.indexOf('    pub(super) fn finish_pack(', packBody.indexOf('    fn auto_close_pack(')),
+);
+assert.match(autoCloseBody, /after\.units_in_box/);
+assert.doesNotMatch(autoCloseBody, /latest_counter/);
+assert.match(packBody, /after_counters/);
+assert.match(nativePrint, /fn next_boxes_in_pallet\([\s\S]*?i64::from\(current_box_id\.is_none\(\)\)/);
 
 const tareBody = nativePrint.slice(
   nativePrint.indexOf('    fn product_box_tare_kg('),
@@ -44,10 +52,10 @@ assert.match(persisted, /save_printer_config[\s\S]*?store_cached\(&self\.printer
 assert.match(persisted, /save_numbering_config[\s\S]*?store_cached\(&self\.numbering_cache/);
 
 const countersBody = operational.slice(
-  operational.indexOf('fn latest_counters(connection:'),
-  operational.indexOf('\nfn open_pallet_content(', operational.indexOf('fn latest_counters(connection:')),
+  operational.indexOf('fn counter_snapshot('),
+  operational.indexOf('\nfn open_pallet_content(', operational.indexOf('fn counter_snapshot(')),
 );
-assert.match(countersBody, /status = 'Open' AND nomenclature_id = \?1/);
+assert.match(countersBody, /status = 'Open'[\s\S]*?\?1 IS NULL OR \?1 = 0 OR nomenclature_id = \?1/);
 assert.match(countersBody, /idx|COUNT\(\*\)|SUM\(weight_netto\)/);
 assert.match(operational, /fn query_json_rows[\s\S]*?\.prepare_cached\(sql\)/);
 const finishBranch = runtime.slice(
@@ -56,12 +64,25 @@ const finishBranch = runtime.slice(
 );
 assert.match(finishBranch, /if matches!\(action\.as_str\(\), "pack" \| "auto-pack"\) \{\s*auto_print_gate\.borrow_mut\(\)\.mark_failed\(\);/);
 
+assert.match(runtime, /struct UiMessageSender/);
+assert.match(runtime, /slint::invoke_from_event_loop/);
+assert.match(runtime, /ui\.on_drain_ui_messages/);
+assert.doesNotMatch(runtime, /Duration::from_millis\(30\)/);
+assert.match(weighingUi, /callback drain-ui-messages;/);
+assert.match(runtime, /const UI_WORKER_THREADS: usize = 4;/);
+assert.match(runtime, /const UI_WORKER_QUEUE_CAPACITY: usize = 64;/);
+assert.match(runtime, /mpsc::sync_channel::<UiTask>/);
+assert.match(runtime, /thread::Builder::new\(\)[\s\S]*?labelpilot-ui-worker-/);
+assert.match(runtime, /std::panic::catch_unwind/);
+assert.doesNotMatch(runtime, /thread::spawn\(/);
+assert.match(runtime, /product_search_timer\.start\([\s\S]*?slint::TimerMode::SingleShot/);
+
 assert.match(printer, /set_nodelay\(true\)/);
 assert.match(printer, /keep_tcp_connection_open/);
 assert.match(printer, /automatic_tcp_job_boundary/);
 assert.match(printer, /physical_key/);
 assert.match(printer, /mpsc::sync_channel\(PRINTER_QUEUE_CAPACITY\)/);
-assert.match(printer, /\.durable\s*\.prepare\(/);
+assert.match(printer, /\.durable\.prepare_with_replay\(/);
 assert.match(printer, /BREAKER_DURATION/);
 
 const serial = read('src-tauri/src/printer/serial.rs');
@@ -78,7 +99,12 @@ assert.match(write, /!self\.flushing/);
 assert.match(write, /DELIVERY_UNCERTAIN/);
 assert.match(printer, /min_by_key\(\|\(_, entry\)\| entry\.last_used_at\)/);
 assert.match(printer, /!matches!\(entry\.outcome, IdempotencyOutcome::Pending\)/);
-assert.match(countersBody, /SELECT total_units, total_boxes FROM operational_totals WHERE id = 1/);
+assert.match(countersBody, /\.prepare_cached\(/);
+assert.equal((countersBody.match(/\.query_row\(/g) || []).length, 1);
+assert.match(countersBody, /WITH[\s\S]*?open_pallet AS[\s\S]*?open_box AS[\s\S]*?box_totals AS/);
+assert.match(countersBody, /totals\.total_units[\s\S]*?totals\.total_boxes/);
+assert.match(operational, /fn after_record\([\s\S]*?total_units: self\.total_units\.saturating_add\(1\)/);
+assert.match(operational, /Ok\(Some\(\(result, outbox, after\)\)\)/);
 assert.doesNotMatch(countersBody, /SELECT COUNT\(\*\) FROM (?:pack|boxes) WHERE status/);
 assert.match(processor, /include_str!\("operational_counters\.sql"\)/);
 assert.equal((schema.match(/CREATE TRIGGER IF NOT EXISTS operational_totals_/g) || []).length, 6);
@@ -102,10 +128,12 @@ assert.match(packBody, /pending\.and_then\(PendingPrintReceipt::wait\)/);
 assert.doesNotMatch(packBody, /self\.remember\(stored\)\?/);
 assert.match(nativePrint, /close_box_with_outbox/);
 assert.match(nativePrint, /fn remember_accepted/);
-assert.match(nativePrint, /atomic_write_bytes\(&self\.last_print_path, &bytes\)/);
+assert.doesNotMatch(nativePrint, /atomic_write_bytes\(&self\.last_print_path, &bytes\)/);
+assert.match(durable, /CREATE TABLE IF NOT EXISTS native_last_print/);
+assert.match(durable, /promote accepted last-print replay/);
 assert.match(operational, /let outbox = prepare_outbox\(&transaction, &result\)\?;[\s\S]*?\.commit\(\)/);
 assert.match(durable, /fn prepare_on_connection/);
 assert.match(printer, /fn prepare_generated/);
 assert.match(printer, /fn submit_committed_with_sink/);
 assert.match(finishBranch, /result\.success_message\(message\)/);
-console.log('Atomic pack/box outbox: prepared material, commit before transport, accepted receipts survive repeat-cache persistence errors');
+console.log('Atomic pack/box outbox: prepared material, SQLite replay, commit before transport and accepted-only last print');

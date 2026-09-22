@@ -2,8 +2,12 @@ use crate::crypto::decode_push_body;
 #[cfg(feature = "desktop")]
 use crate::network::NetworkState;
 use crate::persisted::PersistedState;
-use crate::processor::{export_full_snapshot, process_print_job, process_sync};
+use crate::processor::{
+    export_full_snapshot_with_connection, open_database, process_print_job_with_connection,
+    process_sync_with_connection,
+};
 use crate::runtime_events::RuntimeEventSink;
+use rusqlite::Connection;
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::io::{self, Read, Write};
@@ -100,6 +104,7 @@ struct IngressInner {
 #[derive(Clone)]
 struct IngressRuntime {
     persisted: Arc<PersistedState>,
+    database: Arc<Mutex<Connection>>,
     events: RuntimeEventSink,
     client_version: String,
     request_check: Arc<dyn Fn() + Send + Sync + 'static>,
@@ -145,8 +150,10 @@ impl IngressState {
     where
         F: Fn() + Send + Sync + 'static,
     {
+        let database = Arc::new(Mutex::new(open_database(&persisted)?));
         self.start_runtime(IngressRuntime {
             persisted,
+            database,
             events,
             client_version,
             request_check: Arc::new(request_check),
@@ -441,7 +448,9 @@ fn route_request(runtime: &IngressRuntime, peer: IpAddr, request: HttpRequest) -
         if !peer.is_loopback() {
             return HttpResponse::json(403, json!({"error": "Forbidden"}));
         }
-        return match export_full_snapshot(runtime.persisted.as_ref()) {
+        return match with_database(runtime, |connection| {
+            export_full_snapshot_with_connection(connection)
+        }) {
             Ok(snapshot) => HttpResponse::json(200, snapshot),
             Err(error) => {
                 log(
@@ -485,7 +494,9 @@ fn handle_sync(runtime: &IngressRuntime, body: &[u8]) -> HttpResponse {
     };
 
     let client_version = runtime.client_version.clone();
-    let outcome = match process_sync(persisted, &client_version, &decoded.value) {
+    let outcome = match with_database(runtime, |connection| {
+        process_sync_with_connection(persisted, connection, &client_version, &decoded.value)
+    }) {
         Ok(outcome) => outcome,
         Err(error) => {
             log(runtime, "ERROR", &format!("sync import failed: {error}"));
@@ -542,7 +553,9 @@ fn handle_print_job(runtime: &IngressRuntime, body: &[u8]) -> HttpResponse {
         }
     };
 
-    let job = match process_print_job(persisted, &decoded.value) {
+    let job = match with_database(runtime, |connection| {
+        process_print_job_with_connection(connection, &decoded.value)
+    }) {
         Ok(job) => job,
         Err(error) => {
             log(runtime, "WARN", &format!("print job rejected: {error}"));
@@ -585,6 +598,17 @@ fn write_response(stream: &mut TcpStream, response: &HttpResponse) -> Result<(),
         .and_then(|_| stream.write_all(&response.body))
         .and_then(|_| stream.flush())
         .map_err(|error| error.to_string())
+}
+
+fn with_database<T>(
+    runtime: &IngressRuntime,
+    operation: impl FnOnce(&mut Connection) -> Result<T, String>,
+) -> Result<T, String> {
+    let mut connection = runtime
+        .database
+        .lock()
+        .map_err(|_| "ingress database lock is poisoned".to_owned())?;
+    operation(&mut connection)
 }
 
 fn status_reason(status: u16) -> &'static str {
@@ -685,6 +709,7 @@ mod tests {
         let request_checks = Arc::clone(&checks);
         let runtime = IngressRuntime {
             persisted: Arc::clone(&persisted),
+            database: Arc::new(Mutex::new(open_database(&persisted).unwrap())),
             events: RuntimeEventSink::callback(move |event| {
                 captured_events.lock().unwrap().push(event);
             }),
@@ -753,7 +778,12 @@ mod tests {
             names,
             vec!["sync-complete", "data-updated", "print-jobs-updated"]
         );
-        assert_eq!(process_print_job(&persisted, &job).unwrap().job_id, 7001);
+        assert_eq!(
+            process_print_job_with_connection(&runtime.database.lock().unwrap(), &job,)
+                .unwrap()
+                .job_id,
+            7001
+        );
         drop(runtime);
         drop(persisted);
         std::fs::remove_dir_all(data_dir).unwrap();

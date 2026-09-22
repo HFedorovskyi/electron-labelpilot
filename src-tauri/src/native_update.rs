@@ -1269,7 +1269,7 @@ pub fn confirm_startup_health() -> Result<bool, String> {
     Ok(true)
 }
 
-fn verify_database_snapshot(backup: &Path) -> Result<(), String> {
+pub(crate) fn verify_database_snapshot(backup: &Path) -> Result<(), String> {
     let database = backup.join("client_data.db");
     if !database.is_file() {
         return Ok(());

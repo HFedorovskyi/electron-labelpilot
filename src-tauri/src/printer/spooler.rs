@@ -1,4 +1,6 @@
-use super::{DriverPageSpec, PrinterDeviceConfig, SendOutcome, TransportFailure};
+use super::{
+    DriverPageSpec, PrinterDeviceConfig, SendOutcome, TransportFailure, TransportFailureKind,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct PageDestination {
@@ -25,6 +27,7 @@ fn page_destination(
         || dpi_y <= 0
     {
         return Err(TransportFailure {
+            kind: TransportFailureKind::NotStarted,
             message: "Windows printer returned invalid page metrics".to_owned(),
             timed_out: false,
         });
@@ -39,6 +42,7 @@ fn page_destination(
     let usable_height = printable_height.saturating_sub(top).saturating_sub(bottom);
     if usable_width <= 0 || usable_height <= 0 {
         return Err(TransportFailure {
+            kind: TransportFailureKind::NotStarted,
             message: "page margins exceed the printer printable area".to_owned(),
             timed_out: false,
         });
@@ -63,6 +67,7 @@ fn page_destination(
         .min(maximum_height as f64 / source_height as f64);
     if !scale.is_finite() || scale <= 0.0 {
         return Err(TransportFailure {
+            kind: TransportFailureKind::NotStarted,
             message: "failed to calculate Windows page scaling".to_owned(),
             timed_out: false,
         });
@@ -77,16 +82,61 @@ fn page_destination(
     })
 }
 
+fn label_destination(
+    source_width: u32,
+    source_height: u32,
+    source_dpi: u16,
+    driver_dpi_x: i32,
+    driver_dpi_y: i32,
+) -> Result<PageDestination, TransportFailure> {
+    if source_width == 0
+        || source_height == 0
+        || source_dpi == 0
+        || driver_dpi_x <= 0
+        || driver_dpi_y <= 0
+    {
+        return Err(TransportFailure {
+            kind: TransportFailureKind::NotStarted,
+            message: "Windows printer returned invalid label metrics".to_owned(),
+            timed_out: false,
+        });
+    }
+    let width = (f64::from(source_width) * f64::from(driver_dpi_x) / f64::from(source_dpi)).round();
+    let height =
+        (f64::from(source_height) * f64::from(driver_dpi_y) / f64::from(source_dpi)).round();
+    if !width.is_finite()
+        || !height.is_finite()
+        || !(1.0..=f64::from(i32::MAX)).contains(&width)
+        || !(1.0..=f64::from(i32::MAX)).contains(&height)
+    {
+        return Err(TransportFailure {
+            kind: TransportFailureKind::NotStarted,
+            message: "failed to calculate Windows label scaling".to_owned(),
+            timed_out: false,
+        });
+    }
+    Ok(PageDestination {
+        x: 0,
+        y: 0,
+        width: width as i32,
+        height: height as i32,
+    })
+}
+
 #[cfg(windows)]
 mod platform {
     use super::*;
     use std::ffi::c_void;
     use std::io;
     use std::ptr::{null, null_mut};
+    use windows_sys::Win32::Graphics::Gdi::{
+        DEVMODEW, DMORIENT_PORTRAIT, DM_FORMNAME, DM_IN_BUFFER, DM_ORIENTATION, DM_OUT_BUFFER,
+        DM_PAPERLENGTH, DM_PAPERSIZE, DM_PAPERWIDTH, DM_PRINTQUALITY, DM_SCALE, DM_YRESOLUTION,
+    };
     use windows_sys::Win32::Graphics::Printing::{
-        ClosePrinter, EndDocPrinter, EndPagePrinter, GetDefaultPrinterW, GetPrinterW, OpenPrinterW,
-        StartDocPrinterW, StartPagePrinter, WritePrinter, DOC_INFO_1W, PRINTER_HANDLE,
-        PRINTER_INFO_6,
+        ClosePrinter, DocumentPropertiesW, EndDocPrinter, EndPagePrinter, GetDefaultPrinterW,
+        GetPrinterW, OpenPrinterW, StartDocPrinterW, StartPagePrinter, WritePrinter, DOC_INFO_1W,
+        PRINTER_HANDLE, PRINTER_INFO_6,
     };
 
     fn wide(value: &str) -> Vec<u16> {
@@ -95,9 +145,16 @@ mod platform {
 
     fn failure(context: &str) -> TransportFailure {
         TransportFailure {
+            kind: TransportFailureKind::NotStarted,
             message: format!("{context}: {}", io::Error::last_os_error()),
             timed_out: false,
         }
+    }
+
+    fn unknown_delivery_failure(context: &str) -> TransportFailure {
+        let mut failure = failure(context);
+        failure.kind = TransportFailureKind::Unknown;
+        failure
     }
 
     fn resolve_printer_name(config: &PrinterDeviceConfig) -> Result<String, TransportFailure> {
@@ -122,6 +179,7 @@ mod platform {
             .position(|value| *value == 0)
             .unwrap_or(buffer.len());
         String::from_utf16(&buffer[..end]).map_err(|_| TransportFailure {
+            kind: TransportFailureKind::NotStarted,
             message: "Windows default printer name contains invalid UTF-16".to_owned(),
             timed_out: false,
         })
@@ -211,7 +269,16 @@ mod platform {
             )
         };
         if write_ok == 0 || written as usize != data.len() {
-            let error = failure("Windows spooler WritePrinter");
+            let mut error = failure("Windows spooler WritePrinter");
+            if written > 0 {
+                error.kind = TransportFailureKind::Partial;
+                error.message = format!(
+                    "DELIVERY_UNCERTAIN: {} ({} of {} bytes accepted by spooler)",
+                    error.message,
+                    written,
+                    data.len()
+                );
+            }
             unsafe {
                 EndPagePrinter(printer.0);
                 EndDocPrinter(printer.0);
@@ -220,10 +287,10 @@ mod platform {
         }
         if unsafe { EndPagePrinter(printer.0) } == 0 {
             unsafe { EndDocPrinter(printer.0) };
-            return Err(failure("Windows spooler EndPagePrinter"));
+            return Err(unknown_delivery_failure("Windows spooler EndPagePrinter"));
         }
         if unsafe { EndDocPrinter(printer.0) } == 0 {
-            return Err(failure("Windows spooler EndDocPrinter"));
+            return Err(unknown_delivery_failure("Windows spooler EndDocPrinter"));
         }
         Ok(SendOutcome {
             bytes: data.len(),
@@ -316,6 +383,145 @@ mod platform {
         }
     }
 
+    struct DevModeBuffer {
+        storage: Vec<usize>,
+    }
+
+    impl DevModeBuffer {
+        fn new(bytes: usize) -> Result<Self, TransportFailure> {
+            const MAX_DEVMODE_BYTES: usize = 1024 * 1024;
+            if bytes < std::mem::size_of::<DEVMODEW>() || bytes > MAX_DEVMODE_BYTES {
+                return Err(TransportFailure {
+                    kind: TransportFailureKind::NotStarted,
+                    message: format!("Windows printer returned invalid DEVMODE size: {bytes}"),
+                    timed_out: false,
+                });
+            }
+            let words = bytes.div_ceil(std::mem::size_of::<usize>());
+            Ok(Self {
+                storage: vec![0; words],
+            })
+        }
+
+        fn as_ptr(&self) -> *const DEVMODEW {
+            self.storage.as_ptr().cast()
+        }
+
+        fn as_mut_ptr(&mut self) -> *mut DEVMODEW {
+            self.storage.as_mut_ptr().cast()
+        }
+    }
+
+    fn tenths_of_mm(value: f64, field: &str) -> Result<i16, TransportFailure> {
+        let value = (value * 10.0).round();
+        if !value.is_finite() || !(1.0..=f64::from(i16::MAX)).contains(&value) {
+            return Err(TransportFailure {
+                kind: TransportFailureKind::NotStarted,
+                message: format!("Windows printer {field} is outside the DEVMODE range"),
+                timed_out: false,
+            });
+        }
+        Ok(value as i16)
+    }
+
+    fn printer_devmode(
+        printer: &RawPrinter,
+        name: &[u16],
+        media_width_mm: f64,
+        media_height_mm: f64,
+        raster_dpi: u16,
+    ) -> Result<DevModeBuffer, TransportFailure> {
+        let width = tenths_of_mm(media_width_mm, "media width")?;
+        let length = tenths_of_mm(media_height_mm, "media length")?;
+        let dpi = i16::try_from(raster_dpi).map_err(|_| TransportFailure {
+            kind: TransportFailureKind::NotStarted,
+            message: format!("Windows printer raster DPI is out of range: {raster_dpi}"),
+            timed_out: false,
+        })?;
+        if dpi <= 0 {
+            return Err(TransportFailure {
+                kind: TransportFailureKind::NotStarted,
+                message: "Windows printer raster DPI must be positive".to_owned(),
+                timed_out: false,
+            });
+        }
+
+        let required = unsafe {
+            DocumentPropertiesW(null_mut(), printer.0, name.as_ptr(), null_mut(), null(), 0)
+        };
+        if required <= 0 {
+            return Err(failure("Windows printer DocumentPropertiesW size"));
+        }
+        let mut mode = DevModeBuffer::new(required as usize)?;
+        if unsafe {
+            DocumentPropertiesW(
+                null_mut(),
+                printer.0,
+                name.as_ptr(),
+                mode.as_mut_ptr(),
+                null(),
+                DM_OUT_BUFFER,
+            )
+        } != 1
+        {
+            return Err(failure("Windows printer DocumentPropertiesW defaults"));
+        }
+
+        unsafe {
+            let devmode = &mut *mode.as_mut_ptr();
+            let print = &mut devmode.Anonymous1.Anonymous1;
+            devmode.dmFields &= !(DM_PAPERSIZE | DM_FORMNAME);
+            devmode.dmFields |= DM_ORIENTATION
+                | DM_PAPERLENGTH
+                | DM_PAPERWIDTH
+                | DM_PRINTQUALITY
+                | DM_YRESOLUTION
+                | DM_SCALE;
+            print.dmOrientation = DMORIENT_PORTRAIT as i16;
+            print.dmPaperSize = 0;
+            print.dmPaperLength = length;
+            print.dmPaperWidth = width;
+            print.dmScale = 100;
+            print.dmPrintQuality = dpi;
+            devmode.dmYResolution = dpi;
+            devmode.dmFormName.fill(0);
+        }
+
+        let pointer = mode.as_mut_ptr();
+        if unsafe {
+            DocumentPropertiesW(
+                null_mut(),
+                printer.0,
+                name.as_ptr(),
+                pointer,
+                pointer,
+                DM_IN_BUFFER | DM_OUT_BUFFER,
+            )
+        } != 1
+        {
+            return Err(failure("Windows printer DocumentPropertiesW normalize"));
+        }
+        unsafe {
+            let devmode = &*mode.as_ptr();
+            let print = devmode.Anonymous1.Anonymous1;
+            let size_fields = DM_PAPERLENGTH | DM_PAPERWIDTH;
+            let size_accepted = devmode.dmFields & size_fields == size_fields
+                && (i32::from(print.dmPaperWidth) - i32::from(width)).abs() <= 5
+                && (i32::from(print.dmPaperLength) - i32::from(length)).abs() <= 5;
+            if !size_accepted {
+                return Err(TransportFailure {
+                    kind: TransportFailureKind::NotStarted,
+                    message: format!(
+                        "Windows printer driver rejected custom media size {:.1} x {:.1} mm",
+                        media_width_mm, media_height_mm
+                    ),
+                    timed_out: false,
+                });
+            }
+        }
+        Ok(mode)
+    }
+
     fn send_bitmap_internal(
         config: &PrinterDeviceConfig,
         width: u32,
@@ -328,9 +534,22 @@ mod platform {
         const LOGPIXELSX: i32 = 88;
         const LOGPIXELSY: i32 = 90;
 
-        let name = wide(&resolve_printer_name(config)?);
+        let printer_name = resolve_printer_name(config)?;
+        let name = wide(&printer_name);
         let driver = wide("WINSPOOL");
-        let dc = unsafe { CreateDCW(driver.as_ptr(), name.as_ptr(), null(), null()) };
+        let raster_dpi = config.dpi.unwrap_or(203);
+        let (media_width_mm, media_height_mm) = page.map_or_else(
+            || {
+                (
+                    f64::from(width) * 25.4 / f64::from(raster_dpi),
+                    f64::from(height) * 25.4 / f64::from(raster_dpi),
+                )
+            },
+            |value| (value.page_width_mm, value.page_height_mm),
+        );
+        let printer = RawPrinter::open(&printer_name)?;
+        let mode = printer_devmode(&printer, &name, media_width_mm, media_height_mm, raster_dpi)?;
+        let dc = unsafe { CreateDCW(driver.as_ptr(), name.as_ptr(), null(), mode.as_ptr().cast()) };
         if dc.is_null() {
             return Err(failure("Windows printer CreateDCW"));
         }
@@ -363,12 +582,13 @@ mod platform {
                 page,
             )
         } else {
-            Ok(PageDestination {
-                x: 0,
-                y: 0,
-                width: width as i32,
-                height: height as i32,
-            })
+            label_destination(
+                width,
+                height,
+                raster_dpi,
+                unsafe { GetDeviceCaps(dc.0, LOGPIXELSX) },
+                unsafe { GetDeviceCaps(dc.0, LOGPIXELSY) },
+            )
         };
         let destination = match destination {
             Ok(value) => value,
@@ -435,10 +655,10 @@ mod platform {
         }
         if unsafe { EndPage(dc.0) } <= 0 {
             unsafe { AbortDoc(dc.0) };
-            return Err(failure("Windows printer EndPage"));
+            return Err(unknown_delivery_failure("Windows printer EndPage"));
         }
         if unsafe { EndDoc(dc.0) } <= 0 {
-            return Err(failure("Windows printer EndDoc"));
+            return Err(unknown_delivery_failure("Windows printer EndDoc"));
         }
         Ok(SendOutcome {
             bytes: mono.len(),
@@ -488,6 +708,7 @@ mod platform {
     use super::*;
     fn unsupported() -> TransportFailure {
         TransportFailure {
+            kind: TransportFailureKind::NotStarted,
             message: "Windows spooler is available on Windows only".to_owned(),
             timed_out: false,
         }
@@ -599,6 +820,20 @@ mod tests {
                 y: 0,
                 width: 4960,
                 height: 7016
+            }
+        );
+    }
+
+    #[test]
+    fn label_bitmap_is_scaled_from_raster_dpi_to_driver_dpi() {
+        let target = label_destination(812, 406, 203, 300, 600).unwrap();
+        assert_eq!(
+            target,
+            PageDestination {
+                x: 0,
+                y: 0,
+                width: 1200,
+                height: 1200,
             }
         );
     }

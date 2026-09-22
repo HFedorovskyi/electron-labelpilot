@@ -1,6 +1,6 @@
 use super::metrics::PrintTimingRecord;
 use super::*;
-use crate::operational::{OperatorAttribution, RecordPackResult};
+use crate::operational::{CounterSnapshot, OperatorAttribution, RecordPackResult};
 use crate::printer::PendingPrintReceipt;
 use crate::session::CurrentOperator;
 
@@ -36,7 +36,7 @@ pub(super) struct PreparedPack {
     pub timings: PrintStageTimings,
     pub prepared_ahead: bool,
     pub must_close_box: bool,
-    counters: Value,
+    counters: CounterSnapshot,
     number: String,
     predicted_box: String,
     data: Map<String, Value>,
@@ -48,6 +48,7 @@ pub(super) struct CommittedPack {
     pub job_id: String,
     pub must_close_box: bool,
     pub stale_retries: usize,
+    pub(super) after_counters: CounterSnapshot,
     started: Instant,
     timings: PrintStageTimings,
     prepared_ahead: bool,
@@ -152,31 +153,29 @@ impl NativePrintService {
         &self,
         snapshot: &PackSnapshot,
         printer: &PrinterTransportState,
-        counters: Value,
+        counters: CounterSnapshot,
     ) -> Result<PreparedPack, String> {
         let started = Instant::now();
         let number = formatted_counter(
-            integer(counters.get("totalUnits")).unwrap_or(0) + 1,
+            counters.last_pack_sequence + 1,
             &snapshot.station_number,
             &snapshot.doc,
             "pack_number",
             &snapshot.numbering,
             "unit",
         );
-        let predicted_box = string(counters.get("currentBoxNumber"))
-            .map(str::to_owned)
-            .unwrap_or_else(|| {
-                formatted_counter(
-                    integer(counters.get("totalBoxes")).unwrap_or(0) + 1,
-                    &snapshot.station_number,
-                    &snapshot.doc,
-                    "box_number",
-                    &snapshot.numbering,
-                    "box",
-                )
-            });
-        let box_net = number_value(counters.get("boxNetWeight")) + snapshot.pack_net;
-        let units_in_box = integer(counters.get("unitsInBox")).unwrap_or(0) + 1;
+        let predicted_box = counters.current_box_number.clone().unwrap_or_else(|| {
+            formatted_counter(
+                counters.total_boxes + 1,
+                &snapshot.station_number,
+                &snapshot.doc,
+                "box_number",
+                &snapshot.numbering,
+                "box",
+            )
+        });
+        let box_net = counters.box_net_weight + snapshot.pack_net;
+        let units_in_box = counters.units_in_box + 1;
         let mut data = build_label_data(LabelDataContext {
             product: &snapshot.product,
             station_number: &snapshot.station_number,
@@ -200,7 +199,10 @@ impl NativePrintService {
             box_net,
             box_gross: box_net + snapshot.box_tare,
             units_in_box,
-            boxes_in_pallet: next_boxes_in_pallet(&counters),
+            boxes_in_pallet: next_boxes_in_pallet(
+                counters.boxes_in_pallet,
+                counters.current_box_id,
+            ),
         })?;
         let barcode = resolve_barcode(&snapshot.barcode_fields, &data, &snapshot.product);
         data.insert("barcode".to_owned(), Value::String(barcode));
@@ -260,7 +262,7 @@ impl NativePrintService {
             } = prepared;
             let outbox_started = Instant::now();
             let result = operational.record_pack_with_outbox_checked(
-                Some(&counters),
+                &counters,
                 RecordPackPayload {
                     number: number.clone(),
                     box_number: predicted_box.clone(),
@@ -313,26 +315,36 @@ impl NativePrintService {
                             timings.encode_us.saturating_add(elapsed_us(encode_started));
                         timings.bytes = job.byte_len();
                     }
-                    let job_id = job
-                        .with_idempotency_key(&format!("native-pack:{}", result.pack_id))?
-                        .persist(transaction)?;
                     let stored = StoredPrint {
                         config: snapshot.config.clone(),
                         doc: snapshot.doc.clone(),
-                        data: Value::Object(data),
+                        data: Value::Object(data.clone()),
                         number: number.clone(),
                         kind: "pack".to_owned(),
                         pack_id: Some(result.pack_id),
                     };
+                    let replay_json = serde_json::to_string(&stored)
+                        .map_err(|error| format!("encode last-print replay: {error}"))?;
+                    let job_id = job
+                        .with_idempotency_key(&format!("native-pack:{}", result.pack_id))?
+                        .with_replay_json(replay_json)?
+                        .persist(transaction)?;
+                    transaction
+                        .execute(
+                            "UPDATE pack SET delivery_job_id = ?1 WHERE id = ?2 AND status = 'Pending'",
+                            rusqlite::params![job_id, result.pack_id],
+                        )
+                        .map_err(|error| format!("link pack to delivery job: {error}"))?;
                     Ok((stored, job_id))
                 },
             )?;
             timings.outbox_us = timings.outbox_us.saturating_add(elapsed_us(outbox_started));
-            if let Some((result, (stored, job_id))) = result {
+            if let Some((result, (stored, job_id), after_counters)) = result {
                 return Ok(Some(CommittedPack {
                     result,
                     stored,
                     job_id,
+                    after_counters,
                     number,
                     started,
                     timings,
@@ -350,7 +362,7 @@ impl NativePrintService {
             prepared = self.prepare_pack(
                 snapshot,
                 printer,
-                operational.latest_counters(Some(snapshot.request.product_id))?,
+                operational.latest_counter_snapshot(Some(snapshot.request.product_id))?,
             )?;
             prepared.timings.add_preparation(&timings);
             prepared.started = started;
@@ -380,10 +392,10 @@ impl NativePrintService {
         printer: &PrinterTransportState,
         events: &RuntimeEventSink,
         snapshot: &PackSnapshot,
+        after: &CounterSnapshot,
     ) -> Result<(bool, Vec<String>), String> {
-        let after = operational.latest_counters(Some(snapshot.request.product_id))?;
         let limit = integer(snapshot.product.get("close_box_counter")).unwrap_or(0);
-        if limit > 0 && integer(after.get("unitsInBox")).unwrap_or(0) >= limit {
+        if limit > 0 && after.units_in_box >= limit {
             let closed = self.close_box_internal(
                 persisted,
                 operational,
@@ -394,6 +406,7 @@ impl NativePrintService {
                 &snapshot.request.batch_number,
                 snapshot.production,
                 Some(snapshot),
+                Some(after),
             )?;
             Ok((true, closed.warnings))
         } else {
@@ -423,20 +436,8 @@ impl NativePrintService {
                     &format!("pack {} transport: {error}", committed.result.pack_id),
                     "ERROR",
                 );
-                // Business accounting stays committed even if delivery fails.
-                let close_started = Instant::now();
-                if let Err(close_error) =
-                    self.auto_close_pack(persisted, operational, session, printer, events, snapshot)
-                {
-                    operational.record_print_error(
-                        &format!(
-                            "pack {} box auto-close: {close_error}",
-                            committed.result.pack_id
-                        ),
-                        "ERROR",
-                    );
-                }
-                committed.timings.box_close_us = elapsed_us(close_started);
+                // The Pending pack remains linked to its unresolved delivery job;
+                // the box-close guard prevents production from hiding that state.
                 committed.timings.total_us = elapsed_us(committed.started);
                 self.record_pack_timing(events, &committed, "failed");
                 return Err(error);
@@ -457,6 +458,7 @@ impl NativePrintService {
             printer,
             events,
             snapshot,
+            &committed.after_counters,
         ) {
             Ok((closed, box_warnings)) => {
                 warnings.extend(box_warnings);
@@ -508,8 +510,4 @@ impl NativePrintService {
         self.metrics.record(&record);
         events.emit("native-print-timing", record);
     }
-}
-
-fn number_value(value: Option<&Value>) -> f64 {
-    number(value).unwrap_or(0.0)
 }

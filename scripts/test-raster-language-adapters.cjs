@@ -22,6 +22,8 @@ new Function('module', 'exports', 'require', result.outputFiles[0].text)(
 );
 const encoders = moduleValue.exports;
 
+async function main() {
+
 const bitmap = {
     widthDots: 10,
     heightDots: 9,
@@ -43,13 +45,27 @@ const config = { dpi: 203, gapMm: 2 };
 
 const ascii = bytes => Buffer.from(bytes).toString('latin1');
 const monoHex = Buffer.from(bitmap.mono).toString('hex').toUpperCase();
+const invertedMono = Buffer.from(bitmap.mono.map(byte => byte ^ 0xff));
+
+const tspl = encoders.encodeTsplBitmap(bitmap, config);
+const tsplMarker = Buffer.from('BITMAP 0,0,2,9,0,');
+const tsplMarkerOffset = Buffer.from(tspl).indexOf(tsplMarker);
+assert.ok(tsplMarkerOffset >= 0, 'TSPL BITMAP marker is missing');
+const tsplDataStart = tsplMarkerOffset + tsplMarker.length;
+assert.deepEqual(
+    Buffer.from(tspl).subarray(tsplDataStart, tsplDataStart + bitmap.mono.length),
+    Buffer.from(bitmap.mono),
+);
 
 const epl = encoders.encodeEplBitmap(bitmap, config);
 const eplText = ascii(epl);
 assert.ok(eplText.startsWith('N\nq10\nQ9,16\nGW0,0,2,9,'));
 const eplMarker = Buffer.from('GW0,0,2,9,');
 const eplDataStart = Buffer.from(epl).indexOf(eplMarker) + eplMarker.length;
-assert.deepEqual(Buffer.from(epl).subarray(eplDataStart, eplDataStart + bitmap.mono.length), Buffer.from(bitmap.mono));
+assert.deepEqual(
+    Buffer.from(epl).subarray(eplDataStart, eplDataStart + bitmap.mono.length),
+    invertedMono,
+);
 assert.ok(eplText.endsWith('\nP1\n'));
 
 const cpcl = encoders.encodeCpclBitmap(bitmap, config);
@@ -65,10 +81,16 @@ assert.ok(ascii(dpl).startsWith('\x02xDLP'));
 const bmpOffset = dplBuffer.indexOf(Buffer.from('BM'));
 assert.ok(bmpOffset > 8);
 const bmpSize = dplBuffer.readUInt32LE(bmpOffset + 2);
-assert.equal(dplBuffer.readUInt32LE(bmpOffset + 10), 14 + 40 + 256 * 4);
+assert.equal(dplBuffer.readUInt32LE(bmpOffset + 10), 14 + 40 + 2 * 4);
 assert.equal(dplBuffer.readUInt32LE(bmpOffset + 18), bitmap.widthDots);
 assert.equal(dplBuffer.readUInt32LE(bmpOffset + 22), bitmap.heightDots);
-assert.equal(dplBuffer.readUInt16LE(bmpOffset + 28), 8);
+assert.equal(dplBuffer.readUInt16LE(bmpOffset + 28), 1);
+assert.equal(dplBuffer.readUInt32LE(bmpOffset + 46), 2);
+assert.equal(bmpSize, 14 + 40 + 2 * 4 + 4 * bitmap.heightDots);
+assert.deepEqual(
+    dplBuffer.subarray(bmpOffset + 62, bmpOffset + 66),
+    Buffer.from([0x00, 0x3f, 0xff, 0xff]),
+);
 const dplFormat = ascii(dplBuffer.subarray(bmpOffset + bmpSize));
 assert.match(dplFormat, /^\r\x02L\rD11\r1Y1100000000000LP[0-9A-F]{8}\rQ0001\rE\r$/);
 
@@ -84,15 +106,21 @@ assert.match(sbplData, /^[0-9A-F]+$/);
 
 for (const protocol of ['epl', 'cpcl', 'dpl', 'sbpl']) {
     const direct = encoders['encode' + protocol[0].toUpperCase() + protocol.slice(1) + 'Bitmap'](bitmap, config);
-    const routed = encoders.encodePortableRaster(protocol, bitmap, config);
+    const routed = await encoders.encodePortableRaster(protocol, bitmap, config);
     assert.deepEqual(Buffer.from(routed), Buffer.from(direct), protocol);
 }
 
-console.log('raster adapters: EPL GW, CPCL EG, DPL 8-bit BMP, SBPL GH');
+console.log('raster adapters: TSPL BITMAP, EPL GW, CPCL EG, DPL 1-bit BMP, SBPL GH');
 console.log('fixture: 10x9 dots, 2 bytes/row, exact binary/hex geometry verified');
 console.log('adapter bytes:', {
     epl: epl.length,
     cpcl: cpcl.length,
     dpl: dpl.length,
     sbpl: sbpl.length,
+});
+}
+
+main().catch(error => {
+    console.error(error);
+    process.exitCode = 1;
 });

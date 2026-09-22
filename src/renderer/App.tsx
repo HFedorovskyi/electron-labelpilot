@@ -5,6 +5,7 @@ import { SessionProvider } from './components/SessionProvider';
 import type { CurrentOperator } from './components/SessionProvider';
 import { useTranslation } from './i18n';
 import { ThemeProvider } from './components/ThemeProvider';
+import StartupUnresolvedPrintModal from './components/StartupUnresolvedPrintModal';
 
 // Heavy, non-station tabs: code-split so they don't bloat the initial chunk and are
 // only mounted (and their effects/IPC run) when actually opened.
@@ -262,6 +263,8 @@ const App = () => {
                         </div>
                     )}
                 </main>
+
+                <StartupUnresolvedPrintModal onReviewQueue={() => selectTab('printQueue')} />
 
                 {/* Global Toast Notification */}
                 {

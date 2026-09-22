@@ -24,6 +24,7 @@ Module._extensions['.ts'] = function compileTypeScript(mod, filename) {
     mod._compile(output.outputText, filename);
 };
 
+async function main() {
 try {
     const bitmap = require('../src/renderer/platform/tauriBitmapFallback.ts');
     const sample = {
@@ -33,10 +34,22 @@ try {
         mono: Uint8Array.from([0x00, 0x00, 0xff, 0xff, 0x0f, 0xf0]),
         renderMs: 0,
     };
-    const zpl = Buffer.from(bitmap.encodeZplBitmap(sample, { dpi: 203 })).toString('ascii');
+    const zpl = Buffer.from(await bitmap.encodeZplBitmap(sample, {
+        dpi: 203, protocol: 'image', connection: 'tcp', zplCompression: 'none',
+    })).toString('ascii');
     assert.match(zpl, /^\^XA\n\^PW16\n\^LL3\n/);
     assert.match(zpl, /\^GFA,6,6,2,/);
+    assert.ok(zpl.includes('^GFA,6,6,2,0000FFFF0FF0'), 'safe ZPL mode must emit raw ASCII hex');
     assert.match(zpl, /\^XZ$/);
+    const rleZpl = Buffer.from(await bitmap.encodeZplBitmap(sample, {
+        dpi: 203, protocol: 'image', connection: 'tcp', zplCompression: 'ascii-rle',
+    })).toString('ascii');
+    assert.ok(rleZpl.includes('^GFA,6,6,2,,!'), 'ASCII-RLE mode must remain explicit');
+    assert.ok(!rleZpl.includes('0000FFFF0FF0'), 'ASCII-RLE mode must not silently fall back to raw hex');
+    const z64Zpl = Buffer.from(await bitmap.encodeZplBitmap(sample, {
+        dpi: 203, protocol: 'image', connection: 'tcp', zplCompression: 'z64',
+    })).toString('ascii');
+    assert.ok(z64Zpl.includes(':Z64:'), 'Z64 mode must remain explicit');
 
     const hybridRequest = {
         config: { dpi: 300, protocol: 'image' },
@@ -68,7 +81,9 @@ try {
     assert.deepEqual(overlays, [
         '^FO828,1138^BY4,3.0,113^BEN,113,Y,N^FD4870254930134^FS\n',
     ]);
-    const hybridZpl = Buffer.from(bitmap.encodeZplBitmap(sample, { dpi: 300 }, overlays)).toString('ascii');
+    const hybridZpl = Buffer.from(await bitmap.encodeZplBitmap(sample, {
+        dpi: 300, protocol: 'image', connection: 'tcp', zplCompression: 'none',
+    }, overlays)).toString('ascii');
     assert.ok(hybridZpl.indexOf('^GFA') < hybridZpl.indexOf('^BE'));
     assert.match(hybridZpl, /\^BY4,3\.0,113\^BEN,113,Y,N/);
     assert.equal(bitmap.collectNativeZplBarcodeCommands({
@@ -122,7 +137,11 @@ try {
     assert.match(printer, /"serial"\s*=>/);
     assert.match(printer, /"windows_driver"\s*=>/);
     assert.match(serial, /serialport::new/);
-    assert.match(serial, /DataBits::Eight/);
+    assert.match(serial, /configured_data_bits/);
+    assert.match(serial, /FlowControl::Hardware/);
+    assert.match(serial, /FlowControl::Software/);
+    assert.match(serial, /Parity::Even/);
+    assert.match(serial, /Parity::Odd/);
     assert.match(serial, /StopBits::One/);
     assert.match(orchestrator, /Windows default printer/);
     for (const api of ['OpenPrinterW', 'WritePrinter', 'CreateDCW', 'StretchDIBits', 'GetDefaultPrinterW']) {
@@ -132,8 +151,14 @@ try {
     console.log('public print routing: native + ZPL/TSPL bitmap fallback + Windows GDI');
     console.log(`bitmap encoders: ZPL ${Buffer.byteLength(zpl)} bytes, TSPL ${tspl.length} bytes`);
     console.log('hybrid EAN-13: template 380x133 -> native ZPL 380-dot width, 113-dot bars plus text reserve');
-    console.log('transport coverage: TCP + Serial 8N1 + Windows RAW/GDI');
+    console.log('transport coverage: TCP + configurable Serial framing/flow control + Windows RAW/GDI');
 } finally {
     if (previousTsLoader) Module._extensions['.ts'] = previousTsLoader;
     else delete Module._extensions['.ts'];
 }
+}
+
+main().catch(error => {
+    console.error(error);
+    process.exitCode = 1;
+});

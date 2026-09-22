@@ -912,6 +912,8 @@ export component WeighingPrototype inherits Window {
     property <string> settings-on-label: root.ui-language == "en" ? "ON" : root.ui-language == "de" ? "EIN" : root.ui-language == "uk" ? "УВІМК." : "ВКЛ.";
     property <string> settings-off-label: root.ui-language == "en" ? "OFF" : root.ui-language == "de" ? "AUS" : root.ui-language == "uk" ? "ВИМК." : "ВЫКЛ.";
     property <string> settings-auto-print-hint: root.ui-language == "en" ? "Print a package label when weight is stable and within tolerance" : root.ui-language == "de" ? "Verpackungsetikett bei stabilem Gewicht im Toleranzbereich drucken" : root.ui-language == "uk" ? "Друкувати етикетку упаковки після стабілізації ваги в межах допуску" : "Печатать этикетку упаковки после стабилизации веса в пределах допуска";
+    property <string> settings-confirmed-print-label: root.ui-language == "en" ? "CONFIRMED PRINTING" : root.ui-language == "de" ? "BESTÄTIGTER DRUCK" : root.ui-language == "uk" ? "ПІДТВЕРДЖЕНИЙ ДРУК" : "ПОДТВЕРЖДЁННАЯ ПЕЧАТЬ";
+    property <string> settings-confirmed-print-hint: root.ui-language == "en" ? "Wait for an empty printer buffer and ready status after sending" : root.ui-language == "de" ? "Nach dem Senden auf leeren Puffer und Bereitschaft warten" : root.ui-language == "uk" ? "Після надсилання чекати порожнього буфера та готовності принтера" : "После отправки ждать пустого буфера и готовности принтера";
     property <string> settings-connection-title: root.ui-language == "en" ? "Printer connection" : root.ui-language == "de" ? "Druckeranschluss" : root.ui-language == "uk" ? "Підключення принтера" : "Подключение принтера";
     property <string> settings-connection-hint: root.ui-language == "en" ? "Select how this printer is connected" : root.ui-language == "de" ? "Anschlussart dieses Druckers wählen" : root.ui-language == "uk" ? "Виберіть спосіб підключення цього принтера" : "Выберите, как подключён этот принтер";
     property <string> settings-windows-label: root.ui-language == "en" ? "Windows printer" : root.ui-language == "de" ? "Windows-Drucker" : root.ui-language == "uk" ? "Принтер Windows" : "Принтер Windows";
@@ -1089,11 +1091,15 @@ export component WeighingPrototype inherits Window {
     in-out property <string> settings-ip: "";
     in-out property <string> settings-port: "9100";
     in-out property <string> settings-serial-port: "";
-    in-out property <string> settings-baud-rate: "9600";
+    in-out property <string> settings-baud-rate: "115200";
+    in-out property <string> settings-flow-control: "hardware";
+    in-out property <string> settings-parity: "none";
+    in-out property <string> settings-data-bits: "8";
     in-out property <string> settings-driver-name: "";
     in-out property <string> settings-dpi: "203";
     in-out property <string> settings-ram-cache: "auto";
-    in-out property <bool> settings-z64: false;
+    in-out property <string> settings-zpl-compression: "none";
+    in-out property <bool> settings-confirmed-print: false;
     in-out property <string> settings-darkness: "";
     in-out property <string> settings-print-speed: "";
     in-out property <string> settings-gap-mm: "";
@@ -1146,6 +1152,10 @@ export component WeighingPrototype inherits Window {
     property <string> form-working: root.ui-language == "en" ? "Working…" : root.ui-language == "de" ? "Wird ausgeführt…" : root.ui-language == "uk" ? "Виконується…" : "Выполняется…";
     property <string> form-graphics: root.ui-language == "en" ? "Memory and compression" : root.ui-language == "de" ? "Speicher und Komprimierung" : root.ui-language == "uk" ? "Пам’ять і стиснення" : "Память и сжатие";
     property <string> form-compression: root.ui-language == "en" ? "Z64 compression" : root.ui-language == "de" ? "Z64-Komprimierung" : root.ui-language == "uk" ? "Стиснення Z64" : "Сжатие Z64";
+    property <string> form-flow-control: root.ui-language == "en" ? "Flow control" : root.ui-language == "de" ? "Flusssteuerung" : root.ui-language == "uk" ? "Керування потоком" : "Управление потоком";
+    property <string> form-parity: root.ui-language == "en" ? "Parity" : root.ui-language == "de" ? "Parität" : root.ui-language == "uk" ? "Парність" : "Чётность";
+    property <string> form-data-bits: root.ui-language == "en" ? "Data bits" : root.ui-language == "de" ? "Datenbits" : root.ui-language == "uk" ? "Біти даних" : "Биты данных";
+    property <string> form-none: root.ui-language == "en" ? "None" : root.ui-language == "de" ? "Keine" : root.ui-language == "uk" ? "Немає" : "Нет";
     in-out property <int> settings-printer-section: 0;
     in-out property <int> settings-scale-section: 0;
     in-out property <length> settings-printer-scroll-y: 0px;
@@ -1626,6 +1636,7 @@ export component WeighingPrototype inherits Window {
     callback submit-operator-pin(int, string);
     callback continue-without-operator;
     callback switch-operator;
+    callback drain-ui-messages;
     callback refresh-print-queue;
     callback retry-print-job(string);
     callback cancel-print-job(string);
@@ -2291,6 +2302,7 @@ export component WeighingPrototype inherits Window {
                                 border-radius: 16px;
                                 text: UiText.translate(UiText.language, "ПЕЧАТЬ ЭТИКЕТКИ");
                                 icon: @image-url("../assets/icons/printer-white.png");
+                                enabled: root.scale-online && root.stable;
                                 clicked => { root.print-label(); }
                             }
 
@@ -2621,13 +2633,13 @@ export component WeighingPrototype inherits Window {
                     spacing: 12px; alignment: start; padding-right: 8px; padding-bottom: 4px;
                     if root.settings-printer-section == 0: VerticalLayout {
                         spacing: 12px; alignment: start;
-                        SettingsCard {
+                        if root.settings-protocol == "image" || root.settings-protocol == "zpl": SettingsCard {
                             title: root.form-connection; description: root.settings-connection-hint;
                             HorizontalLayout {
                                 spacing: 12px;
                                 SettingsTab { horizontal-stretch: 1; text: root.settings-windows-label; selected: root.settings-connection == "windows_driver"; enabled: !root.settings-busy; clicked => { root.settings-connection = "windows_driver"; root.settings-dirty = true; } }
                                 SettingsTab { horizontal-stretch: 1; text: root.settings-network-label; selected: root.settings-connection == "tcp"; enabled: !root.settings-busy; clicked => { root.settings-connection = "tcp"; root.settings-dirty = true; } }
-                                SettingsTab { horizontal-stretch: 1; text: root.settings-serial-label; selected: root.settings-connection == "serial"; enabled: !root.settings-busy; clicked => { root.settings-connection = "serial"; root.settings-dirty = true; } }
+                                SettingsTab { horizontal-stretch: 1; text: root.settings-serial-label; selected: root.settings-connection == "serial"; enabled: !root.settings-busy; clicked => { if root.settings-connection != "serial" { root.settings-baud-rate = "115200"; root.settings-flow-control = "hardware"; root.settings-parity = "none"; root.settings-data-bits = "8"; } root.settings-connection = "serial"; root.settings-dirty = true; } }
                             }
                             if root.settings-connection == "windows_driver": VerticalLayout {
 
@@ -2648,11 +2660,37 @@ export component WeighingPrototype inherits Window {
                                     SettingsSelect { horizontal-stretch: 1; label: root.settings-com-placeholder; value: root.settings-serial-port == "" ? root.form-choose-port : root.settings-serial-port; hint: ""; enabled: !root.settings-busy; clicked => { root.settings-picker-target = "printer-serial"; root.settings-picker-search = ""; root.settings-picker-scroll-y = 0px; } }
                                     SettingsField { horizontal-stretch: 1; max-width: 240px; label: root.settings-serial-speed-label; text <=> root.settings-baud-rate; hint: "300–921600"; placeholder: ""; enabled: !root.settings-busy; edited => { root.settings-dirty = true; } keyboard => { root.open-settings-input("printer-baud", root.settings-serial-speed-label, root.settings-baud-rate, 2); } }
                                 }
+                                Text { text: root.form-flow-control; color: Palette.n600; font-size: 12px; }
+                                HorizontalLayout {
+                                    spacing: 12px;
+                                    SettingsTab { horizontal-stretch: 1; text: "RTS/CTS"; selected: root.settings-flow-control == "hardware"; enabled: !root.settings-busy; clicked => { root.settings-flow-control = "hardware"; root.settings-dirty = true; } }
+                                    SettingsTab { horizontal-stretch: 1; text: "XON/XOFF"; selected: root.settings-flow-control == "software"; enabled: !root.settings-busy; clicked => { root.settings-flow-control = "software"; root.settings-dirty = true; } }
+                                    SettingsTab { horizontal-stretch: 1; text: root.form-none; selected: root.settings-flow-control == "none"; enabled: !root.settings-busy; clicked => { root.settings-flow-control = "none"; root.settings-dirty = true; } }
+                                }
+                                Text { text: root.form-parity; color: Palette.n600; font-size: 12px; }
+                                HorizontalLayout {
+                                    spacing: 12px;
+                                    SettingsTab { horizontal-stretch: 1; text: root.form-none; selected: root.settings-parity == "none"; enabled: !root.settings-busy; clicked => { root.settings-parity = "none"; root.settings-dirty = true; } }
+                                    SettingsTab { horizontal-stretch: 1; text: "Even"; selected: root.settings-parity == "even"; enabled: !root.settings-busy; clicked => { root.settings-parity = "even"; root.settings-dirty = true; } }
+                                    SettingsTab { horizontal-stretch: 1; text: "Odd"; selected: root.settings-parity == "odd"; enabled: !root.settings-busy; clicked => { root.settings-parity = "odd"; root.settings-dirty = true; } }
+                                }
+                                Text { text: root.form-data-bits; color: Palette.n600; font-size: 12px; }
+                                HorizontalLayout {
+                                    spacing: 12px;
+                                    SettingsTab { horizontal-stretch: 1; text: "5"; selected: root.settings-data-bits == "5"; enabled: !root.settings-busy; clicked => { root.settings-data-bits = "5"; root.settings-dirty = true; } }
+                                    SettingsTab { horizontal-stretch: 1; text: "6"; selected: root.settings-data-bits == "6"; enabled: !root.settings-busy; clicked => { root.settings-data-bits = "6"; root.settings-dirty = true; } }
+                                    SettingsTab { horizontal-stretch: 1; text: "7"; selected: root.settings-data-bits == "7"; enabled: !root.settings-busy; clicked => { root.settings-data-bits = "7"; root.settings-dirty = true; } }
+                                    SettingsTab { horizontal-stretch: 1; text: "8"; selected: root.settings-data-bits == "8"; enabled: !root.settings-busy; clicked => { root.settings-data-bits = "8"; root.settings-dirty = true; } }
+                                }
                             }
                         }
                         if root.settings-selected-role == "packPrinter": SettingsCard {
                             title: root.settings-pack-role-label;
                             SettingsToggle { label: root.settings-auto-print-label; description: root.settings-auto-print-hint; state-label: root.settings-auto-print ? root.settings-on-label : root.settings-off-label; checked: root.settings-auto-print; enabled: !root.settings-busy; toggled => { root.settings-auto-print = !root.settings-auto-print; root.settings-dirty = true; } }
+                        }
+                        if (root.settings-connection == "tcp" || root.settings-connection == "serial") && (root.settings-protocol == "zpl" || root.settings-protocol == "image" || root.settings-protocol == "tspl"): SettingsCard {
+                            title: root.settings-confirmed-print-label;
+                            SettingsToggle { label: root.settings-confirmed-print-label; description: root.settings-confirmed-print-hint; state-label: root.settings-confirmed-print ? root.settings-on-label : root.settings-off-label; checked: root.settings-confirmed-print; enabled: !root.settings-busy; toggled => { root.settings-confirmed-print = !root.settings-confirmed-print; root.settings-dirty = true; } }
                         }
                     }
                     if root.settings-printer-section == 1: VerticalLayout {
@@ -2692,7 +2730,13 @@ export component WeighingPrototype inherits Window {
                                 SettingsTab { horizontal-stretch: 1; text: root.settings-on-label; selected: root.settings-ram-cache == "on"; enabled: !root.settings-busy; clicked => { root.settings-ram-cache = "on"; root.settings-dirty = true; } }
                                 SettingsTab { horizontal-stretch: 1; text: root.settings-off-label; selected: root.settings-ram-cache == "off"; enabled: !root.settings-busy; clicked => { root.settings-ram-cache = "off"; root.settings-dirty = true; } }
                             }
-                            SettingsToggle { label: root.form-compression; state-label: root.settings-z64 ? "Z64" : "RLE"; checked: root.settings-z64; enabled: !root.settings-busy; toggled => { root.settings-z64 = !root.settings-z64; root.settings-dirty = true; } }
+                            Text { text: root.form-compression; color: Palette.n700; font-size: 13px; }
+                            HorizontalLayout {
+                                spacing: 12px;
+                                SettingsTab { horizontal-stretch: 1; text: "Hex"; selected: root.settings-zpl-compression == "none"; enabled: !root.settings-busy; clicked => { root.settings-zpl-compression = "none"; root.settings-dirty = true; } }
+                                SettingsTab { horizontal-stretch: 1; text: "ASCII-RLE"; selected: root.settings-zpl-compression == "ascii-rle"; enabled: !root.settings-busy; clicked => { root.settings-zpl-compression = "ascii-rle"; root.settings-dirty = true; } }
+                                SettingsTab { horizontal-stretch: 1; text: "Z64"; selected: root.settings-zpl-compression == "z64"; enabled: !root.settings-busy; clicked => { root.settings-zpl-compression = "z64"; root.settings-dirty = true; } }
+                            }
                         }
                     }
                     if root.settings-detection != "": VerticalLayout {

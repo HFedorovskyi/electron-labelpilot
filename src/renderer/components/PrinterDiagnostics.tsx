@@ -12,6 +12,7 @@ import {
     buildDiagnosticReport, defaultCalibrationSize, printCalibration, probePrinter,
     type PrinterConfig, type PrinterDiagnosticResult, type PrinterRole,
 } from '../platform/printerDiagnostics';
+import { effectiveSerialBaudRate, effectiveSerialFlowControl, type PrinterProfileSelection } from '../../shared/printerProfiles';
 
 const ROLES: PrinterRole[] = ['packPrinter', 'boxPrinter', 'palletPrinter'];
 
@@ -25,7 +26,11 @@ function endpoint(config?: PrinterConfig): string {
     if (!config) return '—';
     const connection = String(config.connection ?? '—');
     if (connection === 'tcp' || connection === 'ethernet') return `${String(config.ip ?? '—')}:${Number(config.port ?? 9100)}`;
-    if (connection === 'serial') return `${String(config.serialPort ?? '—')} · ${Number(config.baudRate ?? 9600)}`;
+    if (connection === 'serial') {
+        const serial = config as unknown as PrinterProfileSelection;
+        const flow = effectiveSerialFlowControl(serial);
+        return `${String(config.serialPort ?? '—')} · ${effectiveSerialBaudRate(serial)} · ${Number(config.dataBits ?? 8)}${String(config.parity ?? 'none').charAt(0).toUpperCase()}1 · ${flow === 'hardware' ? 'RTS/CTS' : flow === 'software' ? 'XON/XOFF' : 'no flow'}`;
+    }
     return String(config.driverName ?? connection);
 }
 

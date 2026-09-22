@@ -42,7 +42,7 @@ const Settings = ({ onNavigate }: SettingsProps) => {
     const [protocols, setProtocols] = useState<ProtocolInfo[]>([]);
     const [config, setConfig] = useState({
         type: 'serial',
-        protocolId: 'simulator',
+        protocolId: 'generic',
         path: '',
         baudRate: 9600,
         host: '192.168.1.50',
@@ -62,8 +62,13 @@ const Settings = ({ onNavigate }: SettingsProps) => {
             name: 'Pack Printer',
             connection: 'windows_driver',
             protocol: 'image',
+            compatibilityMode: 'auto',
+            zplCompression: 'none',
             port: 9100,
-            baudRate: 9600,
+            baudRate: 115200,
+            flowControl: 'hardware',
+            parity: 'none',
+            dataBits: 8,
             dpi: 203
         },
         boxPrinter: {
@@ -72,8 +77,13 @@ const Settings = ({ onNavigate }: SettingsProps) => {
             name: 'Box Printer',
             connection: 'windows_driver',
             protocol: 'image',
+            compatibilityMode: 'auto',
+            zplCompression: 'none',
             port: 9100,
-            baudRate: 9600,
+            baudRate: 115200,
+            flowControl: 'hardware',
+            parity: 'none',
+            dataBits: 8,
             dpi: 203
         },
         palletPrinter: {
@@ -82,8 +92,13 @@ const Settings = ({ onNavigate }: SettingsProps) => {
             name: 'Pallet Printer',
             connection: 'windows_driver',
             protocol: 'image',
+            compatibilityMode: 'auto',
+            zplCompression: 'none',
             port: 9100,
-            baudRate: 9600,
+            baudRate: 115200,
+            flowControl: 'hardware',
+            parity: 'none',
+            dataBits: 8,
             dpi: 203
         },
         autoPrintOnStable: true,

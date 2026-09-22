@@ -1,8 +1,10 @@
 export type PersistedRecord = Record<string, unknown>;
 
 export const DEFAULT_SCALE_CONFIG: PersistedRecord = {
-    type: 'simulator',
-    protocolId: 'simulator',
+    type: 'serial',
+    protocolId: 'generic',
+    path: '',
+    baudRate: 9600,
     pollingInterval: 250,
     stabilityCount: 4,
 };
@@ -20,8 +22,12 @@ const DEFAULT_DEVICE_CONFIG: PersistedRecord = {
     connection: 'windows_driver',
     protocol: 'image',
     compatibilityMode: 'auto',
+    zplCompression: 'none',
     port: 9100,
-    baudRate: 9600,
+    baudRate: 115200,
+    flowControl: 'hardware',
+    parity: 'none',
+    dataBits: 8,
     dpi: 203,
 };
 
@@ -58,6 +64,29 @@ export function normalizePrinterConfig(value: unknown): PersistedRecord {
         const device = result[role];
         if (!isRecord(device)) continue;
         delete device.persistentConnection;
+        if (typeof device.zplCompression === 'string') {
+            device.zplCompression = device.zplCompression.trim().toLowerCase();
+        } else if (typeof device.z64 === 'boolean') {
+            // Preserve the exact behavior selected by the former two-state UI.
+            device.zplCompression = device.z64 ? 'z64' : 'ascii-rle';
+        } else {
+            device.zplCompression = device.compatibilityMode === 'advanced'
+                || device.detectedProfileId === 'zpl-full'
+                ? 'z64'
+                : 'none';
+        }
+        if (device.connection === 'serial') {
+            const rasterProtocol = device.protocol !== 'browser';
+            const baudRate = Number(device.baudRate ?? (rasterProtocol ? 115200 : 9600));
+            device.baudRate = baudRate;
+            device.flowControl = typeof device.flowControl === 'string'
+                ? device.flowControl.trim().toLowerCase()
+                : (rasterProtocol && baudRate >= 115200 ? 'hardware' : 'none');
+            device.parity = typeof device.parity === 'string'
+                ? device.parity.trim().toLowerCase()
+                : 'none';
+            device.dataBits ??= 8;
+        }
         if (device.widthMm !== 58 || device.heightMm !== 40) continue;
         delete device.widthMm;
         delete device.heightMm;

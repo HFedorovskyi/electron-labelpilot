@@ -26,10 +26,10 @@ const RECONNECT_MIN: Duration = Duration::from_millis(250);
 const RECONNECT_MAX: Duration = Duration::from_secs(2);
 
 fn default_scale_type() -> String {
-    "simulator".to_owned()
+    "serial".to_owned()
 }
 fn default_protocol_id() -> String {
-    "simulator".to_owned()
+    "generic".to_owned()
 }
 fn default_polling_interval() -> u64 {
     250
@@ -812,7 +812,7 @@ fn crc16(data: &[u8]) -> u16 {
 }
 
 fn parse_protocol(protocol: &Protocol, data: &[u8]) -> Option<ScaleReading> {
-    match protocol.parser {
+    let reading = match protocol.parser {
         ParserKind::Cas => parse_cas(data),
         ParserKind::Mettler => parse_mettler(data),
         ParserKind::Massa100 => parse_massa_100(data),
@@ -831,7 +831,24 @@ fn parse_protocol(protocol: &Protocol, data: &[u8]) -> Option<ScaleReading> {
         ParserKind::DiniArgeo => parse_dini_argeo(data),
         ParserKind::Generic => parse_first_decimal(data, false, false),
         ParserKind::Simulator => None,
+    }?;
+    normalize_reading_to_kg(reading)
+}
+
+fn normalize_reading_to_kg(mut reading: ScaleReading) -> Option<ScaleReading> {
+    reading.weight *= match reading.unit {
+        "kg" => 1.0,
+        "g" => 0.001,
+        "lb" => 0.453_592_37,
+        "oz" => 0.028_349_523_125,
+        "ct" => 0.000_2,
+        _ => return None,
+    };
+    if !reading.weight.is_finite() {
+        return None;
     }
+    reading.unit = "kg";
+    Some(reading)
 }
 
 fn text(data: &[u8]) -> String {
@@ -1046,7 +1063,9 @@ fn parse_dibal(data: &[u8]) -> Option<ScaleReading> {
     Some(ScaleReading {
         weight: parse_number(capture.get(1)?.as_str(), capture.get(2)?.as_str())?,
         unit: "kg",
-        stable: true,
+        // Delta's signed ASCII frame has no trustworthy motion bit. Stability
+        // is established by ReadingFilter over consecutive equal readings.
+        stable: false,
         tare: None,
     })
 }
@@ -1071,6 +1090,8 @@ fn parse_common_ascii(data: &[u8]) -> Option<ScaleReading> {
     {
         Some(unit) if unit == "g" => "g",
         Some(unit) if unit == "lb" => "lb",
+        Some(unit) if unit == "oz" => "oz",
+        Some(unit) if unit == "ct" => "ct",
         _ => "kg",
     };
     if unit == "g" {

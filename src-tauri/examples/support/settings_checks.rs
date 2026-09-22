@@ -294,10 +294,15 @@ pub fn verify() -> Result<Vec<String>, slint::PlatformError> {
 }
 
 /// Real callbacks, isolated preferences file, restart and write-error behavior.
-pub fn verify_preferences(directory: &std::path::Path) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+pub fn verify_preferences(
+    directory: &std::path::Path,
+) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     use labelpilot_tauri_lib::slint_runtime::initialize_ui_preferences;
     std::fs::create_dir_all(directory)?;
-    std::fs::write(directory.join("printer-config.json"), br#"{"language":"ru","fixture":"preserve"}"#)?;
+    std::fs::write(
+        directory.join("printer-config.json"),
+        br#"{"language":"ru","fixture":"preserve"}"#,
+    )?;
     let before = std::fs::read(directory.join("printer-config.json"))?;
     let ui = WeighingPrototype::new()?;
     initialize_ui_preferences(&ui, Some(directory.to_path_buf()));
@@ -320,7 +325,10 @@ pub fn verify_preferences(directory: &std::path::Path) -> Result<Vec<String>, Bo
     }
     assert!(ui.get_settings_dirty() && ui.get_scale_settings_dirty());
     assert_eq!(ui.get_settings_ip(), "192.0.2.123");
-    assert_eq!(std::fs::read(directory.join("printer-config.json"))?, before);
+    assert_eq!(
+        std::fs::read(directory.join("printer-config.json"))?,
+        before
+    );
     ui.invoke_change_ui_language("xx".into());
     assert_eq!(ui.get_ui_language(), "uk");
     let occupied = directory.join("occupied");
@@ -332,5 +340,11 @@ pub fn verify_preferences(directory: &std::path::Path) -> Result<Vec<String>, Bo
     failed.invoke_change_ui_language("en".into());
     assert_eq!(failed.get_ui_language(), "ru");
     assert!(!failed.get_preferences_error().is_empty());
-    Ok(vec!["preferences-visible".into(), "four-languages-two-themes-live".into(), "preferences-survive-restart".into(), "preferences-preserve-device-drafts-and-files".into(), "preferences-save-failure-retains-current-values".into()])
+    Ok(vec![
+        "preferences-visible".into(),
+        "four-languages-two-themes-live".into(),
+        "preferences-survive-restart".into(),
+        "preferences-preserve-device-drafts-and-files".into(),
+        "preferences-save-failure-retains-current-values".into(),
+    ])
 }

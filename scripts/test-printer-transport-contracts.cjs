@@ -7,6 +7,8 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const read = relative => fs.readFileSync(path.join(root, relative), 'utf8');
 const rust = read('src-tauri/src/printer.rs');
+const serial = read('src-tauri/src/printer/serial.rs');
+const status = read('src-tauri/src/printer/status.rs');
 const backend = read('src-tauri/src/printer/backend.rs');
 const spooler = read('src-tauri/src/printer/spooler.rs');
 const commands = read('src-tauri/src/commands.rs');
@@ -31,7 +33,9 @@ const rustPort = Number(rust.match(/const DEFAULT_TCP_PORT: u16 = (\d+);/)?.[1])
 assert.equal(rustPort, 9100);
 assert.equal(rustDuration('CONNECT_TIMEOUT', 'secs') * 1000, 3000);
 assert.equal(rustDuration('WRITE_TIMEOUT', 'secs') * 1000, 3000);
-assert.equal(rustDuration('IDLE_CLOSE', 'millis'), 400);
+assert.equal(rustDuration('KEEP_OPEN_WRITE_TIMEOUT', 'secs') * 1000, 45000);
+assert.equal(rustNumber('TCP_WRITE_PROGRESS_CHUNK_BYTES'), 64 * 1024);
+assert.equal(rustDuration('IDLE_CLOSE', 'secs') * 1000, 15000);
 assert.equal(rustDuration('BREAKER_DURATION', 'secs') * 1000, 5000);
 assert.equal(rustNumber('PRINTER_QUEUE_CAPACITY'), 16);
 assert.equal(rustNumber('MAX_PRINTER_WORKERS'), 12);
@@ -45,6 +49,9 @@ assert.match(rust, /automatic_tcp_job_boundaries_ignore_the_legacy_operator_swit
 
 for (const marker of [
     'set_nodelay(true)',
+    'set_tcp_keepalive',
+    'reused_stream_is_alive',
+    'write_job_once_chunked',
     'try_send(job)',
     'physical_key',
     'tcp_job_boundary',
@@ -56,6 +63,9 @@ for (const marker of [
     'IDEMPOTENCY_OUTCOME_UNCERTAIN',
     'delivery_state',
     'confirmation_mode',
+    'TransportFailureKind',
+    'MAX_AUTOMATIC_DELIVERY_ATTEMPTS',
+    'mark_retry_queued',
 ]) {
     assert.ok(rust.includes(marker), `Rust printer transport is missing ${marker}`);
 }
@@ -75,10 +85,26 @@ assert.match(rust, /driver_page_jobs/);
 assert.match(backend, /SUPPORTED_PRINT_TARGETS/);
 assert.match(spooler, /GetDeviceCaps/);
 assert.match(bridge, /driverPageJobs: number/);
+assert.match(bridge, /keepOpenWriteTimeoutMs: number/);
+assert.match(bridge, /tcpWriteProgressChunkBytes: number/);
 assert.match(bridge, /deduplicatedJobs: number/);
 assert.match(bridge, /idempotencyConflicts: number/);
 assert.match(bridge, /deliveryState:/);
 assert.match(bridge, /confirmationMode:/);
+assert.match(bridge, /queuedFormats\?: number \| null/);
+assert.match(rust, /worker_holds_connection[\s\S]*?"serial" \| "tcp"/);
+assert.match(rust, /A completed handshake proves that the transport recovered/);
+assert.match(rust, /DEFAULT_SERIAL_BAUD_RATE: u64 = 115_200/);
+assert.match(rust, /pub flow_control: Option<String>/);
+assert.match(rust, /pub parity: Option<String>/);
+assert.match(rust, /pub data_bits: Option<u8>/);
+assert.match(rust, /serial:\{\}:\{\}:\{\}:\{\}:\{\}:1/);
+assert.match(serial, /\.data_bits\(configured_data_bits\(config\)\)/);
+assert.match(serial, /\.parity\(configured_parity\(config\)\)/);
+assert.match(serial, /\.flow_control\(configured_flow_control\(config\)\)/);
+assert.match(serial, /FlowControl::Hardware/);
+assert.match(serial, /FlowControl::Software/);
+assert.match(status, /super::serial::open_configured\(config, STATUS_IO_TIMEOUT\)/);
 
 assert.match(bridge, /function bytesToBase64\(data: Uint8Array\)/);
 assert.match(bridge, /const chunkSize = 0x8000/);
@@ -87,6 +113,7 @@ assert.match(screen, /getTauriPrinterTransportSummary/);
 assert.match(css, /migration-split \{[^}]*repeat\(3,/);
 assert.match(css, /migration-printer span/);
 
-console.log('Tauri printer transport contracts: automatic stream/EOF framing, shared endpoint ordering, connect/write 3000 ms');
+console.log('Tauri printer transport contracts: automatic stream/EOF framing, 3000 ms default and 45000 ms progress-aware keep-open writes');
 console.log('Printer transport bounds: 16 jobs/printer, 12 workers, 16 MiB/job, breaker 5000 ms');
 console.log('Printer transport bridge: raw queue plus bounded Windows label/page GDI and 10-minute idempotency');
+console.log('Serial transport: raster default 115200 8N1 RTS/CTS; configurable data bits, parity and flow control');

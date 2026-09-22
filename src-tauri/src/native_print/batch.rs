@@ -1,6 +1,11 @@
 use super::pack::PreparedPack;
 use super::*;
-use crate::printer::MAX_RAW_JOB_BYTES;
+use crate::printer::{PrinterDeviceConfig, PrinterStatusReport, MAX_RAW_JOB_BYTES};
+use std::{thread, time::Duration as WallDuration};
+
+const BATCH_MAX_BUFFERED_FORMATS: u32 = 8;
+const BATCH_STATUS_POLL_INTERVAL: WallDuration = WallDuration::from_millis(250);
+const BATCH_STATUS_CANCEL_POLL: WallDuration = WallDuration::from_millis(50);
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -24,6 +29,125 @@ pub struct NativeBatchStats {
     pub peak_prepared_bytes: usize,
     pub prefetch_capacity: usize,
     pub prefetch_byte_limit: usize,
+    pub status_checks: usize,
+    pub status_waits: usize,
+    pub status_wait_us: u64,
+    pub status_unsupported: bool,
+    pub max_buffered_formats: u32,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum BatchPrinterReadiness {
+    Ready,
+    Unsupported,
+    Waiting(String),
+}
+
+pub(super) fn batch_printer_readiness(report: &PrinterStatusReport) -> BatchPrinterReadiness {
+    if !report.reachable {
+        return BatchPrinterReadiness::Waiting("принтер недоступен".to_owned());
+    }
+    if !report.supports_bidirectional_status {
+        if report.status == "reachable" {
+            return BatchPrinterReadiness::Unsupported;
+        }
+        let details = if report.details.is_empty() {
+            "ответ состояния принтера не распознан".to_owned()
+        } else {
+            report.details.join(" · ")
+        };
+        return BatchPrinterReadiness::Waiting(details);
+    }
+    let fault = matches!(
+        report.status.as_str(),
+        "head-open"
+            | "paper-jam"
+            | "paper-out"
+            | "ribbon-out"
+            | "paused"
+            | "offline"
+            | "error"
+            | "buffer-full"
+            | "busy"
+    );
+    let buffered = report.queued_formats.unwrap_or(0);
+    if fault || buffered >= BATCH_MAX_BUFFERED_FORMATS {
+        let details = if report.details.is_empty() {
+            report.status.clone()
+        } else {
+            report.details.join(" · ")
+        };
+        return BatchPrinterReadiness::Waiting(if buffered == 0 {
+            details
+        } else {
+            format!("{details} · форматов в буфере: {buffered}")
+        });
+    }
+    BatchPrinterReadiness::Ready
+}
+
+#[cfg(test)]
+mod batch_printer_status_tests {
+    use super::*;
+
+    fn report(status: &str, supported: bool, queued_formats: Option<u32>) -> PrinterStatusReport {
+        PrinterStatusReport {
+            printer_id: "pack".to_owned(),
+            printer_name: "Pack".to_owned(),
+            physical_key: "tcp:127.0.0.1:9100".to_owned(),
+            protocol: "zpl".to_owned(),
+            connection: "tcp".to_owned(),
+            reachable: true,
+            status: status.to_owned(),
+            details: vec![status.to_owned()],
+            supports_bidirectional_status: supported,
+            queued_formats,
+            response_bytes: 0,
+            response_preview: None,
+            raw_response_hex: None,
+            manufacturer: None,
+            model: None,
+            firmware: None,
+            link_os_version: None,
+            detected_dpi: None,
+            supports_utf8_text: false,
+            supports_z64: false,
+            capability_evidence: Vec::new(),
+            queried_at_ms: 0,
+        }
+    }
+
+    #[test]
+    fn waits_for_hardware_faults_and_bounded_zpl_buffer() {
+        assert!(matches!(
+            batch_printer_readiness(&report("paper-out", true, Some(0))),
+            BatchPrinterReadiness::Waiting(_)
+        ));
+        assert!(matches!(
+            batch_printer_readiness(&report("printing", true, Some(BATCH_MAX_BUFFERED_FORMATS))),
+            BatchPrinterReadiness::Waiting(_)
+        ));
+        assert_eq!(
+            batch_printer_readiness(&report(
+                "printing",
+                true,
+                Some(BATCH_MAX_BUFFERED_FORMATS - 1)
+            )),
+            BatchPrinterReadiness::Ready
+        );
+    }
+
+    #[test]
+    fn explicitly_reports_missing_bidirectional_status() {
+        assert_eq!(
+            batch_printer_readiness(&report("reachable", false, None)),
+            BatchPrinterReadiness::Unsupported
+        );
+        assert!(matches!(
+            batch_printer_readiness(&report("unknown", false, None)),
+            BatchPrinterReadiness::Waiting(_)
+        ));
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -73,6 +197,98 @@ impl NativeFixedBatchOutcome {
 }
 
 impl NativePrintService {
+    #[allow(clippy::too_many_arguments)]
+    fn await_batch_printer_ready(
+        &self,
+        printer: &PrinterTransportState,
+        events: &RuntimeEventSink,
+        config: &PrinterDeviceConfig,
+        monitoring: &mut bool,
+        completed: i64,
+        requested: i64,
+        cancelled: &dyn Fn() -> bool,
+        stats: &mut NativeBatchStats,
+    ) -> Result<bool, String> {
+        if !*monitoring {
+            return Ok(true);
+        }
+        let wait_started = Instant::now();
+        let mut waiting = false;
+        let mut previous_reason = None::<String>;
+        loop {
+            if cancelled() {
+                if waiting {
+                    stats.status_wait_us = stats
+                        .status_wait_us
+                        .saturating_add(elapsed_us(wait_started));
+                }
+                return Ok(false);
+            }
+            stats.status_checks += 1;
+            let readiness = match printer.query_printer_status_with_sink(events.clone(), config) {
+                Ok(report) => {
+                    stats.max_buffered_formats = stats
+                        .max_buffered_formats
+                        .max(report.queued_formats.unwrap_or(0));
+                    batch_printer_readiness(&report)
+                }
+                Err(error) => BatchPrinterReadiness::Waiting(error),
+            };
+            match readiness {
+                BatchPrinterReadiness::Ready => {
+                    if waiting {
+                        stats.status_wait_us = stats
+                            .status_wait_us
+                            .saturating_add(elapsed_us(wait_started));
+                        events.emit(
+                            "fixed-batch-printer-ready",
+                            json!({"completed":completed,"requested":requested,
+                                "message":"Принтер готов · тираж продолжается"}),
+                        );
+                    }
+                    return Ok(true);
+                }
+                BatchPrinterReadiness::Unsupported => {
+                    *monitoring = false;
+                    stats.status_unsupported = true;
+                    events.emit(
+                        "fixed-batch-printer-status-unsupported",
+                        json!({"completed":completed,"requested":requested,
+                            "message":"Принтер не подтверждает состояние · контроль только по приёму транспорта"}),
+                    );
+                    return Ok(true);
+                }
+                BatchPrinterReadiness::Waiting(reason) => {
+                    if !waiting {
+                        waiting = true;
+                        stats.status_waits += 1;
+                    }
+                    if previous_reason.as_deref() != Some(reason.as_str()) {
+                        events.emit(
+                            "fixed-batch-printer-wait",
+                            json!({"completed":completed,"requested":requested,"reason":reason,
+                                "message":format!("Тираж приостановлен · {reason}")}),
+                        );
+                        previous_reason = Some(reason);
+                    }
+                }
+            }
+            let deadline = Instant::now() + BATCH_STATUS_POLL_INTERVAL;
+            while Instant::now() < deadline {
+                if cancelled() {
+                    stats.status_wait_us = stats
+                        .status_wait_us
+                        .saturating_add(elapsed_us(wait_started));
+                    return Ok(false);
+                }
+                thread::sleep(
+                    BATCH_STATUS_CANCEL_POLL
+                        .min(deadline.saturating_duration_since(Instant::now())),
+                );
+            }
+        }
+    }
+
     /// One committed job in flight and at most one uncommitted prepared successor.
     /// No number reservation, bulk copies, or per-label producer threads.
     #[allow(clippy::too_many_arguments)]
@@ -121,6 +337,8 @@ impl NativePrintService {
             snapshot.box_assets.as_ref().map_err(Clone::clone)?;
         }
         snapshot.snapshot_us = elapsed_us(started);
+        let pack_printer = PrinterDeviceConfig::from_value(snapshot.config.clone())?;
+        let mut status_monitoring = pack_printer.batch_status_polling;
         let mut outcome = NativeFixedBatchOutcome {
             requested: copies,
             completed: 0,
@@ -138,6 +356,18 @@ impl NativePrintService {
         let mut ready = None;
         while outcome.completed < copies {
             if cancelled() {
+                break;
+            }
+            if !self.await_batch_printer_ready(
+                printer,
+                events,
+                &pack_printer,
+                &mut status_monitoring,
+                outcome.completed,
+                copies,
+                cancelled,
+                &mut outcome.stats,
+            )? {
                 break;
             }
             let prepared = match ready.take() {
@@ -278,7 +508,8 @@ impl NativePrintService {
         );
         let preparation = (|| {
             let counters_started = Instant::now();
-            let counters = operational.latest_counters(Some(snapshot.request.product_id))?;
+            let counters =
+                operational.latest_counter_snapshot(Some(snapshot.request.product_id))?;
             let counter_us = elapsed_us(counters_started);
             let mut prepared = self.prepare_pack(snapshot, printer, counters)?;
             prepared.started = counters_started;

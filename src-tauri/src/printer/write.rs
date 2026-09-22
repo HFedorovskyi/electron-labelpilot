@@ -22,7 +22,12 @@ impl JobWriteError {
 
     pub(super) fn into_transport_failure(self, context: &str) -> TransportFailure {
         let mut failure = io_failure(context, self.error);
-        if self.bytes_written > 0 || self.flushing {
+        if self.bytes_written > 0 {
+            failure.kind = if self.flushing {
+                super::TransportFailureKind::Unknown
+            } else {
+                super::TransportFailureKind::Partial
+            };
             failure.message =
                 format!(
                 "DELIVERY_UNCERTAIN: {} ({} bytes written, phase={}); automatic replay suppressed",
@@ -39,9 +44,23 @@ pub(super) fn write_job_once<W: Write + ?Sized>(
     writer: &mut W,
     data: &[u8],
 ) -> Result<(), JobWriteError> {
+    write_job_once_chunked(writer, data, usize::MAX)
+}
+
+/// Bound each syscall so a persistent TCP job observes forward progress between
+/// write timeouts instead of handing the entire raster batch to one blocking call.
+pub(super) fn write_job_once_chunked<W: Write + ?Sized>(
+    writer: &mut W,
+    data: &[u8],
+    max_chunk_bytes: usize,
+) -> Result<(), JobWriteError> {
+    let max_chunk_bytes = max_chunk_bytes.max(1);
     let mut bytes_written = 0;
     while bytes_written < data.len() {
-        let error = match writer.write(&data[bytes_written..]) {
+        let chunk_end = bytes_written
+            .saturating_add(max_chunk_bytes)
+            .min(data.len());
+        let error = match writer.write(&data[bytes_written..chunk_end]) {
             Ok(0) => io::Error::new(
                 io::ErrorKind::WriteZero,
                 "printer write returned zero bytes",
@@ -69,16 +88,19 @@ pub(super) fn write_job_once<W: Write + ?Sized>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::printer::TransportFailureKind;
     use std::collections::VecDeque;
 
     struct Writer {
         steps: VecDeque<io::Result<usize>>,
         written: Vec<u8>,
+        requested: Vec<usize>,
         fail_flush: bool,
         flush_calls: usize,
     }
     impl Write for Writer {
         fn write(&mut self, data: &[u8]) -> io::Result<usize> {
+            self.requested.push(data.len());
             let count = self.steps.pop_front().unwrap_or(Ok(data.len()))?;
             assert!(count <= data.len());
             self.written.extend_from_slice(&data[..count]);
@@ -97,6 +119,7 @@ mod tests {
         Writer {
             steps: steps.into(),
             written: Vec::new(),
+            requested: Vec::new(),
             fail_flush: false,
             flush_calls: 0,
         }
@@ -107,6 +130,14 @@ mod tests {
         let mut writer = writer(vec![Ok(2), Err(io::ErrorKind::Interrupted.into()), Ok(1)]);
         write_job_once(&mut writer, b"LABEL").unwrap();
         assert_eq!(writer.written, b"LABEL");
+        assert_eq!(writer.flush_calls, 1);
+    }
+    #[test]
+    fn chunked_writes_expose_forward_progress() {
+        let mut writer = writer(vec![]);
+        write_job_once_chunked(&mut writer, b"12345678", 3).unwrap();
+        assert_eq!(writer.written, b"12345678");
+        assert_eq!(writer.requested, vec![3, 3, 2]);
         assert_eq!(writer.flush_calls, 1);
     }
     #[test]
@@ -146,10 +177,9 @@ mod tests {
             assert_eq!(writer.written, b"LABEL");
             assert_eq!(writer.flush_calls, 0);
             assert!(!error.can_retry(1));
-            assert!(error
-                .into_transport_failure("test")
-                .message
-                .starts_with("DELIVERY_UNCERTAIN:"));
+            let failure = error.into_transport_failure("test");
+            assert_eq!(failure.kind, TransportFailureKind::Partial);
+            assert!(failure.message.starts_with("DELIVERY_UNCERTAIN:"));
         }
     }
     #[test]
@@ -160,6 +190,7 @@ mod tests {
         assert_eq!(writer.written, b"LABEL");
         assert!(!error.can_retry(1));
         let failure = error.into_transport_failure("test");
+        assert_eq!(failure.kind, TransportFailureKind::Unknown);
         assert!(failure.message.contains("5 bytes written, phase=flush"));
     }
 }

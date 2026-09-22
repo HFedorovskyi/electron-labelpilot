@@ -45,13 +45,17 @@ assert.match(pallet, /palletPrinter\.connection === 'windows_driver'/);
 assert.match(pallet, /printTarget: 'page-sheet'/);
 assert.match(pallet, /printTarget: palletPrinter\.printTarget \|\| 'label-roll'/);
 
-for (const api of ['GetDeviceCaps', 'StretchDIBits', 'StartDocW', 'StartPage', 'EndPage', 'EndDoc']) {
+for (const api of ['DocumentPropertiesW', 'GetDeviceCaps', 'StretchDIBits', 'StartDocW', 'StartPage', 'EndPage', 'EndDoc']) {
     assert.ok(spooler.includes(api), `${api} is missing from page-sheet GDI backend`);
 }
 for (const metric of ['HORZRES', 'VERTRES', 'LOGPIXELSX', 'LOGPIXELSY']) {
     assert.ok(spooler.includes(metric), `${metric} page metric is missing`);
 }
 assert.match(spooler, /fn page_destination\(/);
+assert.match(spooler, /fn label_destination\(/);
+for (const field of ['DM_PAPERWIDTH', 'DM_PAPERLENGTH', 'DM_ORIENTATION', 'DM_PRINTQUALITY', 'DM_YRESOLUTION', 'DM_FORMNAME']) {
+    assert.ok(spooler.includes(field), `${field} is missing from the GDI DEVMODE configuration`);
+}
 assert.match(spooler, /page\.margins_mm\.left/);
 assert.match(spooler, /page\.fit_mode == "actual-size"/);
 assert.match(printer, /JobAction::DriverPage/);

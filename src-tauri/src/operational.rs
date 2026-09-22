@@ -40,6 +40,7 @@ impl OperationalState {
                     DELETE FROM barcodes;
                     DELETE FROM labels;
                     DELETE FROM station;
+                    UPDATE operational_sequences SET last_pack_sequence = 0 WHERE id = 1;
                     DELETE FROM sqlite_sequence;
                     COMMIT;
                     PRAGMA foreign_keys = ON;
@@ -398,8 +399,18 @@ impl OperationalState {
         operator: Option<OperatorAttribution>,
         prepare_outbox: impl FnOnce(&Transaction<'_>, &RecordPackResult) -> Result<T, String>,
     ) -> Result<(RecordPackResult, T), String> {
-        self.record_pack_with_outbox_checked(None, payload, operator, prepare_outbox)?
-            .ok_or_else(|| "record-pack precondition unexpectedly changed".to_owned())
+        payload.validate()?;
+        self.with_connection(|connection| {
+            let transaction = connection
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                .map_err(|error| format!("failed to begin record-pack transaction: {error}"))?;
+            let result = record_pack_transaction(&transaction, payload, operator, "Printed")?;
+            let outbox = prepare_outbox(&transaction, &result)?;
+            transaction
+                .commit()
+                .map_err(|error| format!("failed to commit record-pack transaction: {error}"))?;
+            Ok((result, outbox))
+        })
     }
 
     /// Recheck the render's counter snapshot under the same IMMEDIATE
@@ -407,27 +418,29 @@ impl OperationalState {
     /// None means no mutation occurred: discard stale preparation and retry.
     pub(crate) fn record_pack_with_outbox_checked<T>(
         &self,
-        expected_counters: Option<&Value>,
+        expected_counters: &CounterSnapshot,
         payload: RecordPackPayload,
         operator: Option<OperatorAttribution>,
         prepare_outbox: impl FnOnce(&Transaction<'_>, &RecordPackResult) -> Result<T, String>,
-    ) -> Result<Option<(RecordPackResult, T)>, String> {
+    ) -> Result<Option<(RecordPackResult, T, CounterSnapshot)>, String> {
         payload.validate()?;
+        let pack_number = payload.number.clone();
+        let weight_netto = payload.weight_netto;
         self.with_connection(|connection| {
             let transaction = connection
                 .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
                 .map_err(|error| format!("failed to begin record-pack transaction: {error}"))?;
-            if let Some(expected) = expected_counters {
-                if latest_counters(&transaction, Some(payload.nomenclature_id))? != *expected {
-                    return Ok(None);
-                }
+            let actual = counter_snapshot(&transaction, Some(payload.nomenclature_id))?;
+            if actual != *expected_counters {
+                return Ok(None);
             }
-            let result = record_pack_transaction(&transaction, payload, operator)?;
+            let result = record_pack_transaction(&transaction, payload, operator, "Pending")?;
+            let after = actual.after_record(&result, pack_number, weight_netto);
             let outbox = prepare_outbox(&transaction, &result)?;
             transaction
                 .commit()
                 .map_err(|error| format!("failed to commit record-pack transaction: {error}"))?;
-            Ok(Some((result, outbox)))
+            Ok(Some((result, outbox, after)))
         })
     }
 
@@ -446,6 +459,19 @@ impl OperationalState {
             let transaction = connection
                 .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
                 .map_err(|error| format!("failed to begin close-box transaction: {error}"))?;
+            let unresolved: i64 = transaction
+                .query_row(
+                    "SELECT COUNT(*) FROM pack WHERE box_id = ?1 AND status = 'Pending' AND deleted_at IS NULL",
+                    params![payload.box_id],
+                    |row| row.get(0),
+                )
+                .map_err(db_error("count unresolved packs before close-box"))?;
+            if unresolved > 0 {
+                return Err(format!(
+                    "короб нельзя закрыть: {} упаковок ожидают подтверждения печати",
+                    unresolved
+                ));
+            }
             let changes = transaction
                 .execute(
                     "UPDATE boxes SET status = 'Closed', weight_netto = ?1, weight_brutto = ?2, updated_at = CURRENT_TIMESTAMP WHERE id = ?3 AND status = 'Open'",
@@ -463,7 +489,15 @@ impl OperationalState {
     }
 
     pub fn latest_counters(&self, nomenclature_id: Option<i64>) -> Result<Value, String> {
-        self.with_connection(|connection| latest_counters(connection, nomenclature_id))
+        self.latest_counter_snapshot(nomenclature_id)
+            .map(|counters| counters.to_json())
+    }
+
+    pub(crate) fn latest_counter_snapshot(
+        &self,
+        nomenclature_id: Option<i64>,
+    ) -> Result<CounterSnapshot, String> {
+        self.with_connection(|connection| counter_snapshot(connection, nomenclature_id))
     }
 
     /// Resume the most recent non-empty box instead of losing the active product
@@ -726,6 +760,70 @@ pub struct RecordPackResult {
     pub barcode_value: String,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct CounterSnapshot {
+    pub last_pack_sequence: i64,
+    pub last_pack_number: String,
+    pub last_box_number: String,
+    pub total_units: i64,
+    pub total_boxes: i64,
+    pub boxes_in_pallet: i64,
+    pub units_in_box: i64,
+    pub box_net_weight: f64,
+    pub current_box_id: Option<i64>,
+    pub current_box_number: Option<String>,
+}
+
+impl CounterSnapshot {
+    fn to_json(&self) -> Value {
+        json!({
+            "lastPackSequence": self.last_pack_sequence,
+            "lastPackNumber": self.last_pack_number,
+            "lastBoxNumber": self.last_box_number,
+            "totalUnits": self.total_units,
+            "totalBoxes": self.total_boxes,
+            "boxesInPallet": self.boxes_in_pallet,
+            "unitsInBox": self.units_in_box,
+            "boxNetWeight": self.box_net_weight,
+            "currentBoxId": self.current_box_id,
+            "currentBoxNumber": self.current_box_number,
+        })
+    }
+
+    fn after_record(
+        &self,
+        result: &RecordPackResult,
+        pack_number: String,
+        weight_netto: f64,
+    ) -> Self {
+        let new_box = i64::from(result.new_box_created);
+        Self {
+            last_pack_sequence: self.last_pack_sequence.saturating_add(1),
+            last_pack_number: pack_number,
+            last_box_number: if result.new_box_created {
+                result.box_number.clone()
+            } else {
+                self.last_box_number.clone()
+            },
+            total_units: self.total_units.saturating_add(1),
+            total_boxes: self.total_boxes.saturating_add(new_box),
+            boxes_in_pallet: self.boxes_in_pallet.saturating_add(new_box),
+            units_in_box: if result.new_box_created {
+                1
+            } else {
+                self.units_in_box.saturating_add(1)
+            },
+            box_net_weight: if result.new_box_created {
+                weight_netto
+            } else {
+                self.box_net_weight + weight_netto
+            },
+            current_box_id: Some(result.box_id),
+            current_box_number: Some(result.box_number.clone()),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CloseBoxPayload {
@@ -746,7 +844,21 @@ fn record_pack_transaction(
     transaction: &Transaction<'_>,
     payload: RecordPackPayload,
     operator: Option<OperatorAttribution>,
+    initial_status: &'static str,
 ) -> Result<RecordPackResult, String> {
+    let next_pack_sequence: i64 = transaction
+        .query_row(
+            "SELECT last_pack_sequence + 1 FROM operational_sequences WHERE id = 1",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(db_error("allocate next pack sequence"))?;
+    transaction
+        .execute(
+            "UPDATE operational_sequences SET last_pack_sequence = ?1 WHERE id = 1",
+            params![next_pack_sequence],
+        )
+        .map_err(db_error("advance pack sequence"))?;
     let mut box_row = transaction
         .query_row(
             "SELECT id, number FROM boxes WHERE status = 'Open' AND nomenclature_id = ?1 ORDER BY id DESC LIMIT 1",
@@ -817,19 +929,21 @@ fn record_pack_transaction(
         .execute(
             r#"
             INSERT INTO pack (
-                number, box_id, nomenclature_id, weight_netto, weight_brutto,
+                number, sequence_number, box_id, nomenclature_id, weight_netto, weight_brutto,
                 barcode_value, station_number, status, production_date,
                 expiration_date, batch, operator_uuid, operator_name
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'Printed', ?8, ?9, ?10, ?11, ?12)
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
             "#,
             params![
                 payload.number,
+                next_pack_sequence,
                 box_id,
                 payload.nomenclature_id,
                 payload.weight_netto,
                 payload.weight_brutto,
                 barcode_value,
                 nonempty(payload.station_number),
+                initial_status,
                 nonempty(payload.production_date),
                 nonempty(payload.expiration_date),
                 nonempty(payload.batch),
@@ -870,86 +984,77 @@ fn insert_unique_pallet(transaction: &Transaction<'_>) -> Result<i64, String> {
     Err("failed to allocate a unique pallet number after 50 attempts".to_owned())
 }
 
-fn latest_counters(connection: &Connection, nomenclature_id: Option<i64>) -> Result<Value, String> {
-    let last_pack: Option<String> = connection
-        .query_row(
-            "SELECT number FROM pack WHERE status != 'Deleted' ORDER BY id DESC LIMIT 1",
-            [],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(db_error("read latest pack number"))?;
-    let last_box: Option<String> = connection
-        .query_row(
-            "SELECT number FROM boxes WHERE status != 'Deleted' ORDER BY id DESC LIMIT 1",
-            [],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(db_error("read latest box number"))?;
-    let (total_units, total_boxes): (i64, i64) = connection
-        .query_row(
-            "SELECT total_units, total_boxes FROM operational_totals WHERE id = 1",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .map_err(db_error("read operational totals"))?;
-    let open_pallet: Option<i64> = connection
-        .query_row(
-            "SELECT id FROM pallet WHERE status = 'Open' ORDER BY id DESC LIMIT 1",
-            [],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(db_error("read open pallet"))?;
-    let boxes_in_pallet = match open_pallet {
-        Some(id) => connection
-            .query_row(
-                "SELECT COUNT(*) FROM boxes WHERE pallete_id = ?1 AND status != 'Deleted'",
-                params![id],
-                |row| row.get::<_, i64>(0),
+fn counter_snapshot(
+    connection: &Connection,
+    nomenclature_id: Option<i64>,
+) -> Result<CounterSnapshot, String> {
+    let mut statement = connection
+        .prepare_cached(
+            r#"
+            WITH
+            last_pack AS (
+                SELECT number FROM pack
+                WHERE status != 'Deleted' ORDER BY id DESC LIMIT 1
+            ),
+            last_box AS (
+                SELECT number FROM boxes
+                WHERE status != 'Deleted' ORDER BY id DESC LIMIT 1
+            ),
+            open_pallet AS (
+                SELECT id FROM pallet
+                WHERE status = 'Open' ORDER BY id DESC LIMIT 1
+            ),
+            open_box AS (
+                SELECT id, number FROM boxes
+                WHERE status = 'Open'
+                  AND (?1 IS NULL OR ?1 = 0 OR nomenclature_id = ?1)
+                ORDER BY id DESC LIMIT 1
+            ),
+            pallet_boxes AS (
+                SELECT COUNT(*) AS count
+                FROM boxes
+                WHERE pallete_id = (SELECT id FROM open_pallet)
+                  AND status != 'Deleted'
+            ),
+            box_totals AS (
+                SELECT COUNT(*) AS units,
+                       COALESCE(SUM(weight_netto), 0.0) AS net_weight
+                FROM pack
+                WHERE box_id = (SELECT id FROM open_box)
+                  AND status != 'Deleted'
             )
-            .map_err(db_error("count boxes in pallet"))?,
-        None => 0,
-    };
-    let open_box: Option<(i64, String)> = match nomenclature_id {
-        Some(id) if id != 0 => connection
-            .query_row(
-                "SELECT id, number FROM boxes WHERE status = 'Open' AND nomenclature_id = ?1 ORDER BY id DESC LIMIT 1",
-                params![id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional(),
-        _ => connection
-            .query_row(
-                "SELECT id, number FROM boxes WHERE status = 'Open' ORDER BY id DESC LIMIT 1",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional(),
-    }
-    .map_err(db_error("read open box"))?;
-    let (units_in_box, box_net_weight) = match open_box.as_ref() {
-        Some((id, _)) => connection
-            .query_row(
-                "SELECT COUNT(*), COALESCE(SUM(weight_netto), 0) FROM pack WHERE box_id = ?1 AND status != 'Deleted'",
-                params![id],
-                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, f64>(1)?)),
-            )
-            .map_err(db_error("calculate current box counters"))?,
-        None => (0, 0.0),
-    };
-    Ok(json!({
-        "lastPackNumber": last_pack.unwrap_or_else(|| "0".to_owned()),
-        "lastBoxNumber": last_box.unwrap_or_else(|| "0".to_owned()),
-        "totalUnits": total_units,
-        "totalBoxes": total_boxes,
-        "boxesInPallet": boxes_in_pallet,
-        "unitsInBox": units_in_box,
-        "boxNetWeight": box_net_weight,
-        "currentBoxId": open_box.as_ref().map(|row| row.0),
-        "currentBoxNumber": open_box.map(|row| row.1),
-    }))
+            SELECT
+                (SELECT last_pack_sequence FROM operational_sequences WHERE id = 1),
+                COALESCE((SELECT number FROM last_pack), '0'),
+                COALESCE((SELECT number FROM last_box), '0'),
+                totals.total_units,
+                totals.total_boxes,
+                (SELECT count FROM pallet_boxes),
+                (SELECT units FROM box_totals),
+                (SELECT net_weight FROM box_totals),
+                (SELECT id FROM open_box),
+                (SELECT number FROM open_box)
+            FROM operational_totals AS totals
+            WHERE totals.id = 1
+            "#,
+        )
+        .map_err(db_error("prepare latest counters"))?;
+    statement
+        .query_row(params![nomenclature_id], |row| {
+            Ok(CounterSnapshot {
+                last_pack_sequence: row.get(0)?,
+                last_pack_number: row.get(1)?,
+                last_box_number: row.get(2)?,
+                total_units: row.get(3)?,
+                total_boxes: row.get(4)?,
+                boxes_in_pallet: row.get(5)?,
+                units_in_box: row.get(6)?,
+                box_net_weight: row.get(7)?,
+                current_box_id: row.get(8)?,
+                current_box_number: row.get(9)?,
+            })
+        })
+        .map_err(db_error("read latest counters"))
 }
 
 fn open_pallet_content(

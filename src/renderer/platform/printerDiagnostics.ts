@@ -44,9 +44,11 @@ export interface PrinterDiagnosticResult {
 
 const PUBLIC_CONFIG_KEYS = [
     'id', 'name', 'active', 'connection', 'protocol', 'compatibilityMode',
-    'detectedProfileId', 'ip', 'port', 'serialPort', 'baudRate', 'driverName',
+    'detectedProfileId', 'ip', 'port', 'serialPort', 'baudRate',
+    'flowControl', 'parity', 'dataBits', 'driverName',
     'dpi', 'widthMm', 'heightMm', 'printTarget', 'pageFit',
     'darkness', 'printSpeed', 'gapMm',
+    'ramCache', 'zplCompression', 'z64',
 ] as const;
 
 function errorMessage(error: unknown): string {

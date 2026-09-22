@@ -81,18 +81,34 @@ fn append_element(
                 return Err(format!("TSPL text requires bitmap: {}", element.id));
             }
             let point = js_round(element.font_size.unwrap_or(12.0) * 72.0 / 96.0).max(1);
-            let alignment = match element.text_align.as_deref() {
-                Some("center") => 2,
-                Some("right") => 3,
-                _ => 1,
-            };
-            push(
-                output,
-                &format!(
-                    "TEXT {x},{y},\"0\",{rotation},{point},{point},{alignment},\"{}\"",
-                    escape(&value)
-                ),
-            );
+            if profile.id == "generic-tspl-safe" {
+                if matches!(element.text_align.as_deref(), Some("center" | "right")) {
+                    return Err(format!(
+                        "legacy TSPL text alignment requires bitmap: {}",
+                        element.id
+                    ));
+                }
+                push(
+                    output,
+                    &format!(
+                        "TEXT {x},{y},\"0\",{rotation},{point},{point},\"{}\"",
+                        escape(&value)
+                    ),
+                );
+            } else {
+                let alignment = match element.text_align.as_deref() {
+                    Some("center") => 2,
+                    Some("right") => 3,
+                    _ => 1,
+                };
+                push(
+                    output,
+                    &format!(
+                        "TEXT {x},{y},\"0\",{rotation},{point},{point},{alignment},\"{}\"",
+                        escape(&value)
+                    ),
+                );
+            }
         }
         "rect" => {
             let mut width = js_round(element.w * geometry.scale_x).max(1);

@@ -1,6 +1,10 @@
 import { needsGs1Parse, normalizeBarcodeType } from '../../shared/barcodeTypes';
 import { portableNativeLinearSpec } from '../../shared/barcodePrintMatrix';
 import { labelFontStack, normalizeLabelFontFamily } from '../../shared/labelFonts';
+import {
+    effectiveZplGraphicEncoding,
+    type PrinterProfileSelection,
+} from '../../shared/printerProfiles';
 
 const MAX_ELEMENTS = 1_024;
 const MAX_BITMAP_PIXELS = 9_000_000;
@@ -621,17 +625,50 @@ function concat(parts: Uint8Array[]): Uint8Array {
     return output;
 }
 
-export function encodeZplBitmap(
+function crc16Ccitt(bytes: Uint8Array): number {
+    let crc = 0;
+    for (const byte of bytes) {
+        crc ^= byte << 8;
+        for (let bit = 0; bit < 8; bit++) {
+            crc = crc & 0x8000 ? ((crc << 1) ^ 0x1021) & 0xffff : (crc << 1) & 0xffff;
+        }
+    }
+    return crc;
+}
+
+async function encodeZ64(mono: Uint8Array): Promise<string> {
+    if (typeof CompressionStream === 'undefined') {
+        throw new Error('Z64 encoding is unavailable: this WebView has no CompressionStream support');
+    }
+    const compressedStream = new Blob([mono.slice().buffer])
+        .stream()
+        .pipeThrough(new CompressionStream('deflate'));
+    const compressed = new Uint8Array(await new Response(compressedStream).arrayBuffer());
+    let binary = '';
+    for (let offset = 0; offset < compressed.length; offset += 0x8000) {
+        binary += String.fromCharCode(...compressed.subarray(offset, offset + 0x8000));
+    }
+    const encoded = btoa(binary);
+    const crc = crc16Ccitt(new TextEncoder().encode(encoded)).toString(16).toUpperCase().padStart(4, '0');
+    return `:Z64:${encoded}:${crc}`;
+}
+
+export async function encodeZplBitmap(
     bitmap: TauriRenderedBitmap,
     config: Record<string, unknown>,
     nativeBarcodeCommands: readonly string[] = [],
-): Uint8Array {
+): Promise<Uint8Array> {
     const total = bitmap.mono.length;
-    const compressed = compressZplBitmap(bitmap.mono, bitmap.bytesPerRow, bitmap.heightDots);
+    const encoding = effectiveZplGraphicEncoding(config as unknown as PrinterProfileSelection);
+    const graphic = encoding === 'none'
+        ? monoHex(bitmap.mono)
+        : encoding === 'z64'
+            ? await encodeZ64(bitmap.mono)
+            : compressZplBitmap(bitmap.mono, bitmap.bytesPerRow, bitmap.heightDots);
     let stream = `^XA\n^PW${bitmap.widthDots}\n^LL${bitmap.heightDots}\n^PON\n`;
     if (config.darkness !== undefined) stream += `^MD${finite(config.darkness)}\n`;
     if (config.printSpeed !== undefined) stream += `^PR${finite(config.printSpeed)}\n`;
-    stream += `^FO0,0^GFA,${total},${total},${bitmap.bytesPerRow},${compressed}^FS\n`;
+    stream += `^FO0,0^GFA,${total},${total},${bitmap.bytesPerRow},${graphic}^FS\n`;
     if (nativeBarcodeCommands.length) stream += nativeBarcodeCommands.join('');
     stream += '^XZ';
     const bytes = ascii(stream);
@@ -676,7 +713,10 @@ export function encodeEplBitmap(
         `N\nq${bitmap.widthDots}\nQ${bitmap.heightDots},${gapDots}\n`
         + `GW0,0,${bitmap.bytesPerRow},${bitmap.heightDots},`,
     );
-    return ensureAdapterOutput('epl', concat([prefix, bitmap.mono, ascii('\nP1\n')]));
+    // EPL2 GW uses 0 for a printed dot and 1 for an unprinted dot, opposite
+    // to the renderer's canonical 1 = black representation.
+    const eplMono = bitmap.mono.map(byte => byte ^ 0xff);
+    return ensureAdapterOutput('epl', concat([prefix, eplMono, ascii('\nP1\n')]));
 }
 
 export function encodeCpclBitmap(
@@ -699,10 +739,10 @@ function writeU32(view: DataView, offset: number, value: number): void {
     view.setUint32(offset, value, true);
 }
 
-function encodeDplBmp8(bitmap: TauriRenderedBitmap, dpi: number): Uint8Array {
-    const rowBytes = (bitmap.widthDots + 3) & ~3;
+function encodeDplBmp1(bitmap: TauriRenderedBitmap, dpi: number): Uint8Array {
+    const rowBytes = Math.ceil(bitmap.widthDots / 32) * 4;
     const pixelBytes = rowBytes * bitmap.heightDots;
-    const pixelOffset = 14 + 40 + 256 * 4;
+    const pixelOffset = 14 + 40 + 2 * 4;
     const fileSize = pixelOffset + pixelBytes;
     if (fileSize > MAX_OUTPUT_BYTES - 256) {
         throw new Error(`DPL BMP exceeds ${MAX_OUTPUT_BYTES - 256} bytes`);
@@ -717,26 +757,23 @@ function encodeDplBmp8(bitmap: TauriRenderedBitmap, dpi: number): Uint8Array {
     writeU32(view, 18, bitmap.widthDots);
     writeU32(view, 22, bitmap.heightDots);
     writeU16(view, 26, 1);
-    writeU16(view, 28, 8);
+    writeU16(view, 28, 1);
     writeU32(view, 34, pixelBytes);
     const pixelsPerMeter = Math.max(1, Math.round(dpi / 0.0254));
     writeU32(view, 38, pixelsPerMeter);
     writeU32(view, 42, pixelsPerMeter);
-    writeU32(view, 46, 256);
+    writeU32(view, 46, 2);
     writeU32(view, 50, 2);
-    for (let value = 0; value < 256; value++) {
-        const palette = 54 + value * 4;
-        bmp[palette] = value;
-        bmp[palette + 1] = value;
-        bmp[palette + 2] = value;
-    }
+    // Palette index 0 is black and index 1 is white. The renderer's canonical
+    // bitmap uses 1 for black, so downloaded BMP rows are inverted.
+    bmp.fill(0xff, 58, 61);
     for (let sourceY = 0; sourceY < bitmap.heightDots; sourceY++) {
         const target = pixelOffset + (bitmap.heightDots - 1 - sourceY) * rowBytes;
-        for (let x = 0; x < bitmap.widthDots; x++) {
-            const source = bitmap.mono[sourceY * bitmap.bytesPerRow + (x >> 3)];
-            bmp[target + x] = source & (0x80 >> (x & 7)) ? 0 : 255;
+        bmp.fill(0xff, target, target + rowBytes);
+        const source = sourceY * bitmap.bytesPerRow;
+        for (let offset = 0; offset < bitmap.bytesPerRow; offset++) {
+            bmp[target + offset] = bitmap.mono[source + offset] ^ 0xff;
         }
-        bmp.fill(255, target + bitmap.widthDots, target + rowBytes);
     }
     return bmp;
 }
@@ -765,7 +802,7 @@ export function encodeDplBitmap(
         throw new Error('DPL raster dimensions must be in 1..9999 dots');
     }
     const name = `LP${fnv1a32(bitmap).toString(16).toUpperCase().padStart(8, '0')}`;
-    const bmp = encodeDplBmp8(bitmap, Math.round(finite(config.dpi, 203)));
+    const bmp = encodeDplBmp1(bitmap, Math.round(finite(config.dpi, 203)));
     const stx = '\x02';
     const download = ascii(`${stx}xD${name}\r${stx}IDb${name}\r`);
     const format = ascii(
@@ -814,12 +851,12 @@ export function encodeSbplBitmap(
 
 export type PortableRasterProtocol = 'zpl' | 'image' | 'tspl' | 'epl' | 'cpcl' | 'dpl' | 'sbpl';
 
-export function encodePortableRaster(
+export async function encodePortableRaster(
     protocol: PortableRasterProtocol,
     bitmap: TauriRenderedBitmap,
     config: Record<string, unknown>,
     nativeBarcodeCommands: readonly string[] = [],
-): Uint8Array {
+): Promise<Uint8Array> {
     switch (protocol) {
         case 'zpl':
         case 'image':

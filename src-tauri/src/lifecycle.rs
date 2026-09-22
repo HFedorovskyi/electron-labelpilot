@@ -1,3 +1,4 @@
+use rusqlite::{Connection, OpenFlags, MAIN_DB};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::ffi::OsStr;
@@ -28,6 +29,8 @@ const FILES_TO_BACKUP: &[&str] = &[
     "identity_pre_demo.json",
 ];
 const DIRECTORIES_TO_BACKUP: &[&str] = &["outbox"];
+const DATABASE_FILE: &str = "client_data.db";
+const DATABASE_SIDECARS: &[&str] = &["client_data.db-wal", "client_data.db-shm"];
 
 pub struct UpdateRuntimeState {
     pending: Mutex<Option<PendingUpdate>>,
@@ -349,7 +352,11 @@ pub fn create_backup(data_dir: &Path, version: &str) -> Result<BackupInfo, Strin
     for name in FILES_TO_BACKUP {
         let source = data_dir.join(name);
         if source.is_file() {
-            copy_file_synced(&source, &temporary.join(name))?;
+            if *name == DATABASE_FILE {
+                snapshot_database(&source, &temporary.join(name))?;
+            } else {
+                copy_file_synced(&source, &temporary.join(name))?;
+            }
             files.push((*name).to_owned());
         }
     }
@@ -362,6 +369,8 @@ pub fn create_backup(data_dir: &Path, version: &str) -> Result<BackupInfo, Strin
             directories.push((*name).to_owned());
         }
     }
+
+    crate::native_update::verify_database_snapshot(&temporary)?;
 
     let metadata = BackupMetadata {
         id: id.clone(),
@@ -457,11 +466,15 @@ pub fn apply_pending_rollback(data_dir: &Path) -> Result<Option<String>, String>
     if metadata.id != pending.backup_id {
         return Err("backup metadata identity mismatch".to_owned());
     }
+    crate::native_update::verify_database_snapshot(&backup_path)?;
 
     for file in metadata.files {
         validate_relative_name(&file)?;
         let source = backup_path.join(&file);
         if source.is_file() {
+            if file == DATABASE_FILE {
+                clear_database_sidecars(data_dir)?;
+            }
             copy_file_atomic(&source, &data_dir.join(&file))?;
         }
     }
@@ -530,6 +543,43 @@ fn copy_file_synced(source: &Path, target: &Path) -> Result<(), String> {
     output
         .sync_all()
         .map_err(|error| format!("failed to flush {}: {error}", target.display()))
+}
+
+fn snapshot_database(source: &Path, target: &Path) -> Result<(), String> {
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
+    }
+    if target.exists() {
+        fs::remove_file(target)
+            .map_err(|error| format!("failed to replace {}: {error}", target.display()))?;
+    }
+    let connection = Connection::open_with_flags(
+        source,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .map_err(|error| format!("failed to open database snapshot source: {error}"))?;
+    connection
+        .busy_timeout(Duration::from_secs(5))
+        .map_err(|error| format!("failed to configure database snapshot timeout: {error}"))?;
+    connection
+        .backup(MAIN_DB, target, None)
+        .map_err(|error| format!("failed to create consistent database snapshot: {error}"))
+}
+
+fn clear_database_sidecars(data_dir: &Path) -> Result<(), String> {
+    for name in DATABASE_SIDECARS {
+        let path = data_dir.join(name);
+        if path.is_file() {
+            fs::remove_file(&path).map_err(|error| {
+                format!(
+                    "failed to remove stale SQLite sidecar {}: {error}",
+                    path.display()
+                )
+            })?;
+        }
+    }
+    Ok(())
 }
 
 fn copy_file_atomic(source: &Path, target: &Path) -> Result<(), String> {
@@ -760,6 +810,50 @@ mod tests {
         );
         assert!(directory.0.join("outbox/original.lpr").is_file());
         assert!(directory.0.join("outbox/live.lpr").is_file());
+    }
+
+    #[test]
+    fn database_backup_captures_wal_and_rollback_removes_stale_sidecars() {
+        let directory = TestDirectory::new("database-wal");
+        let database = directory.0.join(DATABASE_FILE);
+        let connection = Connection::open(&database).unwrap();
+        connection
+            .execute_batch(
+                "PRAGMA journal_mode = WAL; \
+                 PRAGMA wal_autocheckpoint = 0; \
+                 CREATE TABLE trace(value TEXT NOT NULL); \
+                 INSERT INTO trace(value) VALUES ('before');",
+            )
+            .unwrap();
+
+        let backup = create_backup(&directory.0, "2.0.5").unwrap();
+        let snapshot = Connection::open(Path::new(&backup.path).join(DATABASE_FILE)).unwrap();
+        assert_eq!(
+            snapshot
+                .query_row("SELECT value FROM trace", [], |row| row.get::<_, String>(0))
+                .unwrap(),
+            "before"
+        );
+        drop(snapshot);
+
+        connection
+            .execute("INSERT INTO trace(value) VALUES ('after')", [])
+            .unwrap();
+        drop(connection);
+        fs::write(directory.0.join("client_data.db-wal"), b"stale-wal").unwrap();
+        fs::write(directory.0.join("client_data.db-shm"), b"stale-shm").unwrap();
+
+        queue_rollback(&directory.0, &backup.id).unwrap();
+        apply_pending_rollback(&directory.0).unwrap();
+        assert!(!directory.0.join("client_data.db-wal").exists());
+        assert!(!directory.0.join("client_data.db-shm").exists());
+        let restored = Connection::open(&database).unwrap();
+        assert_eq!(
+            restored
+                .query_row("SELECT COUNT(*) FROM trace", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
     }
 
     #[test]

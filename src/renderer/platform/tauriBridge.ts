@@ -53,6 +53,10 @@ export interface TauriTelemetrySummary {
     intervalMs: number;
     uptimeMs: number;
     recordedEvents: number;
+    pendingEventWrites: number;
+    droppedEvents: number;
+    eventWriteFailures: number;
+    eventQueueCapacity: number;
     reportCycles: number;
     sentReports: number;
     spooledReports: number;
@@ -82,6 +86,8 @@ export interface TauriPrinterTransportSummary {
     maxJobBytes: number;
     connectTimeoutMs: number;
     writeTimeoutMs: number;
+    keepOpenWriteTimeoutMs: number;
+    tcpWriteProgressChunkBytes: number;
     idleCloseMs: number;
     breakerMs: number;
     tcpJobs: number;
@@ -175,9 +181,18 @@ export interface TauriPrinterStatusReport {
     status: string;
     details: string[];
     supportsBidirectionalStatus: boolean;
+    queuedFormats?: number | null;
     responseBytes: number;
     responsePreview?: string;
     rawResponseHex?: string;
+    manufacturer?: string;
+    model?: string;
+    firmware?: string;
+    linkOsVersion?: string;
+    detectedDpi?: 203 | 300 | 600;
+    supportsUtf8Text: boolean;
+    supportsZ64: boolean;
+    capabilityEvidence: string[];
     queriedAtMs: number;
 }
 export interface TauriPrinterGenerationRequest {

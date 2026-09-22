@@ -147,7 +147,7 @@ export async function printTauriLabel(optionsValue: unknown): Promise<boolean> {
         if (!['zpl', 'image', 'tspl', 'epl', 'cpcl', 'dpl', 'sbpl'].includes(protocol)) {
             throw new Error(`unsupported raster adapter protocol: ${protocol}`);
         }
-        const bytes = bitmapModule.encodePortableRaster(
+        const bytes = await bitmapModule.encodePortableRaster(
             protocol as 'zpl' | 'image' | 'tspl' | 'epl' | 'cpcl' | 'dpl' | 'sbpl',
             bitmap,
             config,

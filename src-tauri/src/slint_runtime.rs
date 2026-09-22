@@ -21,16 +21,15 @@ use std::{
     path::PathBuf,
     rc::Rc,
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc::{self, TryRecvError},
-        Arc,
+        Arc, Mutex, OnceLock,
     },
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 slint::include_modules!();
-
 
 /// Pure settings models are shared by the live UI and its off-screen probe.
 pub fn initialize_settings_models(ui: &WeighingPrototype) {
@@ -96,8 +95,15 @@ pub fn initialize_ui_preferences(ui: &WeighingPrototype, directory: Option<PathB
         let state = state.clone();
         move |language| {
             let Some(ui) = weak.upgrade() else { return };
-            if !matches!(language.as_str(), "ru" | "en" | "de" | "uk") { return; }
-            if persist_ui_preferences(&ui, state.as_deref(), language.as_str(), ui.get_dark_theme()) {
+            if !matches!(language.as_str(), "ru" | "en" | "de" | "uk") {
+                return;
+            }
+            if persist_ui_preferences(
+                &ui,
+                state.as_deref(),
+                language.as_str(),
+                ui.get_dark_theme(),
+            ) {
                 ui.set_ui_language(language);
             }
         }
@@ -113,7 +119,12 @@ pub fn initialize_ui_preferences(ui: &WeighingPrototype, directory: Option<PathB
     });
 }
 
-fn persist_ui_preferences(ui: &WeighingPrototype, state: Option<&PersistedState>, language: &str, dark: bool) -> bool {
+fn persist_ui_preferences(
+    ui: &WeighingPrototype,
+    state: Option<&PersistedState>,
+    language: &str,
+    dark: bool,
+) -> bool {
     if let Some(state) = state {
         if let Err(error) = state.save_ui_preferences(language, dark) {
             let prefix = match ui.get_ui_language().as_str() {
@@ -234,6 +245,179 @@ enum UiMessage {
         printer_config: Option<Result<Value, String>>,
         warmup: Option<Result<Value, String>>,
     },
+}
+
+#[derive(Clone)]
+struct UiMessageSender {
+    sender: mpsc::Sender<UiMessage>,
+    wake_pending: Arc<AtomicBool>,
+    ui: slint::Weak<WeighingPrototype>,
+}
+
+impl UiMessageSender {
+    fn send(&self, message: UiMessage) -> Result<(), mpsc::SendError<UiMessage>> {
+        self.sender.send(message)?;
+        if !self.wake_pending.swap(true, Ordering::AcqRel) {
+            let weak = self.ui.clone();
+            let wake_pending = Arc::clone(&self.wake_pending);
+            if slint::invoke_from_event_loop(move || {
+                if let Some(ui) = weak.upgrade() {
+                    ui.invoke_drain_ui_messages();
+                } else {
+                    wake_pending.store(false, Ordering::Release);
+                }
+            })
+            .is_err()
+            {
+                self.wake_pending.store(false, Ordering::Release);
+            }
+        }
+        Ok(())
+    }
+}
+
+const UI_WORKER_THREADS: usize = 4;
+const UI_WORKER_QUEUE_CAPACITY: usize = 64;
+type UiTask = Box<dyn FnOnce() + Send + 'static>;
+
+struct UiWorkerPool {
+    sender: mpsc::SyncSender<UiTask>,
+}
+
+impl UiWorkerPool {
+    fn new(worker_count: usize, queue_capacity: usize) -> Result<Self, String> {
+        if worker_count == 0 || queue_capacity == 0 {
+            return Err("worker count and queue capacity must be positive".to_owned());
+        }
+        let (sender, receiver) = mpsc::sync_channel::<UiTask>(queue_capacity);
+        let receiver = Arc::new(Mutex::new(receiver));
+        for index in 0..worker_count {
+            let receiver = Arc::clone(&receiver);
+            let worker_name = format!("labelpilot-ui-worker-{}", index + 1);
+            let error_name = worker_name.clone();
+            thread::Builder::new()
+                .name(worker_name.clone())
+                .spawn(move || loop {
+                    let task = {
+                        let receiver = match receiver.lock() {
+                            Ok(receiver) => receiver,
+                            Err(poisoned) => poisoned.into_inner(),
+                        };
+                        receiver.recv()
+                    };
+                    let Ok(task) = task else { break };
+                    if let Err(payload) =
+                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(task))
+                    {
+                        let detail = payload
+                            .downcast_ref::<&str>()
+                            .copied()
+                            .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+                            .unwrap_or("unknown panic payload");
+                        append_runtime_log(&format!(
+                            "Slint worker {worker_name} recovered after task panic: {detail}"
+                        ));
+                    }
+                })
+                .map_err(|error| format!("spawn {error_name}: {error}"))?;
+        }
+        Ok(Self { sender })
+    }
+
+    fn spawn<F>(&self, task: F) -> Result<(), String>
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        self.sender
+            .send(Box::new(task))
+            .map_err(|_| "Slint worker queue disconnected".to_owned())
+    }
+}
+
+static UI_WORKER_POOL: OnceLock<Result<UiWorkerPool, String>> = OnceLock::new();
+
+fn ui_worker_pool() -> Result<&'static UiWorkerPool, String> {
+    match UI_WORKER_POOL
+        .get_or_init(|| UiWorkerPool::new(UI_WORKER_THREADS, UI_WORKER_QUEUE_CAPACITY))
+    {
+        Ok(pool) => Ok(pool),
+        Err(error) => Err(error.clone()),
+    }
+}
+
+fn spawn_ui_task<F>(task: F)
+where
+    F: FnOnce() + Send + 'static,
+{
+    if let Err(error) = ui_worker_pool().and_then(|pool| pool.spawn(task)) {
+        append_runtime_log(&format!("Slint worker task rejected: {error}"));
+    }
+}
+
+#[cfg(test)]
+mod ui_worker_pool_tests {
+    use super::UiWorkerPool;
+    use std::{
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            mpsc, Arc, Barrier,
+        },
+        time::Duration,
+    };
+
+    #[test]
+    fn bounds_parallelism_and_names_workers() {
+        let pool = UiWorkerPool::new(2, 8).expect("create test UI worker pool");
+        let barrier = Arc::new(Barrier::new(3));
+        let active = Arc::new(AtomicUsize::new(0));
+        let maximum = Arc::new(AtomicUsize::new(0));
+        let (started_tx, started_rx) = mpsc::channel();
+        let (done_tx, done_rx) = mpsc::channel();
+
+        for _ in 0..2 {
+            let barrier = Arc::clone(&barrier);
+            let active = Arc::clone(&active);
+            let maximum = Arc::clone(&maximum);
+            let started_tx = started_tx.clone();
+            let done_tx = done_tx.clone();
+            pool.spawn(move || {
+                let current = active.fetch_add(1, Ordering::AcqRel) + 1;
+                maximum.fetch_max(current, Ordering::AcqRel);
+                started_tx
+                    .send(std::thread::current().name().unwrap_or_default().to_owned())
+                    .expect("report worker name");
+                barrier.wait();
+                active.fetch_sub(1, Ordering::AcqRel);
+                done_tx.send(()).expect("report task completion");
+            })
+            .expect("queue test task");
+        }
+
+        let names = (0..2)
+            .map(|_| {
+                started_rx
+                    .recv_timeout(Duration::from_secs(2))
+                    .expect("worker task started")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(maximum.load(Ordering::Acquire), 2);
+        assert!(names
+            .iter()
+            .all(|name| name.starts_with("labelpilot-ui-worker-")));
+
+        barrier.wait();
+        for _ in 0..2 {
+            done_rx
+                .recv_timeout(Duration::from_secs(2))
+                .expect("worker task completed");
+        }
+    }
+
+    #[test]
+    fn rejects_zero_sized_pool_configuration() {
+        assert!(UiWorkerPool::new(0, 8).is_err());
+        assert!(UiWorkerPool::new(2, 0).is_err());
+    }
 }
 
 #[derive(Debug, Default)]
@@ -631,8 +815,10 @@ fn scale_config() -> Value {
             "stabilityCount": 4
         }),
         _ => json!({
-            "type": "simulator",
-            "protocolId": "simulator",
+            "type": "serial",
+            "protocolId": "generic",
+            "path": "",
+            "baudRate": 9600,
             "pollingInterval": 120,
             "stabilityCount": 4
         }),
@@ -793,7 +979,7 @@ fn schedule_runtime_refresh(
     coordinator: &Rc<RefCell<RefreshCoordinator>>,
     runtime: &NativeUiRuntime,
     selected_id: Option<i64>,
-    message_tx: &mpsc::Sender<UiMessage>,
+    message_tx: &UiMessageSender,
     data_changed: bool,
     printer_changed: bool,
     revision: Option<NativeUiRevision>,
@@ -806,7 +992,7 @@ fn schedule_runtime_refresh(
     };
     let runtime = runtime.clone();
     let message_tx = message_tx.clone();
-    thread::spawn(move || {
+    spawn_ui_task(move || {
         let snapshot = data_changed.then(|| runtime.weighing_snapshot(selected_id, None));
         let printer_config = printer_changed.then(|| runtime.printer_config());
         let warmup = if printer_changed {
@@ -830,14 +1016,14 @@ fn schedule_runtime_refresh(
 fn schedule_printer_health_refresh(
     gate: &Rc<RefCell<RefreshGate>>,
     runtime: &NativeUiRuntime,
-    message_tx: &mpsc::Sender<UiMessage>,
+    message_tx: &UiMessageSender,
 ) {
     if !gate.borrow_mut().request() {
         return;
     }
     let runtime = runtime.clone();
     let message_tx = message_tx.clone();
-    thread::spawn(move || {
+    spawn_ui_task(move || {
         let _ = message_tx.send(UiMessage::PrinterHealthChecked(
             runtime.probe_pack_printer(),
         ));
@@ -847,14 +1033,14 @@ fn schedule_printer_health_refresh(
 fn schedule_queue_refresh(
     gate: &Rc<RefCell<RefreshGate>>,
     runtime: &NativeUiRuntime,
-    message_tx: &mpsc::Sender<UiMessage>,
+    message_tx: &UiMessageSender,
 ) {
     if !gate.borrow_mut().request() {
         return;
     }
     let runtime = runtime.clone();
     let message_tx = message_tx.clone();
-    thread::spawn(move || {
+    spawn_ui_task(move || {
         let _ = message_tx.send(UiMessage::QueueLoaded(runtime.printer_queue_snapshot(100)));
     });
 }
@@ -862,14 +1048,14 @@ fn schedule_queue_refresh(
 fn schedule_diagnostics_refresh(
     gate: &Rc<RefCell<RefreshGate>>,
     runtime: &NativeUiRuntime,
-    message_tx: &mpsc::Sender<UiMessage>,
+    message_tx: &UiMessageSender,
 ) {
     if !gate.borrow_mut().request() {
         return;
     }
     let runtime = runtime.clone();
     let message_tx = message_tx.clone();
-    thread::spawn(move || {
+    spawn_ui_task(move || {
         let _ = message_tx.send(UiMessage::DiagnosticsLoaded(
             runtime.probe_configured_printers(),
         ));
@@ -879,14 +1065,14 @@ fn schedule_diagnostics_refresh(
 fn schedule_printer_settings_refresh(
     gate: &Rc<RefCell<RefreshGate>>,
     runtime: &NativeUiRuntime,
-    message_tx: &mpsc::Sender<UiMessage>,
+    message_tx: &UiMessageSender,
 ) {
     if !gate.borrow_mut().request() {
         return;
     }
     let runtime = runtime.clone();
     let message_tx = message_tx.clone();
-    thread::spawn(move || {
+    spawn_ui_task(move || {
         let _ = message_tx.send(UiMessage::PrinterSettingsLoaded(
             runtime.printer_settings_snapshot(),
         ));
@@ -896,14 +1082,14 @@ fn schedule_printer_settings_refresh(
 fn schedule_scale_settings_refresh(
     gate: &Rc<RefCell<RefreshGate>>,
     runtime: &NativeUiRuntime,
-    message_tx: &mpsc::Sender<UiMessage>,
+    message_tx: &UiMessageSender,
 ) {
     if !gate.borrow_mut().request() {
         return;
     }
     let runtime = runtime.clone();
     let message_tx = message_tx.clone();
-    thread::spawn(move || {
+    spawn_ui_task(move || {
         let _ = message_tx.send(UiMessage::ScaleSettingsLoaded(
             runtime.scale_settings_snapshot(),
         ));
@@ -913,7 +1099,7 @@ fn schedule_scale_settings_refresh(
 fn schedule_fixed_weight_refresh(
     gate: &Rc<RefCell<RefreshGate>>,
     runtime: &NativeUiRuntime,
-    message_tx: &mpsc::Sender<UiMessage>,
+    message_tx: &UiMessageSender,
     selected_product_id: Option<i64>,
     search: Option<String>,
 ) {
@@ -922,7 +1108,7 @@ fn schedule_fixed_weight_refresh(
     }
     let runtime = runtime.clone();
     let message_tx = message_tx.clone();
-    thread::spawn(move || {
+    spawn_ui_task(move || {
         let _ = message_tx.send(UiMessage::FixedWeightLoaded(
             runtime.fixed_weight_snapshot(selected_product_id, search.as_deref()),
         ));
@@ -932,7 +1118,7 @@ fn schedule_fixed_weight_refresh(
 fn schedule_production_jobs_refresh(
     gate: &Rc<RefCell<RefreshGate>>,
     runtime: &NativeUiRuntime,
-    message_tx: &mpsc::Sender<UiMessage>,
+    message_tx: &UiMessageSender,
     selected_job_id: Option<i64>,
     completed: bool,
 ) {
@@ -941,7 +1127,7 @@ fn schedule_production_jobs_refresh(
     }
     let runtime = runtime.clone();
     let message_tx = message_tx.clone();
-    thread::spawn(move || {
+    spawn_ui_task(move || {
         let _ = message_tx.send(UiMessage::ProductionJobsLoaded(Box::new(
             runtime
                 .production_print_jobs_snapshot(selected_job_id, completed.then_some("completed")),
@@ -952,7 +1138,7 @@ fn schedule_production_jobs_refresh(
 fn schedule_catalog_refresh(
     gate: &Rc<RefCell<RefreshGate>>,
     runtime: &NativeUiRuntime,
-    message_tx: &mpsc::Sender<UiMessage>,
+    message_tx: &UiMessageSender,
     selected_product_id: Option<i64>,
     search: Option<String>,
     limit: usize,
@@ -962,7 +1148,7 @@ fn schedule_catalog_refresh(
     }
     let runtime = runtime.clone();
     let message_tx = message_tx.clone();
-    thread::spawn(move || {
+    spawn_ui_task(move || {
         let _ = message_tx.send(UiMessage::CatalogLoaded(
             runtime.catalog_snapshot_with_limit(selected_product_id, search.as_deref(), limit),
         ));
@@ -972,14 +1158,14 @@ fn schedule_catalog_refresh(
 fn schedule_server_license_refresh(
     gate: &Rc<RefCell<RefreshGate>>,
     runtime: &NativeUiRuntime,
-    message_tx: &mpsc::Sender<UiMessage>,
+    message_tx: &UiMessageSender,
 ) {
     if !gate.borrow_mut().request() {
         return;
     }
     let runtime = runtime.clone();
     let message_tx = message_tx.clone();
-    thread::spawn(move || {
+    spawn_ui_task(move || {
         let _ = message_tx.send(UiMessage::ServerLicenseLoaded(
             runtime.server_license_snapshot(),
         ));
@@ -1241,10 +1427,14 @@ fn apply_printer_role_editor(ui: &WeighingPrototype, role: &NativePrinterRoleSet
     ui.set_settings_port(role.port.to_string().into());
     ui.set_settings_serial_port(role.serial_port.clone().into());
     ui.set_settings_baud_rate(role.baud_rate.to_string().into());
+    ui.set_settings_flow_control(role.flow_control.clone().into());
+    ui.set_settings_parity(role.parity.clone().into());
+    ui.set_settings_data_bits(role.data_bits.to_string().into());
     ui.set_settings_driver_name(role.driver_name.clone().into());
     ui.set_settings_dpi(role.dpi.to_string().into());
     ui.set_settings_ram_cache(role.ram_cache.clone().into());
-    ui.set_settings_z64(role.z64);
+    ui.set_settings_zpl_compression(role.zpl_compression.clone().into());
+    ui.set_settings_confirmed_print(role.confirmed_print);
     ui.set_settings_darkness(format_optional_setting(role.darkness).into());
     ui.set_settings_print_speed(format_optional_setting(role.print_speed).into());
     ui.set_settings_gap_mm(format_optional_setting(role.gap_mm).into());
@@ -1317,10 +1507,14 @@ fn printer_settings_input(
         port: parse_settings_i32("TCP-порт", &ui.get_settings_port())?,
         serial_port: ui.get_settings_serial_port().to_string(),
         baud_rate: parse_settings_i32("Скорость Serial", &ui.get_settings_baud_rate())?,
+        flow_control: ui.get_settings_flow_control().to_string(),
+        parity: ui.get_settings_parity().to_string(),
+        data_bits: parse_settings_i32("Биты данных", &ui.get_settings_data_bits())?,
         driver_name: ui.get_settings_driver_name().to_string(),
         dpi: parse_settings_i32("DPI", &ui.get_settings_dpi())?,
         ram_cache: ui.get_settings_ram_cache().to_string(),
-        z64: ui.get_settings_z64(),
+        zpl_compression: ui.get_settings_zpl_compression().to_string(),
+        confirmed_print: ui.get_settings_confirmed_print(),
         darkness: parse_optional_settings_f64("Темнота", &ui.get_settings_darkness())?,
         print_speed: parse_optional_settings_f64(
             "Скорость печати",
@@ -1543,9 +1737,7 @@ fn calendar_day_rows(visible_month: time::Date, selected: time::Date) -> Vec<Cal
 fn apply_calendar(ui: &WeighingPrototype, visible_month: time::Date) {
     let today = time::OffsetDateTime::now_utc().date();
     let selected = parse_display_date(ui.get_labeling_date().as_str()).unwrap_or(today);
-    ui.set_calendar_month_label(
-        calendar_month_label(visible_month, "ru").into(),
-    );
+    ui.set_calendar_month_label(calendar_month_label(visible_month, "ru").into());
     ui.set_calendar_days(ModelRc::new(VecModel::from(calendar_day_rows(
         visible_month,
         selected,
@@ -2507,10 +2699,18 @@ fn apply_core_event(ui: &WeighingPrototype, event: CoreEvent) {
             };
             ui.set_scale_status(label.into());
             ui.set_scale_online(online);
+            if !online {
+                ui.set_gross_weight("0.000".into());
+                ui.set_net_weight("0.000".into());
+                ui.set_stable(false);
+            }
         }
         CoreEvent::Event { name, payload } if name == "scale-error" => {
             ui.set_scale_online(false);
             ui.set_scale_status("Весы: ошибка".into());
+            ui.set_gross_weight("0.000".into());
+            ui.set_net_weight("0.000".into());
+            ui.set_stable(false);
             let message = payload
                 .as_str()
                 .unwrap_or("Ошибка подключения промышленных весов");
@@ -2590,6 +2790,7 @@ fn sync_adaptive_layout(ui: &WeighingPrototype) {
 }
 
 pub fn run() -> Result<(), String> {
+    ui_worker_pool().map_err(|error| format!("initialize Slint worker pool: {error}"))?;
     let ui = WeighingPrototype::new()
         .map_err(|error| format!("initialize Slint weighing UI: {error}"))?;
     let initial_width = env::var("LABELPILOT_SLINT_WINDOW_WIDTH")
@@ -2611,7 +2812,13 @@ pub fn run() -> Result<(), String> {
         ui.window().set_maximized(true);
     }
     sync_adaptive_layout(&ui);
-    let (message_tx, message_rx) = mpsc::channel::<UiMessage>();
+    let (raw_message_tx, message_rx) = mpsc::channel::<UiMessage>();
+    let message_dispatch_pending = Arc::new(AtomicBool::new(false));
+    let message_tx = UiMessageSender {
+        sender: raw_message_tx,
+        wake_pending: Arc::clone(&message_dispatch_pending),
+        ui: ui.as_weak(),
+    };
     let product_store = Rc::new(RefCell::new(Vec::<NativeUiProduct>::new()));
     let product_search_generation = Arc::new(AtomicU64::new(0));
     let operator_store = Rc::new(RefCell::new(Vec::<NativeUiOperator>::new()));
@@ -2845,7 +3052,7 @@ pub fn run() -> Result<(), String> {
             ui.set_printer_status("Принтер: подключение".into());
         }
         let warmup_tx = message_tx.clone();
-        thread::spawn(move || {
+        spawn_ui_task(move || {
             let _ = warmup_tx.send(UiMessage::WarmupFinished(
                 warmup_runtime.warmup_production_assets(),
             ));
@@ -2913,11 +3120,13 @@ pub fn run() -> Result<(), String> {
         edit_fixed_copies(current.as_str(), key.as_str()).into()
     });
     ui.on_step_fixed_copies(|current, delta| step_fixed_copies(current.as_str(), delta).into());
+    let product_search_timer = Rc::new(slint::Timer::default());
     ui.on_search_products({
         let weak = ui.as_weak();
         let runtime = runtime.clone();
         let message_tx = message_tx.clone();
         let product_search_generation = Arc::clone(&product_search_generation);
+        let product_search_timer = Rc::clone(&product_search_timer);
         move |query| {
             let Some(runtime) = runtime.clone() else {
                 return;
@@ -2933,20 +3142,29 @@ pub fn run() -> Result<(), String> {
                 .collect::<String>();
             let message_tx = message_tx.clone();
             let product_search_generation = Arc::clone(&product_search_generation);
-            thread::spawn(move || {
-                thread::sleep(PRODUCT_SEARCH_DEBOUNCE);
-                if product_search_generation.load(Ordering::Acquire) != generation {
-                    return;
-                }
-                let search = (!query.is_empty()).then_some(query.as_str());
-                let outcome = runtime.products(search);
-                if product_search_generation.load(Ordering::Acquire) == generation {
-                    let _ = message_tx.send(UiMessage::ProductSearchLoaded {
-                        generation,
-                        outcome,
+            product_search_timer.start(
+                slint::TimerMode::SingleShot,
+                PRODUCT_SEARCH_DEBOUNCE,
+                move || {
+                    let runtime = runtime.clone();
+                    let query = query.clone();
+                    let message_tx = message_tx.clone();
+                    let product_search_generation = Arc::clone(&product_search_generation);
+                    spawn_ui_task(move || {
+                        if product_search_generation.load(Ordering::Acquire) != generation {
+                            return;
+                        }
+                        let search = (!query.is_empty()).then_some(query.as_str());
+                        let outcome = runtime.products(search);
+                        if product_search_generation.load(Ordering::Acquire) == generation {
+                            let _ = message_tx.send(UiMessage::ProductSearchLoaded {
+                                generation,
+                                outcome,
+                            });
+                        }
                     });
-                }
-            });
+                },
+            );
         }
     });
 
@@ -2990,7 +3208,7 @@ pub fn run() -> Result<(), String> {
             }
             ui.set_product_selection_busy(true);
             let message_tx = message_tx.clone();
-            thread::spawn(move || {
+            spawn_ui_task(move || {
                 let _ = message_tx.send(UiMessage::ProductSelected {
                     previous_product_id,
                     outcome: runtime.select_weighing_product(previous_product_id, product_id),
@@ -3029,7 +3247,7 @@ pub fn run() -> Result<(), String> {
             ui.set_operator_login_busy(true);
             let selected_id = selected_product.get();
             let message_tx = message_tx.clone();
-            thread::spawn(move || {
+            spawn_ui_task(move || {
                 let outcome = runtime.login_operator(&operator.uuid, "");
                 let snapshot = runtime.weighing_snapshot(selected_id, None);
                 let _ = message_tx.send(UiMessage::SessionFinished {
@@ -3064,7 +3282,7 @@ pub fn run() -> Result<(), String> {
             let selected_id = selected_product.get();
             let pin = pin.to_string();
             let message_tx = message_tx.clone();
-            thread::spawn(move || {
+            spawn_ui_task(move || {
                 let outcome = runtime.login_operator(&operator.uuid, &pin);
                 let snapshot = runtime.weighing_snapshot(selected_id, None);
                 let _ = message_tx.send(UiMessage::SessionFinished {
@@ -3104,7 +3322,7 @@ pub fn run() -> Result<(), String> {
             ui.set_operator_login_busy(true);
             let selected_id = selected_product.get();
             let message_tx = message_tx.clone();
-            thread::spawn(move || {
+            spawn_ui_task(move || {
                 let outcome = runtime.logout_operator();
                 let snapshot = runtime.weighing_snapshot(selected_id, None);
                 let _ = message_tx.send(UiMessage::SessionFinished {
@@ -3137,6 +3355,13 @@ pub fn run() -> Result<(), String> {
                     .replace(',', ".")
                     .parse::<f64>()
                     .unwrap_or(0.0);
+                if !ui.get_scale_online() || !ui.get_stable() || gross_weight <= 0.010 {
+                    show_alert(
+                        &ui,
+                        "Печать разрешена только при подключённых весах и стабильном положительном весе",
+                    );
+                    return;
+                }
                 if !auto_print_gate
                     .borrow_mut()
                     .begin_manual_print(gross_weight)
@@ -3151,7 +3376,7 @@ pub fn run() -> Result<(), String> {
                 let production_date = ui.get_labeling_date().to_string();
                 show_toast(&ui, "Запись упаковки и формирование этикетки…");
                 let message_tx = message_tx.clone();
-                thread::spawn(move || {
+                spawn_ui_task(move || {
                     let outcome = runtime.print_production_pack(
                         product_id,
                         gross_weight,
@@ -3187,7 +3412,7 @@ pub fn run() -> Result<(), String> {
                 let selected_id = selected_product.get();
                 show_toast(&ui, "Повтор последней этикетки…");
                 let message_tx = message_tx.clone();
-                thread::spawn(move || {
+                spawn_ui_task(move || {
                     let outcome = runtime.repeat_production_print();
                     let delta = runtime.production_delta(selected_id);
                     let _ = message_tx.send(UiMessage::ProductionFinished {
@@ -3254,7 +3479,7 @@ pub fn run() -> Result<(), String> {
                 }
                 show_toast(&ui, "Закрытие короба и формирование этикетки…");
                 let message_tx = message_tx.clone();
-                thread::spawn(move || {
+                spawn_ui_task(move || {
                     let outcome =
                         runtime.close_production_box(product_id, &batch_number, &production_date);
                     let delta = runtime.production_delta(Some(product_id));
@@ -3298,7 +3523,7 @@ pub fn run() -> Result<(), String> {
                 }
                 show_toast(&ui, "Формирование паллетного листа…");
                 let message_tx = message_tx.clone();
-                thread::spawn(move || {
+                spawn_ui_task(move || {
                     let outcome = runtime.print_production_pallet(selected_id);
                     let delta = runtime.production_delta(selected_id);
                     let _ = message_tx.send(UiMessage::ProductionFinished {
@@ -3345,7 +3570,7 @@ pub fn run() -> Result<(), String> {
             ui.set_queue_status("Повторная отправка задания…".into());
             let job_id = job_id.to_string();
             let message_tx = message_tx.clone();
-            thread::spawn(move || {
+            spawn_ui_task(move || {
                 let outcome = runtime.retry_print_job(&job_id).map(|_| ());
                 let snapshot = runtime.printer_queue_snapshot(100);
                 let _ = message_tx.send(UiMessage::QueueActionFinished {
@@ -3371,7 +3596,7 @@ pub fn run() -> Result<(), String> {
             ui.set_queue_status("Отмена задания…".into());
             let job_id = job_id.to_string();
             let message_tx = message_tx.clone();
-            thread::spawn(move || {
+            spawn_ui_task(move || {
                 let outcome = runtime.cancel_print_job(&job_id).map(|_| ());
                 let snapshot = runtime.printer_queue_snapshot(100);
                 let _ = message_tx.send(UiMessage::QueueActionFinished {
@@ -3439,7 +3664,10 @@ pub fn run() -> Result<(), String> {
                 .cloned();
             if let Some(selected) = selected.as_ref() {
                 apply_printer_role_editor(&ui, selected);
-            } else if matches!(role.as_str(), "packPrinter" | "boxPrinter" | "palletPrinter") {
+            } else if matches!(
+                role.as_str(),
+                "packPrinter" | "boxPrinter" | "palletPrinter"
+            ) {
                 ui.set_settings_selected_role(role.into());
             }
         }
@@ -3466,7 +3694,7 @@ pub fn run() -> Result<(), String> {
             ui.set_settings_busy(true);
             ui.set_settings_status("Проверка и атомарное сохранение…".into());
             let message_tx = message_tx.clone();
-            thread::spawn(move || {
+            spawn_ui_task(move || {
                 let outcome = runtime.save_printer_role_settings(input, auto_print);
                 let _ = message_tx.send(UiMessage::PrinterSettingsSaved(outcome));
             });
@@ -3494,7 +3722,7 @@ pub fn run() -> Result<(), String> {
             ui.set_settings_busy(true);
             ui.set_settings_status("Определяем транспорт и профиль…".into());
             let message_tx = message_tx.clone();
-            thread::spawn(move || {
+            spawn_ui_task(move || {
                 let outcome = runtime.detect_and_apply_printer_settings(input, auto_print);
                 let snapshot = if outcome.as_ref().is_ok_and(|result| result.applied) {
                     Some(runtime.printer_settings_snapshot())
@@ -3526,7 +3754,7 @@ pub fn run() -> Result<(), String> {
             ui.set_settings_busy(true);
             ui.set_settings_status("Генерация и отправка тестовой этикетки…".into());
             let message_tx = message_tx.clone();
-            thread::spawn(move || {
+            spawn_ui_task(move || {
                 let _ = message_tx.send(UiMessage::PrinterSettingsTested(
                     runtime.test_printer_settings(input),
                 ));
@@ -3575,7 +3803,7 @@ pub fn run() -> Result<(), String> {
             ui.set_scale_settings_busy(true);
             ui.set_scale_settings_status("Сохранение и перезапуск потока весов…".into());
             let message_tx = message_tx.clone();
-            thread::spawn(move || {
+            spawn_ui_task(move || {
                 let _ = message_tx.send(UiMessage::ScaleSettingsSaved(
                     runtime.save_scale_settings(input),
                 ));
@@ -3603,7 +3831,7 @@ pub fn run() -> Result<(), String> {
             ui.set_scale_settings_busy(true);
             ui.set_scale_settings_status("Открываем транспорт и ждём реальный кадр…".into());
             let message_tx = message_tx.clone();
-            thread::spawn(move || {
+            spawn_ui_task(move || {
                 let _ = message_tx.send(UiMessage::ScaleSettingsTested(
                     runtime.test_scale_settings(input),
                 ));
@@ -3695,7 +3923,7 @@ pub fn run() -> Result<(), String> {
                 show_alert(&ui, "Выберите товар фиксированного веса");
                 return;
             };
-            if !ui.get_stable() || !ui.get_fixed_control_in_range() {
+            if !ui.get_scale_online() || !ui.get_stable() || !ui.get_fixed_control_in_range() {
                 show_alert(
                     &ui,
                     "Дождитесь стабильного контрольного веса в пределах допуска",
@@ -3707,6 +3935,10 @@ pub fn run() -> Result<(), String> {
                 .replace(',', ".")
                 .parse::<f64>()
                 .unwrap_or(0.0);
+            if measured <= 0.010 {
+                show_alert(&ui, "Контрольный вес должен быть положительным");
+                return;
+            }
             if !auto_print_gate.borrow_mut().begin_manual_print(measured) {
                 show_toast(&ui, "Печать уже выполняется");
                 return;
@@ -3716,7 +3948,7 @@ pub fn run() -> Result<(), String> {
             ui.set_fixed_busy(true);
             ui.set_fixed_status("Запись упаковки и печать фиксированной этикетки…".into());
             let message_tx = message_tx.clone();
-            thread::spawn(move || {
+            spawn_ui_task(move || {
                 let outcome = runtime.print_fixed_weight_pack(product_id, measured, batch, date);
                 let snapshot = runtime.fixed_weight_snapshot(Some(product_id), None);
                 let _ = message_tx.send(UiMessage::FixedWeightPrinted {
@@ -3757,7 +3989,7 @@ pub fn run() -> Result<(), String> {
             ui.set_fixed_progress_total(clamp_i32(copies));
             ui.set_fixed_status(format!("Пакетная печать · 0 из {copies}").into());
             let message_tx = message_tx.clone();
-            thread::spawn(move || {
+            spawn_ui_task(move || {
                 let outcome = runtime.print_fixed_weight_batch(product_id, copies, batch, date);
                 let snapshot = runtime.fixed_weight_snapshot(Some(product_id), None);
                 let _ = message_tx.send(UiMessage::FixedBatchFinished { outcome, snapshot });
@@ -3893,7 +4125,7 @@ pub fn run() -> Result<(), String> {
             ui.set_production_jobs_busy(true);
             ui.set_production_jobs_status(format!("Печать по заданию #{job_id}…").into());
             let message_tx = message_tx.clone();
-            thread::spawn(move || {
+            spawn_ui_task(move || {
                 let outcome = runtime.print_production_job_pack(job_id, measured);
                 let snapshot = runtime.production_print_jobs_snapshot(Some(job_id), None);
                 let _ = message_tx.send(UiMessage::ProductionJobPrinted {
@@ -3929,7 +4161,7 @@ pub fn run() -> Result<(), String> {
             }
             ui.set_production_jobs_busy(true);
             let message_tx = message_tx.clone();
-            thread::spawn(move || {
+            spawn_ui_task(move || {
                 let outcome = runtime.complete_production_print_job(job_id);
                 let snapshot = runtime.production_print_jobs_snapshot(None, None);
                 let _ = message_tx.send(UiMessage::ProductionJobActionFinished {
@@ -3955,7 +4187,7 @@ pub fn run() -> Result<(), String> {
 
             ui.set_production_jobs_busy(true);
             let message_tx = message_tx.clone();
-            thread::spawn(move || {
+            spawn_ui_task(move || {
                 let outcome = runtime.delete_production_print_job(job_id);
                 let snapshot = runtime.production_print_jobs_snapshot(None, None);
                 let _ = message_tx.send(UiMessage::ProductionJobActionFinished {
@@ -4112,7 +4344,7 @@ pub fn run() -> Result<(), String> {
             ui.set_license_status("Сохранение адреса и проверка связи…".into());
             let address = address.to_string();
             let message_tx = message_tx.clone();
-            thread::spawn(move || {
+            spawn_ui_task(move || {
                 let _ = message_tx.send(UiMessage::ServerAddressSaved(
                     runtime.save_server_address(&address),
                 ));
@@ -4134,7 +4366,7 @@ pub fn run() -> Result<(), String> {
             ui.set_update_error("".into());
             ui.set_update_status("Проверка канала обновлений…".into());
             let tx = message_tx.clone();
-            thread::spawn(move || {
+            spawn_ui_task(move || {
                 let result = updater.check_online();
                 let _ = tx.send(UiMessage::UpdateFinished {
                     action: "check".to_owned(),
@@ -4157,7 +4389,7 @@ pub fn run() -> Result<(), String> {
             ui.set_update_busy(true);
             ui.set_update_error("".into());
             let tx = message_tx.clone();
-            thread::spawn(move || {
+            spawn_ui_task(move || {
                 let progress_tx = tx.clone();
                 let result = updater.download(move |downloaded, total| {
                     let _ = progress_tx.send(UiMessage::UpdateProgress { downloaded, total });
@@ -4189,7 +4421,7 @@ pub fn run() -> Result<(), String> {
             ui.set_update_error("".into());
             ui.set_update_status("Проверка офлайн-пакета…".into());
             let tx = message_tx.clone();
-            thread::spawn(move || {
+            spawn_ui_task(move || {
                 let result = updater.stage_offline_manifest(&path);
                 let _ = tx.send(UiMessage::UpdateFinished {
                     action: "offline".to_owned(),
@@ -4212,7 +4444,7 @@ pub fn run() -> Result<(), String> {
             ui.set_update_busy(true);
             ui.set_update_status("Создание точки восстановления…".into());
             let tx = message_tx.clone();
-            thread::spawn(move || {
+            spawn_ui_task(move || {
                 let result = updater.queue_install();
                 let _ = tx.send(UiMessage::UpdateFinished {
                     action: "install".to_owned(),
@@ -4236,7 +4468,7 @@ pub fn run() -> Result<(), String> {
             ui.set_update_error("".into());
             ui.set_update_status("Подготовка ручного восстановления…".into());
             let tx = message_tx.clone();
-            thread::spawn(move || {
+            spawn_ui_task(move || {
                 let result = updater.queue_manual_rollback();
                 let _ = tx.send(UiMessage::UpdateFinished {
                     action: "rollback".to_owned(),
@@ -4259,7 +4491,7 @@ pub fn run() -> Result<(), String> {
                 };
                 show_toast(&ui, "Удаление последней упаковки…");
                 let message_tx = message_tx.clone();
-                thread::spawn(move || {
+                spawn_ui_task(move || {
                     let outcome = runtime.delete_latest_production_pack(product_id);
                     let snapshot = runtime.weighing_snapshot(Some(product_id), None);
                     let _ = message_tx.send(UiMessage::DeleteFinished {
@@ -4317,6 +4549,61 @@ pub fn run() -> Result<(), String> {
             ui.invoke_check_update();
         }
         _ => {}
+    }
+    if env::var_os("LABELPILOT_SLINT_START_PAGE").is_none()
+        && env::var_os("LABELPILOT_SLINT_SELF_TEST").is_none()
+    {
+        if let Some(startup_runtime) = runtime.as_ref() {
+            if let Ok(snapshot) = startup_runtime.printer_queue_snapshot(5_000) {
+                let unresolved = snapshot
+                    .jobs
+                    .iter()
+                    .filter(|job| {
+                        matches!(
+                            job.state.as_str(),
+                            "queued" | "rendering" | "sending" | "failed" | "uncertain"
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                if !unresolved.is_empty() {
+                    let unresolved_count = unresolved.len();
+                    let has_problems = unresolved
+                        .iter()
+                        .any(|job| matches!(job.state.as_str(), "failed" | "uncertain"));
+                    let mut lines = unresolved
+                        .iter()
+                        .take(20)
+                        .map(|job| {
+                            format!(
+                                "{} · {} · {}",
+                                job.job_id.chars().take(8).collect::<String>(),
+                                job.printer_name,
+                                queue_state_label(&job.state)
+                            )
+                        })
+                        .collect::<Vec<_>>();
+                    if unresolved_count > lines.len() {
+                        lines.push(format!("…ещё {}", unresolved_count - lines.len()));
+                    }
+                    drop(unresolved);
+                    apply_queue_snapshot(&ui, snapshot);
+                    ui.set_active_page(1);
+                    ui.set_settings_queue_filter(if has_problems {
+                        "problems".into()
+                    } else {
+                        "active".into()
+                    });
+                    show_alert(
+                        &ui,
+                        &format!(
+                            "Незавершённые задания печати: {}\n\n{}\n\nПроверьте очередь перед продолжением работы.",
+                            unresolved_count,
+                            lines.join("\n")
+                        ),
+                    );
+                }
+            }
+        }
     }
     if env::var_os("LABELPILOT_SLINT_SELF_TEST").is_some() {
         ui.set_operator_login_visible(true);
@@ -4406,7 +4693,6 @@ pub fn run() -> Result<(), String> {
         );
     }
 
-    let event_timer = slint::Timer::default();
     if let Some(event_runtime) = runtime.clone() {
         let weak = ui.as_weak();
         let product_store = Rc::clone(&product_store);
@@ -4436,11 +4722,15 @@ pub fn run() -> Result<(), String> {
         let event_selected_catalog_product = Rc::clone(&selected_catalog_product);
         let event_message_tx = message_tx.clone();
         let event_product_search_generation = Arc::clone(&product_search_generation);
-        event_timer.start(
-            slint::TimerMode::Repeated,
-            Duration::from_millis(30),
-            move || loop {
-                match message_rx.try_recv() {
+        let event_dispatch_pending = Arc::clone(&message_dispatch_pending);
+        ui.on_drain_ui_messages(move || {
+            let mut pending_message = None;
+            loop {
+                let message = match pending_message.take() {
+                    Some(message) => Ok(message),
+                    None => message_rx.try_recv(),
+                };
+                match message {
                     Ok(UiMessage::Core(event)) => {
                         let reading = match &event {
                             CoreEvent::Event { name, payload } if name == "scale-reading" => {
@@ -4464,6 +4754,19 @@ pub fn run() -> Result<(), String> {
                                     payload.get("requested").and_then(Value::as_i64).unwrap_or(0),
                                 ))
                             }
+                            _ => None,
+                        };
+                        let fixed_batch_status = match &event {
+                            CoreEvent::Event { name, payload }
+                                if matches!(
+                                    name.as_str(),
+                                    "fixed-batch-printer-wait"
+                                        | "fixed-batch-printer-ready"
+                                        | "fixed-batch-printer-status-unsupported"
+                                ) => payload
+                                    .get("message")
+                                    .and_then(Value::as_str)
+                                    .map(str::to_owned),
                             _ => None,
                         };
                         let production_jobs_changed = matches!(
@@ -4508,6 +4811,9 @@ pub fn run() -> Result<(), String> {
                                 ui.set_fixed_status(
                                     format!("Пакетная печать · {completed} из {requested}").into(),
                                 );
+                            }
+                            if let Some(status) = fixed_batch_status {
+                                ui.set_fixed_status(status.into());
                             }
                             if let Some((data_changed, printer_changed)) = refresh_flags {
                                 schedule_runtime_refresh(
@@ -4690,7 +4996,7 @@ pub fn run() -> Result<(), String> {
                                         let message_tx = event_message_tx.clone();
                                         match target {
                                             Some(AutoPrintTarget::ProductionPack(product_id)) => {
-                                                thread::spawn(move || {
+                                                spawn_ui_task(move || {
                                                     let outcome = runtime.print_production_pack(
                                                         product_id,
                                                         weight,
@@ -4713,7 +5019,7 @@ pub fn run() -> Result<(), String> {
                                                     "Вес стабилен и в допуске · автопечать…"
                                                         .into(),
                                                 );
-                                                thread::spawn(move || {
+                                                spawn_ui_task(move || {
                                                     let outcome = runtime.print_fixed_weight_pack(
                                                         product_id,
                                                         weight,
@@ -5667,10 +5973,24 @@ pub fn run() -> Result<(), String> {
                             Err(error) => show_alert(&ui, &format!("Сессия оператора: {error}")),
                         }
                     }
-                    Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
+                    Err(TryRecvError::Empty) => {
+                        event_dispatch_pending.store(false, Ordering::Release);
+                        match message_rx.try_recv() {
+                            Ok(message) => {
+                                pending_message = Some(message);
+                                continue;
+                            }
+                            Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
+                        }
+                    }
+                    Err(TryRecvError::Disconnected) => {
+                        event_dispatch_pending.store(false, Ordering::Release);
+                        break;
+                    }
                 }
-            },
-        );
+            }
+        });
+        ui.invoke_drain_ui_messages();
     }
 
     let queue_live_timer = slint::Timer::default();

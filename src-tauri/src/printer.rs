@@ -4,7 +4,7 @@ mod serial;
 mod spooler;
 mod status;
 mod write;
-use self::write::write_job_once;
+use self::write::{write_job_once, write_job_once_chunked};
 #[cfg(test)]
 mod regression_tests;
 
@@ -18,6 +18,7 @@ use base64::Engine;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serial::SerialConnection;
+use socket2::{SockRef, TcpKeepalive};
 use std::collections::{HashMap, HashSet};
 use std::io;
 use std::net::{IpAddr, Shutdown, SocketAddr, TcpStream, ToSocketAddrs};
@@ -31,12 +32,22 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::AppHandle;
 
 const DEFAULT_TCP_PORT: u16 = 9100;
+const DEFAULT_SERIAL_BAUD_RATE: u64 = 115_200;
+const LEGACY_SERIAL_BAUD_RATE: u64 = 9_600;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 const WRITE_TIMEOUT: Duration = Duration::from_secs(3);
-const IDLE_CLOSE: Duration = Duration::from_millis(400);
+const KEEP_OPEN_WRITE_TIMEOUT: Duration = Duration::from_secs(45);
+const TCP_WRITE_PROGRESS_CHUNK_BYTES: usize = 64 * 1024;
+const IDLE_CLOSE: Duration = Duration::from_secs(15);
+const TCP_KEEPALIVE_TIME: Duration = Duration::from_secs(5);
+const TCP_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(2);
 const BREAKER_DURATION: Duration = Duration::from_secs(5);
+const RETRY_BASE_DELAY: Duration = Duration::from_millis(250);
+const MAX_AUTOMATIC_DELIVERY_ATTEMPTS: u8 = 4;
 const WORKER_POLL: Duration = Duration::from_millis(50);
 const COMPLETION_TIMEOUT: Duration = Duration::from_secs(60);
+const PRINT_CONFIRMATION_TIMEOUT: Duration = Duration::from_secs(30);
+const PRINT_CONFIRMATION_POLL: Duration = Duration::from_millis(250);
 const IDEMPOTENCY_TTL: Duration = Duration::from_secs(10 * 60);
 const MAX_IDEMPOTENCY_ENTRIES: usize = 2_048;
 pub const PRINTER_QUEUE_CAPACITY: usize = 16;
@@ -49,6 +60,10 @@ fn default_active() -> bool {
 
 fn default_protocol() -> String {
     "zpl".to_owned()
+}
+
+fn default_batch_status_polling() -> bool {
+    true
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -160,8 +175,8 @@ pub fn list_system_printers() -> Result<Vec<SystemPrinterInfo>, String> {
 pub fn list_system_printers() -> Result<Vec<SystemPrinterInfo>, String> {
     Ok(Vec::new())
 }
-/// Status probe that routes through an active serial print worker when one
-/// holds the port (see [`PrinterTransportState::query_printer_status_with_sink`]).
+/// Status probe that routes through an active TCP/serial print worker when one
+/// owns the connection (see [`PrinterTransportState::query_printer_status_with_sink`]).
 pub fn query_printer_status_routed(
     app: RuntimeEventSink,
     transport: &PrinterTransportState,
@@ -192,9 +207,25 @@ pub struct PrinterDeviceConfig {
     #[serde(default)]
     pub baud_rate: Option<u64>,
     #[serde(default)]
+    pub flow_control: Option<String>,
+    #[serde(default)]
+    pub parity: Option<String>,
+    #[serde(default)]
+    pub data_bits: Option<u8>,
+    #[serde(default)]
     pub driver_name: Option<String>,
     #[serde(default)]
+    pub dpi: Option<u16>,
+    #[serde(default)]
     pub job_idempotency_key: Option<String>,
+    #[serde(default)]
+    pub capability_probe: bool,
+    #[serde(default = "default_batch_status_polling")]
+    pub batch_status_polling: bool,
+    /// Require device-protocol status after the transport write before the
+    /// durable job (and linked pack) may become accepted/Printed.
+    #[serde(default)]
+    pub confirmed_print: bool,
 }
 
 impl PrinterDeviceConfig {
@@ -211,6 +242,10 @@ impl PrinterDeviceConfig {
             .map(|value| value.trim().to_ascii_lowercase())
             .filter(|value| !value.is_empty());
         config.serial_port = config.serial_port.map(|value| value.trim().to_owned());
+        config.flow_control = config
+            .flow_control
+            .map(|value| value.trim().to_ascii_lowercase());
+        config.parity = config.parity.map(|value| value.trim().to_ascii_lowercase());
         config.driver_name = config.driver_name.map(|value| value.trim().to_owned());
         config.job_idempotency_key = config
             .job_idempotency_key
@@ -252,9 +287,26 @@ impl PrinterDeviceConfig {
                 if path.is_empty() || path.len() > 260 {
                     return Err("serial printer port must contain 1..260 bytes".to_owned());
                 }
-                let baud = config.baud_rate.unwrap_or(9_600);
+                if config
+                    .baud_rate
+                    .is_some_and(|baud| !(300..=4_000_000).contains(&baud))
+                {
+                    return Err("serial printer baud rate must be in 300..4000000".to_owned());
+                }
+                let baud = config.baud_rate();
                 if !(300..=4_000_000).contains(&baud) {
                     return Err("serial printer baud rate must be in 300..4000000".to_owned());
+                }
+                if !matches!(config.flow_control(), "none" | "hardware" | "software") {
+                    return Err(
+                        "serial printer flowControl must be none, hardware, or software".to_owned(),
+                    );
+                }
+                if !matches!(config.parity(), "none" | "even" | "odd") {
+                    return Err("serial printer parity must be none, even, or odd".to_owned());
+                }
+                if !matches!(config.data_bits(), 5..=8) {
+                    return Err("serial printer dataBits must be in 5..8".to_owned());
                 }
             }
             "windows_driver" => {
@@ -265,6 +317,14 @@ impl PrinterDeviceConfig {
             }
             other => return Err(format!("unsupported printer connection: {other}")),
         }
+        if config.confirmed_print
+            && (!matches!(config.connection.as_str(), "tcp" | "serial")
+                || !matches!(config.protocol.as_str(), "zpl" | "image" | "tspl"))
+        {
+            return Err(
+                "confirmedPrint requires a TCP/serial ZPL, image-ZPL, or TSPL printer".to_owned(),
+            );
+        }
         Ok(config)
     }
 
@@ -273,7 +333,40 @@ impl PrinterDeviceConfig {
     }
 
     fn baud_rate(&self) -> u32 {
-        self.baud_rate.unwrap_or(9_600) as u32
+        self.baud_rate.unwrap_or_else(|| {
+            if self.uses_raster_serial_defaults() {
+                DEFAULT_SERIAL_BAUD_RATE
+            } else {
+                LEGACY_SERIAL_BAUD_RATE
+            }
+        }) as u32
+    }
+
+    fn uses_raster_serial_defaults(&self) -> bool {
+        matches!(
+            self.protocol.as_str(),
+            "zpl" | "tspl" | "epl" | "cpcl" | "dpl" | "sbpl" | "image"
+        )
+    }
+
+    fn flow_control(&self) -> &str {
+        self.flow_control.as_deref().unwrap_or_else(|| {
+            if self.uses_raster_serial_defaults()
+                && u64::from(self.baud_rate()) >= DEFAULT_SERIAL_BAUD_RATE
+            {
+                "hardware"
+            } else {
+                "none"
+            }
+        })
+    }
+
+    fn parity(&self) -> &str {
+        self.parity.as_deref().unwrap_or("none")
+    }
+
+    fn data_bits(&self) -> u8 {
+        self.data_bits.unwrap_or(8)
     }
 
     pub fn physical_key(&self) -> String {
@@ -284,12 +377,15 @@ impl PrinterDeviceConfig {
                 self.port()
             ),
             "serial" => format!(
-                "serial:{}:{}",
+                "serial:{}:{}:{}:{}:{}:1",
                 self.serial_port
                     .as_deref()
                     .unwrap_or_default()
                     .to_ascii_uppercase(),
-                self.baud_rate()
+                self.baud_rate(),
+                self.data_bits(),
+                self.parity(),
+                self.flow_control(),
             ),
             "windows_driver" => {
                 let name = self.driver_name.as_deref().unwrap_or_default();
@@ -369,6 +465,7 @@ fn is_loopback_printer_host(host: &str) -> bool {
 pub(crate) struct PreparedPrinterJob {
     config: PrinterDeviceConfig,
     action: JobAction,
+    replay_json: Option<String>,
 }
 
 #[cfg(feature = "slint-ui")]
@@ -379,6 +476,14 @@ impl PreparedPrinterJob {
             return Err("job idempotency key must contain 1..128 printable bytes".to_owned());
         }
         self.config.job_idempotency_key = Some(key.to_owned());
+        Ok(self)
+    }
+
+    pub(crate) fn with_replay_json(mut self, replay_json: String) -> Result<Self, String> {
+        if replay_json.is_empty() {
+            return Err("last-print replay data must not be empty".to_owned());
+        }
+        self.replay_json = Some(replay_json);
         Ok(self)
     }
 
@@ -393,12 +498,13 @@ impl PreparedPrinterJob {
     pub(crate) fn persist(self, transaction: &rusqlite::Transaction<'_>) -> Result<String, String> {
         let physical_key = self.config.physical_key();
         let fingerprint = action_fingerprint(&self.action);
-        match durable::DurablePrintStore::prepare_on_connection(
+        match durable::DurablePrintStore::prepare_on_connection_with_replay(
             transaction,
             &self.config,
             &physical_key,
             fingerprint,
             &self.action,
+            self.replay_json.as_deref(),
         )? {
             durable::PrepareOutcome::New(job_id) => Ok(job_id),
             durable::PrepareOutcome::Cached(_) => {
@@ -577,6 +683,8 @@ pub struct PrinterTransportSummary {
     pub max_job_bytes: usize,
     pub connect_timeout_ms: u64,
     pub write_timeout_ms: u64,
+    pub keep_open_write_timeout_ms: u64,
+    pub tcp_write_progress_chunk_bytes: usize,
     pub idle_close_ms: u64,
     pub breaker_ms: u64,
     pub tcp_jobs: u64,
@@ -618,6 +726,7 @@ struct PrinterStats {
 enum IdempotencyOutcome {
     Pending,
     Completed(PrintReceipt),
+    FailedNotStarted(String),
     Failed(String),
 }
 
@@ -760,6 +869,7 @@ impl PrinterTransportState {
         Ok(PreparedPrinterJob {
             config,
             action: JobAction::Print(data),
+            replay_json: None,
         })
     }
 
@@ -769,7 +879,7 @@ impl PrinterTransportState {
         app: RuntimeEventSink,
         job: PreparedPrinterJob,
     ) -> Result<PrintReceipt, String> {
-        self.submit(app, job.config, job.action)
+        self.submit_with_replay(app, job.config, job.action, job.replay_json)
     }
 
     #[cfg(feature = "slint-ui")]
@@ -826,6 +936,7 @@ impl PrinterTransportState {
                 height,
                 mono,
             },
+            replay_json: None,
         })
     }
     #[cfg(feature = "slint-ui")]
@@ -898,6 +1009,7 @@ impl PrinterTransportState {
                     document_name,
                 },
             },
+            replay_json: None,
         })
     }
     #[cfg(feature = "desktop")]
@@ -1083,6 +1195,11 @@ impl PrinterTransportState {
                             .fetch_add(1, Ordering::AcqRel);
                         return Ok(IdempotencyReservation::Cached(receipt));
                     }
+                    IdempotencyOutcome::FailedNotStarted(error) => {
+                        return Err(format!(
+                            "DURABLE_RETRY_REQUIRED: previous delivery definitely did not start: {error}"
+                        ));
+                    }
                     IdempotencyOutcome::Failed(error) => {
                         self.inner
                             .stats
@@ -1153,6 +1270,9 @@ impl PrinterTransportState {
                 if entry.fingerprint == fingerprint {
                     entry.outcome = match outcome {
                         Ok(receipt) => IdempotencyOutcome::Completed(receipt.clone()),
+                        Err(error) if error.starts_with("DELIVERY_NOT_STARTED:") => {
+                            IdempotencyOutcome::FailedNotStarted(error.clone())
+                        }
                         Err(error) => IdempotencyOutcome::Failed(error.clone()),
                     };
                 }
@@ -1180,6 +1300,16 @@ impl PrinterTransportState {
         config: PrinterDeviceConfig,
         action: JobAction,
     ) -> Result<PrintReceipt, String> {
+        self.submit_with_replay(app, config, action, None)
+    }
+
+    fn submit_with_replay(
+        &self,
+        app: RuntimeEventSink,
+        config: PrinterDeviceConfig,
+        action: JobAction,
+        replay_json: Option<String>,
+    ) -> Result<PrintReceipt, String> {
         let physical_key = config.physical_key();
         if matches!(&action, JobAction::Probe) {
             return self.submit_once(app, config, action, &physical_key, None);
@@ -1198,11 +1328,13 @@ impl PrinterTransportState {
             IdempotencyReservation::Cached(_) => unreachable!(),
         };
 
-        let durable = match self
-            .inner
-            .durable
-            .prepare(&config, &physical_key, fingerprint, &action)
-        {
+        let durable = match self.inner.durable.prepare_with_replay(
+            &config,
+            &physical_key,
+            fingerprint,
+            &action,
+            replay_json.as_deref(),
+        ) {
             Ok(value) => value,
             Err(error) => {
                 if let Some(scope) = leader_scope.as_deref() {
@@ -1399,6 +1531,21 @@ impl PrinterTransportState {
         }
     }
 
+    #[cfg(feature = "slint-ui")]
+    pub(crate) fn last_replay_json(&self) -> Result<Option<String>, String> {
+        self.inner.durable.last_replay_json()
+    }
+
+    #[cfg(feature = "slint-ui")]
+    pub(crate) fn migrate_legacy_replay(&self, replay_json: &str) -> Result<(), String> {
+        self.inner.durable.migrate_legacy_replay(replay_json)
+    }
+
+    #[cfg(feature = "slint-ui")]
+    pub(crate) fn clear_last_replay(&self) -> Result<(), String> {
+        self.inner.durable.clear_last_replay()
+    }
+
     pub fn durable_jobs(
         &self,
         state: Option<&str>,
@@ -1411,23 +1558,23 @@ impl PrinterTransportState {
         self.inner.durable.summary()
     }
 
-    /// Queries printer status. When an active print worker holds the device
-    /// (persistent serial ports), the handshake is executed on that worker's
-    /// connection instead of opening a second one, which Windows would refuse.
+    /// Queries printer status. When an active print worker owns the device, the
+    /// handshake is serialized on that worker and persistent TCP/serial streams
+    /// are reused instead of racing a second connection against live printing.
     pub fn query_printer_status_with_sink(
         &self,
         app: RuntimeEventSink,
         config: &PrinterDeviceConfig,
     ) -> Result<PrinterStatusReport, String> {
         let physical_key = config.physical_key();
-        let worker_holds_serial = config.connection == "serial"
+        let worker_holds_connection = matches!(config.connection.as_str(), "serial" | "tcp")
             && self
                 .inner
                 .workers
                 .lock()
                 .map(|workers| workers.contains_key(&physical_key))
                 .unwrap_or(false);
-        if !worker_holds_serial {
+        if !worker_holds_connection {
             return status::query(config);
         }
         let queue = self.queue_for(&physical_key)?;
@@ -1562,6 +1709,8 @@ impl PrinterTransportState {
             max_job_bytes: MAX_RAW_JOB_BYTES,
             connect_timeout_ms: CONNECT_TIMEOUT.as_millis() as u64,
             write_timeout_ms: WRITE_TIMEOUT.as_millis() as u64,
+            keep_open_write_timeout_ms: KEEP_OPEN_WRITE_TIMEOUT.as_millis() as u64,
+            tcp_write_progress_chunk_bytes: TCP_WRITE_PROGRESS_CHUNK_BYTES,
             idle_close_ms: IDLE_CLOSE.as_millis() as u64,
             breaker_ms: BREAKER_DURATION.as_millis() as u64,
             tcp_jobs: stats.tcp_jobs.load(Ordering::Acquire),
@@ -1747,50 +1896,114 @@ fn run_device_worker(
                 stats.queued_now.fetch_sub(1, Ordering::AcqRel);
                 stats.active_now.fetch_add(1, Ordering::AcqRel);
 
-                let started = match job.durable_job_id.as_deref() {
-                    Some(job_id) => match durable.mark_sending(job_id) {
-                        Ok(true) => {
-                            emit_durable_status(&job.app, Some(job_id), "sending", None);
-                            Ok(true)
-                        }
-                        Ok(false) => {
-                            Err("durable print job was cancelled before sending".to_owned())
-                        }
-                        Err(error) => Err(error),
-                    },
-                    None => Ok(true),
-                };
-                let transport_started = matches!(started, Ok(true));
-                let mut result = match started {
-                    Ok(true) => {
-                        process_job(&key, &job, &mut connection, &mut breaker_until, &stats)
+                let mut delivery_attempts = 0_u8;
+                let mut cancelled = false;
+                let mut transport_result = loop {
+                    if !matches!(job.action, JobAction::Status)
+                        && !wait_for_breaker(&stop, &mut breaker_until)
+                    {
+                        break Err(TransportFailure::not_started(
+                            "printer worker stopped while delivery was waiting to retry",
+                            false,
+                        ));
                     }
-                    Ok(false) => unreachable!(),
-                    Err(error) => Err(error),
+                    let started = match job.durable_job_id.as_deref() {
+                        Some(job_id) => match durable.mark_sending(job_id) {
+                            Ok(true) => {
+                                emit_durable_status(&job.app, Some(job_id), "sending", None);
+                                Ok(())
+                            }
+                            Ok(false) => {
+                                cancelled = true;
+                                Err(TransportFailure::not_started(
+                                    "durable print job was cancelled before sending",
+                                    false,
+                                ))
+                            }
+                            Err(error) => Err(TransportFailure::not_started(error, false)),
+                        },
+                        None => Ok(()),
+                    };
+                    if let Err(error) = started {
+                        break Err(error);
+                    }
+                    delivery_attempts = delivery_attempts.saturating_add(1);
+                    match process_job(&key, &job, &mut connection, &mut breaker_until, &stats) {
+                        Ok(mut receipt) => {
+                            receipt.attempts =
+                                receipt.attempts.saturating_add(delivery_attempts - 1);
+                            break Ok(receipt);
+                        }
+                        Err(mut error) => {
+                            if !matches!(job.action, JobAction::Status) {
+                                breaker_until =
+                                    Some(Instant::now() + retry_delay(delivery_attempts));
+                            }
+                            let retryable = error.kind == TransportFailureKind::NotStarted
+                                && !matches!(job.action, JobAction::Status)
+                                && delivery_attempts < MAX_AUTOMATIC_DELIVERY_ATTEMPTS
+                                && !stop.load(Ordering::Acquire);
+                            if !retryable {
+                                break Err(error);
+                            }
+                            if let Some(job_id) = job.durable_job_id.as_deref() {
+                                if let Err(state_error) =
+                                    durable.mark_retry_queued(job_id, &error.message)
+                                {
+                                    error.message = format!(
+                                        "{}; failed to persist automatic retry: {state_error}",
+                                        error.message
+                                    );
+                                    break Err(error);
+                                }
+                                emit_durable_status(
+                                    &job.app,
+                                    Some(job_id),
+                                    "queued",
+                                    Some(&error.message),
+                                );
+                            }
+                        }
+                    }
                 };
 
                 if let (Some(job_id), Ok(receipt)) =
-                    (job.durable_job_id.as_deref(), result.as_mut())
+                    (job.durable_job_id.as_deref(), transport_result.as_mut())
                 {
                     receipt.durable_job_id = Some(job_id.to_owned());
                     receipt.durable_state = Some("accepted".to_owned());
                     if let Err(error) = durable.mark_accepted(job_id, receipt) {
-                        result = Err(format!(
+                        transport_result = Err(TransportFailure::unknown(format!(
                             "DURABLE_RECEIPT_PERSISTENCE_UNCERTAIN: transport accepted but receipt update failed: {error}"
-                        ));
+                        )));
                     } else {
                         emit_durable_status(&job.app, Some(job_id), "accepted", None);
                     }
                 }
-                if let (Some(job_id), Err(error)) = (job.durable_job_id.as_deref(), result.as_ref())
+                if let (Some(job_id), Err(error)) =
+                    (job.durable_job_id.as_deref(), transport_result.as_ref())
                 {
-                    if transport_started {
-                        let _ = durable.mark_uncertain(job_id, error);
-                        emit_durable_status(&job.app, Some(job_id), "uncertain", Some(error));
+                    if cancelled {
+                        emit_durable_status(
+                            &job.app,
+                            Some(job_id),
+                            "cancelled",
+                            Some(&error.message),
+                        );
+                    } else if error.is_uncertain() {
+                        let _ = durable.mark_uncertain(job_id, &error.message);
+                        emit_durable_status(
+                            &job.app,
+                            Some(job_id),
+                            "uncertain",
+                            Some(&error.message),
+                        );
                     } else {
-                        emit_durable_status(&job.app, Some(job_id), "cancelled", Some(error));
+                        let _ = durable.mark_failed(job_id, &error.message);
+                        emit_durable_status(&job.app, Some(job_id), "failed", Some(&error.message));
                     }
                 }
+                let result = transport_result.map_err(TransportFailure::into_message);
 
                 stats.active_now.fetch_sub(1, Ordering::AcqRel);
                 // Status probes are transport diagnostics, not print jobs.
@@ -1844,45 +2057,63 @@ fn run_device_worker(
         let _ = job.completion.send(Err(error));
     }
 }
+
+fn retry_delay(failed_attempts: u8) -> Duration {
+    let shift = u32::from(failed_attempts.saturating_sub(1).min(5));
+    (RETRY_BASE_DELAY * (1_u32 << shift)).min(BREAKER_DURATION)
+}
+
+fn wait_for_breaker(stop: &AtomicBool, breaker_until: &mut Option<Instant>) -> bool {
+    while let Some(until) = *breaker_until {
+        if stop.load(Ordering::Acquire) {
+            return false;
+        }
+        let remaining = until.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            *breaker_until = None;
+            break;
+        }
+        thread::sleep(remaining.min(WORKER_POLL));
+    }
+    true
+}
+
 fn process_job(
     key: &str,
     job: &PrintJob,
     connection: &mut DeviceConnection,
     breaker_until: &mut Option<Instant>,
     stats: &PrinterStats,
-) -> Result<PrintReceipt, String> {
+) -> Result<PrintReceipt, TransportFailure> {
     if matches!(job.action, JobAction::Status) {
         let send_started = Instant::now();
         // Status probes bypass the circuit breaker: a printer that ignores a
         // status command must not fail-fast the label queue behind it.
         return match connection.query_status(&job.config) {
-            Ok(report) => Ok(PrintReceipt {
-                printer_id: job.config.id.clone(),
-                physical_key: key.to_owned(),
-                bytes: 0,
-                queue_ms: elapsed_ms(job.submitted_at),
-                send_ms: elapsed_ms(send_started),
-                attempts: 1,
-                reused_connection: true,
-                delivery_state: "status-queried".to_owned(),
-                confirmation_mode: "protocol-status".to_owned(),
-                idempotency_key: job.config.job_idempotency_key.clone(),
-                deduplicated: false,
-                durable_job_id: None,
-                durable_state: None,
-                status_report: Some(Box::new(report)),
-            }),
-            Err(error) => Err(error.message),
+            Ok(report) => {
+                // A completed handshake proves that the transport recovered.
+                // Hardware faults remain visible in the report and are handled
+                // by the batch readiness gate rather than the reachability breaker.
+                *breaker_until = None;
+                Ok(PrintReceipt {
+                    printer_id: job.config.id.clone(),
+                    physical_key: key.to_owned(),
+                    bytes: 0,
+                    queue_ms: elapsed_ms(job.submitted_at),
+                    send_ms: elapsed_ms(send_started),
+                    attempts: 1,
+                    reused_connection: true,
+                    delivery_state: "status-queried".to_owned(),
+                    confirmation_mode: "protocol-status".to_owned(),
+                    idempotency_key: job.config.job_idempotency_key.clone(),
+                    deduplicated: false,
+                    durable_job_id: None,
+                    durable_state: None,
+                    status_report: Some(Box::new(report)),
+                })
+            }
+            Err(error) => Err(error),
         };
-    }
-    if breaker_until.is_some_and(|until| Instant::now() < until) {
-        let remaining = breaker_until
-            .map(|until| until.saturating_duration_since(Instant::now()).as_millis())
-            .unwrap_or_default();
-        return Err(format!(
-            "printer \"{}\" unreachable (failing fast for {remaining}ms)",
-            job.config.display_name()
-        ));
     }
     *breaker_until = None;
     let queue_ms = elapsed_ms(job.submitted_at);
@@ -1903,33 +2134,101 @@ fn process_job(
         JobAction::Probe => connection.probe(&job.config),
         JobAction::Status => unreachable!("status jobs are handled before transport dispatch"),
     };
-    let (delivery_state, confirmation_mode) = match &job.action {
+    let (mut delivery_state, mut confirmation_mode) = match &job.action {
         JobAction::Probe => ("reachable", "connect-probe"),
         _ if job.config.connection == "windows_driver" => ("spooler-accepted", "windows-spooler"),
         _ => ("transport-accepted", "transport-write"),
     };
     match send_result {
-        Ok(outcome) => Ok(PrintReceipt {
-            printer_id: job.config.id.clone(),
-            physical_key: key.to_owned(),
-            bytes: outcome.bytes,
-            queue_ms,
-            send_ms: elapsed_ms(send_started),
-            attempts: outcome.attempts,
-            reused_connection: outcome.reused_connection,
-            delivery_state: delivery_state.to_owned(),
-            confirmation_mode: confirmation_mode.to_owned(),
-            idempotency_key: job.config.job_idempotency_key.clone(),
-            deduplicated: false,
-            durable_job_id: None,
-            durable_state: None,
-            status_report: None,
-        }),
-        Err(error) => {
-            *breaker_until = Some(Instant::now() + BREAKER_DURATION);
-            Err(error.message)
+        Ok(outcome) => {
+            let status_report =
+                if job.config.confirmed_print && matches!(job.action, JobAction::Print(_)) {
+                    delivery_state = "printed";
+                    confirmation_mode = "protocol-status";
+                    Some(Box::new(await_print_confirmation(connection, &job.config)?))
+                } else {
+                    None
+                };
+            Ok(PrintReceipt {
+                printer_id: job.config.id.clone(),
+                physical_key: key.to_owned(),
+                bytes: outcome.bytes,
+                queue_ms,
+                send_ms: elapsed_ms(send_started),
+                attempts: outcome.attempts,
+                reused_connection: outcome.reused_connection,
+                delivery_state: delivery_state.to_owned(),
+                confirmation_mode: confirmation_mode.to_owned(),
+                idempotency_key: job.config.job_idempotency_key.clone(),
+                deduplicated: false,
+                durable_job_id: None,
+                durable_state: None,
+                status_report,
+            })
         }
+        Err(error) => Err(error),
     }
+}
+
+fn await_print_confirmation(
+    connection: &mut DeviceConnection,
+    config: &PrinterDeviceConfig,
+) -> Result<PrinterStatusReport, TransportFailure> {
+    let deadline = Instant::now() + PRINT_CONFIRMATION_TIMEOUT;
+    loop {
+        let report = connection.query_status(config).map_err(|error| {
+            TransportFailure::unknown(format!(
+                "print bytes were written but device confirmation failed: {}",
+                error.message
+            ))
+        })?;
+        let confirmed =
+            print_confirmation_complete(config, &report).map_err(TransportFailure::unknown)?;
+        if confirmed {
+            return Ok(report);
+        }
+        if Instant::now() >= deadline {
+            return Err(TransportFailure::unknown(format!(
+                "print bytes were written but the printer did not become idle within {} seconds",
+                PRINT_CONFIRMATION_TIMEOUT.as_secs()
+            )));
+        }
+        thread::sleep(PRINT_CONFIRMATION_POLL);
+    }
+}
+
+fn print_confirmation_complete(
+    config: &PrinterDeviceConfig,
+    report: &PrinterStatusReport,
+) -> Result<bool, String> {
+    if !report.reachable || !report.supports_bidirectional_status {
+        return Err(
+            "print bytes were written but the printer did not provide supported status".to_owned(),
+        );
+    }
+    if matches!(
+        report.status.as_str(),
+        "head-open"
+            | "paper-jam"
+            | "paper-out"
+            | "ribbon-out"
+            | "paused"
+            | "offline"
+            | "error"
+            | "buffer-full"
+            | "busy"
+    ) {
+        return Err(format!(
+            "print bytes were written but printer reports {}: {}",
+            report.status,
+            report.details.join(" · ")
+        ));
+    }
+    Ok(match config.protocol.as_str() {
+        "zpl" | "image" => report.queued_formats == Some(0),
+        "tspl" => report.status == "ready",
+        _ => false,
+    })
 }
 fn elapsed_ms(start: Instant) -> u64 {
     start.elapsed().as_millis().min(u64::MAX as u128) as u64
@@ -1947,10 +2246,10 @@ impl DeviceConnection {
             "tcp" => self.tcp.probe(config),
             "serial" => self.serial.probe(config),
             "windows_driver" => spooler::probe(config),
-            other => Err(TransportFailure {
-                message: format!("unsupported printer connection: {other}"),
-                timed_out: false,
-            }),
+            other => Err(TransportFailure::not_started(
+                format!("unsupported printer connection: {other}"),
+                false,
+            )),
         }
     }
 
@@ -1959,13 +2258,10 @@ impl DeviceConnection {
         config: &PrinterDeviceConfig,
     ) -> Result<status::PrinterStatusReport, TransportFailure> {
         match config.connection.as_str() {
-            // Serial is probed on the worker's held port; other connections
-            // open their own short-lived status connection.
+            "tcp" => self.tcp.query_status(config),
             "serial" => self.serial.query_status(config),
-            _ => status::query(config).map_err(|message| TransportFailure {
-                message,
-                timed_out: false,
-            }),
+            _ => status::query(config)
+                .map_err(|message| TransportFailure::not_started(message, false)),
         }
     }
 
@@ -1979,10 +2275,10 @@ impl DeviceConnection {
             "tcp" => self.tcp.send(config, data, stats),
             "serial" => self.serial.send(config, data, stats),
             "windows_driver" => spooler::send_raw(config, data),
-            other => Err(TransportFailure {
-                message: format!("unsupported printer connection: {other}"),
-                timed_out: false,
-            }),
+            other => Err(TransportFailure::not_started(
+                format!("unsupported printer connection: {other}"),
+                false,
+            )),
         }
     }
 
@@ -2033,13 +2329,80 @@ struct SendOutcome {
     reused_connection: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TransportFailureKind {
+    NotStarted,
+    Partial,
+    Unknown,
+}
+
 #[derive(Debug)]
 struct TransportFailure {
+    kind: TransportFailureKind,
     message: String,
     timed_out: bool,
 }
 
+impl TransportFailure {
+    fn not_started(message: impl Into<String>, timed_out: bool) -> Self {
+        Self {
+            kind: TransportFailureKind::NotStarted,
+            message: message.into(),
+            timed_out,
+        }
+    }
+
+    fn unknown(message: impl Into<String>) -> Self {
+        Self {
+            kind: TransportFailureKind::Unknown,
+            message: message.into(),
+            timed_out: false,
+        }
+    }
+
+    fn is_uncertain(&self) -> bool {
+        matches!(
+            self.kind,
+            TransportFailureKind::Partial | TransportFailureKind::Unknown
+        )
+    }
+
+    fn into_message(self) -> String {
+        match self.kind {
+            TransportFailureKind::NotStarted => {
+                format!("DELIVERY_NOT_STARTED: {}", self.message)
+            }
+            TransportFailureKind::Partial | TransportFailureKind::Unknown
+                if self.message.starts_with("DELIVERY_UNCERTAIN:") =>
+            {
+                self.message
+            }
+            TransportFailureKind::Partial | TransportFailureKind::Unknown => {
+                format!("DELIVERY_UNCERTAIN: {}", self.message)
+            }
+        }
+    }
+}
+
 impl TcpConnection {
+    fn query_status(
+        &mut self,
+        config: &PrinterDeviceConfig,
+    ) -> Result<status::PrinterStatusReport, TransportFailure> {
+        self.ensure_connected(config)?;
+        let keep_open = config.keep_tcp_connection_open();
+        let result = status::query_stream_report(
+            config,
+            self.stream.as_mut().expect("connected TCP status stream"),
+        );
+        self.last_write = Some(Instant::now());
+        self.keep_open = keep_open;
+        if result.is_err() || !keep_open {
+            self.close();
+        }
+        result
+    }
+
     fn probe(&mut self, config: &PrinterDeviceConfig) -> Result<SendOutcome, TransportFailure> {
         let endpoint = config.physical_key();
         let reused = self.stream.is_some() && self.endpoint.as_deref() == Some(&endpoint);
@@ -2065,7 +2428,11 @@ impl TcpConnection {
         stats: &PrinterStats,
     ) -> Result<SendOutcome, TransportFailure> {
         let endpoint = config.physical_key();
-        let reused = self.stream.is_some() && self.endpoint.as_deref() == Some(&endpoint);
+        let reuse_candidate = self.stream.is_some() && self.endpoint.as_deref() == Some(&endpoint);
+        let reused = reuse_candidate && self.reused_stream_is_alive();
+        if reuse_candidate && !reused {
+            stats.reconnects.fetch_add(1, Ordering::AcqRel);
+        }
         let mut attempts = 0_u8;
         loop {
             attempts += 1;
@@ -2077,11 +2444,18 @@ impl TcpConnection {
                 self.close();
                 continue;
             }
-            let write_result =
-                write_job_once(self.stream.as_mut().expect("connected stream"), data);
+            let keep_open = config.keep_tcp_connection_open();
+            let write_result = if keep_open {
+                write_job_once_chunked(
+                    self.stream.as_mut().expect("connected stream"),
+                    data,
+                    TCP_WRITE_PROGRESS_CHUNK_BYTES,
+                )
+            } else {
+                write_job_once(self.stream.as_mut().expect("connected stream"), data)
+            };
             match write_result {
                 Ok(()) => {
-                    let keep_open = config.keep_tcp_connection_open();
                     self.keep_open = keep_open;
                     self.last_write = Some(Instant::now());
                     let outcome = SendOutcome {
@@ -2113,25 +2487,39 @@ impl TcpConnection {
         if self.endpoint.as_deref() != Some(&endpoint) {
             self.close();
         }
-        if self.stream.is_some() {
-            return Ok(());
+        if self.stream.is_none() {
+            let address = resolve_address(config)?;
+            let stream = TcpStream::connect_timeout(&address, CONNECT_TIMEOUT)
+                .map_err(|error| io_failure(&format!("TCP printer connect {address}"), error))?;
+            stream
+                .set_nodelay(true)
+                .map_err(|error| io_failure("TCP printer TCP_NODELAY", error))?;
+            SockRef::from(&stream)
+                .set_tcp_keepalive(
+                    &TcpKeepalive::new()
+                        .with_time(TCP_KEEPALIVE_TIME)
+                        .with_interval(TCP_KEEPALIVE_INTERVAL)
+                        .with_retries(3),
+                )
+                .map_err(|error| io_failure("TCP printer keepalive", error))?;
+            self.stream = Some(stream);
+            self.endpoint = Some(endpoint);
         }
-        let address = resolve_address(config)?;
-        let stream = TcpStream::connect_timeout(&address, CONNECT_TIMEOUT)
-            .map_err(|error| io_failure(&format!("TCP printer connect {address}"), error))?;
-        stream
-            .set_write_timeout(Some(WRITE_TIMEOUT))
+        let timeout = if config.keep_tcp_connection_open() {
+            KEEP_OPEN_WRITE_TIMEOUT
+        } else {
+            WRITE_TIMEOUT
+        };
+        self.stream
+            .as_ref()
+            .expect("connected stream")
+            .set_write_timeout(Some(timeout))
             .map_err(|error| io_failure("TCP printer write timeout", error))?;
-        stream
-            .set_nodelay(true)
-            .map_err(|error| io_failure("TCP printer TCP_NODELAY", error))?;
-        self.stream = Some(stream);
-        self.endpoint = Some(endpoint);
         Ok(())
     }
 
     fn close_if_idle(&mut self) {
-        if self.keep_open {
+        if !self.keep_open {
             return;
         }
         if self
@@ -2140,6 +2528,30 @@ impl TcpConnection {
         {
             self.close();
         }
+    }
+
+    fn reused_stream_is_alive(&mut self) -> bool {
+        let Some(stream) = self.stream.as_ref() else {
+            return false;
+        };
+        let healthy = if stream.set_nonblocking(true).is_err() {
+            false
+        } else {
+            let mut byte = [0_u8; 1];
+            let peek = stream.peek(&mut byte);
+            let restored = stream.set_nonblocking(false).is_ok();
+            restored
+                && matches!(
+                    peek,
+                    Ok(count) if count > 0
+                )
+                || restored
+                    && matches!(peek, Err(ref error) if error.kind() == io::ErrorKind::WouldBlock)
+        };
+        if !healthy {
+            self.close();
+        }
+        healthy
     }
 
     fn close(&mut self) {
@@ -2158,23 +2570,23 @@ fn resolve_address(config: &PrinterDeviceConfig) -> Result<SocketAddr, Transport
         .to_socket_addrs()
         .map_err(|error| io_failure("TCP printer resolve", error))?
         .next()
-        .ok_or_else(|| TransportFailure {
-            message: format!(
-                "TCP printer address did not resolve: {host}:{}",
-                config.port()
-            ),
-            timed_out: false,
+        .ok_or_else(|| {
+            TransportFailure::not_started(
+                format!(
+                    "TCP printer address did not resolve: {host}:{}",
+                    config.port()
+                ),
+                false,
+            )
         })
 }
 
 fn io_failure(context: &str, error: io::Error) -> TransportFailure {
-    TransportFailure {
-        message: format!("{context}: {error}"),
-        timed_out: matches!(
-            error.kind(),
-            io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
-        ),
-    }
+    let timed_out = matches!(
+        error.kind(),
+        io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+    );
+    TransportFailure::not_started(format!("{context}: {error}"), timed_out)
 }
 
 fn log_duplicate(
@@ -2266,6 +2678,106 @@ mod tests {
         PrinterDeviceConfig::from_value(value).unwrap()
     }
 
+    fn confirmation_report(status: &str, queued_formats: Option<u32>) -> PrinterStatusReport {
+        PrinterStatusReport {
+            printer_id: "pack".to_owned(),
+            printer_name: "Pack".to_owned(),
+            physical_key: "tcp:127.0.0.1:9100".to_owned(),
+            protocol: "zpl".to_owned(),
+            connection: "tcp".to_owned(),
+            reachable: true,
+            status: status.to_owned(),
+            details: vec![status.to_owned()],
+            supports_bidirectional_status: true,
+            queued_formats,
+            response_bytes: 1,
+            response_preview: None,
+            raw_response_hex: None,
+            manufacturer: None,
+            model: None,
+            firmware: None,
+            link_os_version: None,
+            detected_dpi: None,
+            supports_utf8_text: false,
+            supports_z64: false,
+            capability_evidence: Vec::new(),
+            queried_at_ms: 0,
+        }
+    }
+
+    #[test]
+    fn confirmed_print_requires_supported_bidirectional_routes() {
+        let zpl = PrinterDeviceConfig::from_value(serde_json::json!({
+            "id":"confirmed-zpl", "connection":"tcp", "protocol":"zpl",
+            "ip":"127.0.0.1", "port":9100, "confirmedPrint":true
+        }))
+        .unwrap();
+        assert!(
+            !print_confirmation_complete(&zpl, &confirmation_report("printing", Some(1))).unwrap()
+        );
+        assert!(
+            print_confirmation_complete(&zpl, &confirmation_report("printing", Some(0))).unwrap()
+        );
+        assert!(
+            print_confirmation_complete(&zpl, &confirmation_report("paper-out", Some(0))).is_err()
+        );
+
+        let invalid = serde_json::json!({
+            "id":"confirmed-dpl", "connection":"tcp", "protocol":"dpl",
+            "ip":"127.0.0.1", "port":9100, "confirmedPrint":true
+        });
+        assert!(PrinterDeviceConfig::from_value(invalid).is_err());
+    }
+
+    #[test]
+    fn confirmed_zpl_job_becomes_printed_only_after_empty_buffer_status() {
+        use std::io::{Read, Write};
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut received = Vec::new();
+            let mut buffer = [0_u8; 256];
+            loop {
+                let read = socket.read(&mut buffer).unwrap();
+                received.extend_from_slice(&buffer[..read]);
+                if received.windows(5).any(|window| window == b"~HS\r\n") {
+                    break;
+                }
+            }
+            assert!(received.windows(3).any(|window| window == b"^XZ"));
+            socket
+                .write_all(b"\x02030,0,0,0250,000,0,0,0,000,0,0,0\x03\r\n\x02001,0,0,0,0,2,0,0,00000000,1,000\x03\r\n\x021234,0\x03\r\n")
+                .unwrap();
+        });
+        let state = PrinterTransportState::new();
+        let receipt = state
+            .submit_generated_with_sink(
+                RuntimeEventSink::detached(),
+                serde_json::json!({
+                    "id":"confirmed-loopback", "connection":"tcp", "protocol":"zpl",
+                    "ip":"127.0.0.1", "port":port, "confirmedPrint":true,
+                    "tcpJobBoundary":"stream"
+                }),
+                b"^XA^FO10,10^FDconfirmed^FS^XZ".to_vec(),
+            )
+            .unwrap();
+        server.join().unwrap();
+        assert_eq!(receipt.delivery_state, "printed");
+        assert_eq!(receipt.confirmation_mode, "protocol-status");
+        assert_eq!(
+            receipt
+                .status_report
+                .as_deref()
+                .and_then(|report| report.queued_formats),
+            Some(0)
+        );
+    }
+
     #[test]
     fn validates_all_transport_configs_and_physical_queue_keys() {
         let a = config(9100, "pack", None);
@@ -2273,6 +2785,7 @@ mod tests {
         let pallet = config(9100, "pallet", None);
         assert_eq!(a.physical_key(), "tcp:127.0.0.1:9100");
         assert_eq!(a.physical_key(), b.physical_key());
+        assert!(a.batch_status_polling);
         assert_eq!(a.physical_key(), pallet.physical_key());
 
         let other = PrinterDeviceConfig::from_value(serde_json::json!({
@@ -2290,10 +2803,23 @@ mod tests {
         assert_eq!(state.summary().worker_count, 2);
 
         let serial = PrinterDeviceConfig::from_value(serde_json::json!({
-            "id": "serial", "connection": "serial", "serialPort": "COM1", "baudRate": 9600
+            "id": "serial", "connection": "serial", "protocol": "zpl", "serialPort": "COM1", "baudRate": 9600
         }))
         .unwrap();
-        assert_eq!(serial.physical_key(), "serial:COM1:9600");
+        assert_eq!(serial.physical_key(), "serial:COM1:9600:8:none:none:1");
+
+        let raster_serial = PrinterDeviceConfig::from_value(serde_json::json!({
+            "id": "raster-serial", "connection": "serial", "protocol": "epl", "serialPort": "COM2"
+        }))
+        .unwrap();
+        assert_eq!(raster_serial.baud_rate(), 115_200);
+        assert_eq!(raster_serial.flow_control(), "hardware");
+        assert_eq!(raster_serial.parity(), "none");
+        assert_eq!(raster_serial.data_bits(), 8);
+        assert_eq!(
+            raster_serial.physical_key(),
+            "serial:COM2:115200:8:none:hardware:1"
+        );
 
         let spooler = PrinterDeviceConfig::from_value(serde_json::json!({
             "id": "driver", "connection": "windows_driver", "driverName": "Zebra Queue"
@@ -2309,6 +2835,9 @@ mod tests {
         for invalid in [
             serde_json::json!({"id":"bad", "connection":"serial", "serialPort":""}),
             serde_json::json!({"id":"bad", "connection":"serial", "serialPort":"COM1", "baudRate":42}),
+            serde_json::json!({"id":"bad", "connection":"serial", "serialPort":"COM1", "flowControl":"invalid"}),
+            serde_json::json!({"id":"bad", "connection":"serial", "serialPort":"COM1", "parity":"mark"}),
+            serde_json::json!({"id":"bad", "connection":"serial", "serialPort":"COM1", "dataBits":9}),
             serde_json::json!({"id":"bad", "connection":"tcp", "ip":"", "port":70000}),
         ] {
             assert!(PrinterDeviceConfig::from_value(invalid).is_err());
@@ -2343,6 +2872,28 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(detected_bridge.tcp_job_boundary(), TcpJobBoundary::Eof);
+    }
+
+    #[test]
+    fn tcp_write_timeout_tracks_job_boundary_on_reused_connections() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let mut connection = TcpConnection::default();
+        let protocol = config(port, "network", Some("stream"));
+        connection.ensure_connected(&protocol).unwrap();
+        assert_eq!(
+            connection.stream.as_ref().unwrap().write_timeout().unwrap(),
+            Some(KEEP_OPEN_WRITE_TIMEOUT)
+        );
+
+        let eof = config(port, "network", Some("eof"));
+        connection.ensure_connected(&eof).unwrap();
+        assert_eq!(
+            connection.stream.as_ref().unwrap().write_timeout().unwrap(),
+            Some(WRITE_TIMEOUT)
+        );
+        connection.close();
+        drop(listener);
     }
 
     #[cfg(windows)]
@@ -2469,8 +3020,87 @@ mod tests {
             .send(&config(port, "pack", None), b"^XA^XZ", &stats)
             .unwrap_err();
         assert!(error.message.contains("connect"));
+        assert_eq!(error.kind, TransportFailureKind::NotStarted);
         assert!(!error.timed_out);
         assert_eq!(stats.reconnects.load(Ordering::Acquire), 1);
+    }
+
+    #[test]
+    fn definitely_unstarted_delivery_retries_then_becomes_failed() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        let directory =
+            std::env::temp_dir().join(format!("labelpilot-retry-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let database = directory.join("printer.sqlite3");
+        {
+            let state = PrinterTransportState::with_database(&database).unwrap();
+            let error = state
+                .submit_generated_with_sink(
+                    RuntimeEventSink::detached(),
+                    serde_json::json!({
+                        "id": "retry-test",
+                        "connection": "tcp",
+                        "protocol": "zpl",
+                        "ip": "127.0.0.1",
+                        "port": port
+                    }),
+                    b"^XA^XZ".to_vec(),
+                )
+                .unwrap_err();
+            assert!(error.starts_with("DELIVERY_NOT_STARTED:"), "{error}");
+            let jobs = state.durable_jobs(Some("failed"), Some(10)).unwrap();
+            assert_eq!(jobs.len(), 1);
+            assert_eq!(
+                jobs[0].attempt_count,
+                u64::from(MAX_AUTOMATIC_DELIVERY_ATTEMPTS)
+            );
+            let summary = state.durable_summary().unwrap();
+            assert_eq!(summary.failed, 1);
+            assert_eq!(summary.uncertain, 0);
+        }
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn retry_backoff_is_exponential_and_bounded() {
+        assert_eq!(retry_delay(1), Duration::from_millis(250));
+        assert_eq!(retry_delay(2), Duration::from_millis(500));
+        assert_eq!(retry_delay(3), Duration::from_secs(1));
+        assert_eq!(retry_delay(8), BREAKER_DURATION);
+    }
+
+    #[test]
+    fn persistent_tcp_connection_closes_after_idle_limit() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let mut connection = TcpConnection::default();
+        let protocol = config(port, "idle", Some("stream"));
+        connection.ensure_connected(&protocol).unwrap();
+        connection.keep_open = true;
+        connection.last_write = Some(Instant::now() - IDLE_CLOSE);
+        connection.close_if_idle();
+        assert!(connection.stream.is_none());
+    }
+
+    #[test]
+    fn preflight_rejects_a_reused_socket_after_peer_fin() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = thread::spawn(move || {
+            let (socket, _) = listener.accept().unwrap();
+            socket.shutdown(Shutdown::Both).unwrap();
+        });
+        let mut connection = TcpConnection::default();
+        let protocol = config(port, "fin", Some("stream"));
+        connection.ensure_connected(&protocol).unwrap();
+        server.join().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while connection.reused_stream_is_alive() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(connection.stream.is_none());
     }
 
     #[test]
@@ -2528,7 +3158,9 @@ mod tests {
         assert_eq!(summary.max_workers, 12);
         assert_eq!(summary.connect_timeout_ms, 3000);
         assert_eq!(summary.write_timeout_ms, 3000);
-        assert_eq!(summary.idle_close_ms, 400);
+        assert_eq!(summary.keep_open_write_timeout_ms, 45000);
+        assert_eq!(summary.tcp_write_progress_chunk_bytes, 64 * 1024);
+        assert_eq!(summary.idle_close_ms, 15_000);
         assert_eq!(summary.breaker_ms, 5000);
         assert_eq!(summary.tcp_jobs, 0);
         assert_eq!(summary.serial_jobs, 0);
@@ -2606,6 +3238,23 @@ mod tests {
             .reserve_idempotency(&device, &key, fingerprint)
             .unwrap_err()
             .contains("IDEMPOTENCY_OUTCOME_UNCERTAIN"));
+        device.job_idempotency_key = Some("job-not-started".to_owned());
+        let not_started_scope = match state
+            .reserve_idempotency(&device, &key, fingerprint)
+            .unwrap()
+        {
+            IdempotencyReservation::Leader(scope) => scope,
+            _ => panic!("not-started reservation must lead"),
+        };
+        state.finish_idempotency(
+            &not_started_scope,
+            fingerprint,
+            &Err("DELIVERY_NOT_STARTED: connection refused".to_owned()),
+        );
+        assert!(state
+            .reserve_idempotency(&device, &key, fingerprint)
+            .unwrap_err()
+            .contains("DURABLE_RETRY_REQUIRED"));
         let summary = state.summary();
         assert_eq!(summary.deduplicated_jobs, 1);
         assert_eq!(summary.idempotency_conflicts, 1);

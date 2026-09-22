@@ -42,6 +42,10 @@
 
 Native ZPL/TSPL generation, raster adapters for EPL/CPCL/DPL/SBPL, TCP/Serial/Windows RAW transport, Windows GDI label printing and ordinary page-sheet printing are selected by the Rust planner. Complex documents use the on-demand renderer bitmap path; `bwip-js` remains isolated in a lazy chunk.
 
+USB label printers are sent through a Windows print queue; direct WinUSB/`usbprint.sys` access is intentionally not used. For a printer without a vendor driver, create a **Generic / Text Only** queue and select `windows_driver` with the printer's raw command protocol (for example, ZPL). DPL raster jobs use a compact 1-bit BMP to keep serial transfers bounded.
+
+Delivery failures before the first payload byte are retried automatically up to four times with exponential backoff and finish as `failed`; only partial writes or an ambiguous spooler finalization finish as `uncertain`. Persistent TCP connections use keepalive, are checked before reuse, and close after 15 seconds idle.
+
 ## Resource profile
 
 The main renderer bundle is gated below 160 KiB, operating screens are lazy chunks below 50 KiB each, barcode generation loads on demand, printer queues and telemetry outbox are bounded. Slint defaults to the GPU-backed `winit-skia-opengl` renderer for subpixel text, falls back to Skia software rendering when OpenGL is unavailable, keeps `winit-femtovg` as an explicit low-footprint override, and exits the Tauri dispatcher after sidecar startup.

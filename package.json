@@ -36,6 +36,7 @@
     "test:print-performance": "node scripts/test-print-performance-functionality.cjs && cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --features slint-ui --lib materialized_totals && cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --features slint-ui --lib production_delta",
     "test:printer-transport": "node scripts/test-printer-transport-contracts.cjs && cargo test --manifest-path src-tauri/Cargo.toml printer::",
     "smoke:printer": "node scripts/smoke-tauri-printer.cjs src-tauri/target/release/labelpilot-tauri.exe",
+    "probe:zpl-emulator": "cargo run --manifest-path src-tauri/Cargo.toml --no-default-features --features slint-ui --example zpl_emulator_probe --",
     "test:native-generator": "cargo test --manifest-path src-tauri/Cargo.toml generator::tests",
     "smoke:native-generator": "node scripts/smoke-tauri-native-generator.cjs src-tauri/target/release/labelpilot-tauri.exe",
     "test:public-print": "node scripts/test-public-print-routing.cjs && cargo test --manifest-path src-tauri/Cargo.toml printer::tests && cargo test --manifest-path src-tauri/Cargo.toml generator::tests",

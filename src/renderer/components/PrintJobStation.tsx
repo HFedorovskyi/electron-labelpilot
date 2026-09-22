@@ -142,8 +142,17 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
                 if (w < 0.010) autoPrintFiredRef.current = false;
             }
         });
-        const removeScaleStatus = window.desktopBridge.on('scale-status', (s: any) => setScaleStatus(s));
-        window.desktopBridge.invoke('get-scale-status').then((s: string) => { if (s) setScaleStatus(s); });
+        const applyScaleStatus = (value: unknown) => {
+            const next = String(value || 'disconnected');
+            setScaleStatus(next);
+            if (next !== 'connected') {
+                setWeight('0.000');
+                weightRef.current = '0.000';
+                setIsStable(false);
+            }
+        };
+        const removeScaleStatus = window.desktopBridge.on('scale-status', applyScaleStatus);
+        window.desktopBridge.invoke('get-scale-status').then((s: string) => { if (s) applyScaleStatus(s); });
 
         return () => {
             removeJobsListener();
@@ -534,6 +543,10 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
         isPrintingRef.current = true;
 
         try {
+            if (scaleStatus !== 'connected' || !isStable) {
+                setAlertMessage(t('ws.waitStableToPrint'));
+                return;
+            }
             const cw = parseFloat(weightRef.current);
             if (cw <= 0.010) {
                 setAlertMessage(t('pj.putOnScale'));
@@ -600,6 +613,10 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
         isPrintingRef.current = true;
 
         try {
+            if (scaleStatus !== 'connected' || !isStable) {
+                setAlertMessage(t('ws.waitStableToPrint'));
+                return;
+            }
             const cw = parseFloat(weightRef.current);
             if (cw <= 0.010) {
                 setAlertMessage(t('pj.putOnScale'));
@@ -963,7 +980,7 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
                         {/* Print Button */}
                         <button
                             onClick={activeJob.quantity_unit === 'pcs' ? handlePrintPcsPack : handlePrintKgPack}
-                            disabled={!activeJob || !labelDoc || scaleStatus !== 'connected'}
+                            disabled={!activeJob || !labelDoc || scaleStatus !== 'connected' || !isStable || !(parseFloat(weight) > 0.010)}
                             className="w-full py-4 bg-violet-600 hover:bg-violet-500 active:bg-violet-700 transition-all rounded-3xl font-bold text-xl shadow-[0_10px_40px_-10px_rgba(139,92,246,0.5)] flex items-center justify-center gap-3 border-t border-white/10 text-white disabled:opacity-40 disabled:pointer-events-none disabled:shadow-none"
                         >
                             <Printer className="w-6 h-6" /> {t('ws.print')}

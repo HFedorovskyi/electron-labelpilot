@@ -82,7 +82,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         std::env::set_var("SLINT_BACKEND", "winit-skia-opengl");
     }
     let mut callback_checks = settings_checks::verify()?;
-    callback_checks.extend(settings_checks::verify_preferences(&path.with_extension("preferences-data"))?);
+    callback_checks.extend(settings_checks::verify_preferences(
+        &path.with_extension("preferences-data"),
+    )?);
     let ui = WeighingPrototype::new()?;
     ui.set_kiosk_mode(false);
     ui.set_compact(width < 1280.0);
@@ -97,7 +99,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     labelpilot_tauri_lib::slint_runtime::initialize_ui_preferences(&ui, None);
     ui.invoke_change_ui_language(f.language.clone().into());
     ui.invoke_change_ui_theme(f.dark);
-    if f.preferences { ui.invoke_open_preferences(); }
+    if f.preferences {
+        ui.invoke_open_preferences();
+    }
     ui.set_update_current_version(env!("CARGO_PKG_VERSION").into());
     ui.set_active_page(f.page);
     ui.set_settings_active(true);
@@ -328,10 +332,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         ] {
             ui.invoke_change_ui_language(language.into());
             assert_eq!(ui.get_localized_queue_status().as_str(), expected);
-            assert_eq!(ui.get_queue_status().as_str(), "424 заданий · обновлено 08:12:14");
-            assert_eq!(ui.get_product_name().as_str(), "МӘРМӘР СИЫР / СТЕЙК НЬЮ-ЙОРК");
+            assert_eq!(
+                ui.get_queue_status().as_str(),
+                "424 заданий · обновлено 08:12:14"
+            );
+            assert_eq!(
+                ui.get_product_name().as_str(),
+                "МӘРМӘР СИЫР / СТЕЙК НЬЮ-ЙОРК"
+            );
         }
-        assert!(ui.get_localized_alert_text().contains("Verbindung abgelehnt (os error 10061)"));
+        assert!(ui
+            .get_localized_alert_text()
+            .contains("Verbindung abgelehnt (os error 10061)"));
         ui.invoke_change_ui_language(f.language.clone().into());
         callback_checks.push("live-locales-de-en-uk-ru-de-preserve-model-data".into());
     }

@@ -6,9 +6,12 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
-const MAX_RECOVERY_JOBS: usize = 512;
-const MAX_LIST_JOBS: usize = 200;
+// One fixed-weight production run may contain 5,000 labels. Recovery and the
+// operator's unresolved list must therefore be able to represent the whole run.
+const MAX_RECOVERY_JOBS: usize = 5_000;
+const MAX_LIST_JOBS: usize = 5_000;
 const RETENTION_MS: i64 = 30 * 24 * 60 * 60 * 1_000;
+const MAX_REPLAY_JSON_BYTES: usize = 16 * 1024 * 1024;
 
 const VALID_STATES: [&str; 7] = [
     "queued",
@@ -148,8 +151,26 @@ impl DurablePrintStore {
         fingerprint: u64,
         action: &JobAction,
     ) -> Result<PrepareOutcome, String> {
+        self.prepare_with_replay(config, physical_key, fingerprint, action, None)
+    }
+
+    pub(super) fn prepare_with_replay(
+        &self,
+        config: &PrinterDeviceConfig,
+        physical_key: &str,
+        fingerprint: u64,
+        action: &JobAction,
+        replay_json: Option<&str>,
+    ) -> Result<PrepareOutcome, String> {
         let connection = self.lock()?;
-        Self::prepare_on_connection(&connection, config, physical_key, fingerprint, action)
+        Self::prepare_on_connection_with_replay(
+            &connection,
+            config,
+            physical_key,
+            fingerprint,
+            action,
+            replay_json,
+        )
     }
 
     // The caller's business transaction owns this INSERT; never acquire our connection here.
@@ -160,6 +181,29 @@ impl DurablePrintStore {
         fingerprint: u64,
         action: &JobAction,
     ) -> Result<PrepareOutcome, String> {
+        Self::prepare_on_connection_with_replay(
+            connection,
+            config,
+            physical_key,
+            fingerprint,
+            action,
+            None,
+        )
+    }
+
+    pub(super) fn prepare_on_connection_with_replay(
+        connection: &Connection,
+        config: &PrinterDeviceConfig,
+        physical_key: &str,
+        fingerprint: u64,
+        action: &JobAction,
+        replay_json: Option<&str>,
+    ) -> Result<PrepareOutcome, String> {
+        if replay_json.is_some_and(|value| value.len() > MAX_REPLAY_JSON_BYTES) {
+            return Err(format!(
+                "last-print replay data exceeds {MAX_REPLAY_JSON_BYTES} bytes"
+            ));
+        }
         let fingerprint = format!("{fingerprint:016X}");
         if let Some(key) = config.job_idempotency_key.as_deref() {
             let existing = connection
@@ -228,8 +272,8 @@ impl DurablePrintStore {
                 "INSERT INTO printer_delivery_jobs (
                     job_id, state, printer_id, printer_name, physical_key, protocol, connection,
                     idempotency_key, fingerprint, config_json, action_kind, action_json, payload,
-                    payload_bytes, attempt_count, created_at_ms, updated_at_ms
-                 ) VALUES (?1, 'queued', ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 0, ?14, ?14)",
+                    payload_bytes, attempt_count, created_at_ms, updated_at_ms, replay_json
+                 ) VALUES (?1, 'queued', ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 0, ?14, ?14, ?15)",
                 params![
                     job_id,
                     config.id,
@@ -245,6 +289,7 @@ impl DurablePrintStore {
                     payload,
                     payload.len() as i64,
                     now,
+                    replay_json,
                 ],
             )
             .map_err(db_error("insert durable print job"))?;
@@ -289,6 +334,15 @@ impl DurablePrintStore {
                 params![unix_ms(), job_id],
             )
             .map_err(db_error("queue durable retry"))?;
+        if state == "cancelled" && table_exists(&transaction, "pack")? {
+            transaction
+                .execute(
+                    "UPDATE pack SET status = 'Pending', deleted_at = NULL \
+                     WHERE delivery_job_id = ?1 AND status = 'Deleted'",
+                    params![job_id],
+                )
+                .map_err(db_error("restore linked pack for delivery retry"))?;
+        }
         let job = load_stored_job(&transaction, job_id)?;
         transaction
             .commit()
@@ -298,8 +352,11 @@ impl DurablePrintStore {
 
     pub(super) fn cancel(&self, job_id: &str) -> Result<DurablePrintJobRecord, String> {
         validate_job_id(job_id)?;
-        let connection = self.lock()?;
-        let changed = connection
+        let mut connection = self.lock()?;
+        let transaction = connection
+            .transaction()
+            .map_err(db_error("begin durable cancellation"))?;
+        let changed = transaction
             .execute(
                 "UPDATE printer_delivery_jobs SET state = 'cancelled', updated_at_ms = ?1, \
                  last_error = 'cancelled by operator' \
@@ -308,7 +365,7 @@ impl DurablePrintStore {
             )
             .map_err(db_error("cancel durable print job"))?;
         if changed == 0 {
-            let state = connection
+            let state = transaction
                 .query_row(
                     "SELECT state FROM printer_delivery_jobs WHERE job_id = ?1",
                     params![job_id],
@@ -323,7 +380,21 @@ impl DurablePrintStore {
                 None => format!("durable print job not found: {job_id}"),
             });
         }
-        load_record(&connection, job_id)
+        if table_exists(&transaction, "pack")? {
+            transaction
+                .execute(
+                    "UPDATE pack SET status = 'Deleted', \
+                     deleted_at = strftime('%Y-%m-%d %H:%M:%f','now') \
+                     WHERE delivery_job_id = ?1 AND status = 'Pending'",
+                    params![job_id],
+                )
+                .map_err(db_error("soft-delete pack after delivery cancellation"))?;
+        }
+        let record = load_record(&transaction, job_id)?;
+        transaction
+            .commit()
+            .map_err(db_error("commit durable cancellation"))?;
+        Ok(record)
     }
 
     pub(super) fn mark_sending(&self, job_id: &str) -> Result<bool, String> {
@@ -360,8 +431,11 @@ impl DurablePrintStore {
         let receipt_json = serde_json::to_string(receipt)
             .map_err(|error| format!("encode durable receipt: {error}"))?;
         let now = unix_ms();
-        let changed = self
-            .lock()?
+        let mut connection = self.lock()?;
+        let transaction = connection
+            .transaction()
+            .map_err(db_error("begin durable acceptance"))?;
+        let changed = transaction
             .execute(
                 "UPDATE printer_delivery_jobs SET state = 'accepted', updated_at_ms = ?1, \
                  accepted_at_ms = ?1, last_error = NULL, receipt_json = ?2 \
@@ -369,15 +443,95 @@ impl DurablePrintStore {
                 params![now, receipt_json, job_id],
             )
             .map_err(db_error("mark durable print job accepted"))?;
-        self.expect_one_transition(job_id, changed, "sending", "accepted")
+        self.expect_one_transition(job_id, changed, "sending", "accepted")?;
+        if table_exists(&transaction, "pack")? {
+            transaction
+                .execute(
+                    "UPDATE pack SET status = 'Printed' WHERE delivery_job_id = ?1 AND status = 'Pending'",
+                    params![job_id],
+                )
+                .map_err(db_error("promote accepted pack to Printed"))?;
+        }
+        let replay_json = transaction
+            .query_row(
+                "SELECT replay_json FROM printer_delivery_jobs WHERE job_id = ?1",
+                params![job_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .map_err(db_error("load accepted last-print replay"))?;
+        if let Some(replay_json) = replay_json {
+            transaction
+                .execute(
+                    "INSERT INTO native_last_print(singleton, source_job_id, replay_json, accepted_at_ms) \
+                     VALUES(1, ?1, ?2, ?3) \
+                     ON CONFLICT(singleton) DO UPDATE SET \
+                       source_job_id=excluded.source_job_id, \
+                       replay_json=excluded.replay_json, \
+                       accepted_at_ms=excluded.accepted_at_ms",
+                    params![job_id, replay_json, now],
+                )
+                .map_err(db_error("promote accepted last-print replay"))?;
+        }
+        transaction
+            .commit()
+            .map_err(db_error("commit durable acceptance"))
+    }
+
+    pub(super) fn last_replay_json(&self) -> Result<Option<String>, String> {
+        self.lock()?
+            .query_row(
+                "SELECT replay_json FROM native_last_print WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(db_error("load native last-print replay"))
+    }
+
+    pub(super) fn migrate_legacy_replay(&self, replay_json: &str) -> Result<(), String> {
+        if replay_json.len() > MAX_REPLAY_JSON_BYTES {
+            return Err(format!(
+                "legacy last-print replay data exceeds {MAX_REPLAY_JSON_BYTES} bytes"
+            ));
+        }
+        self.lock()?
+            .execute(
+                "INSERT OR IGNORE INTO native_last_print(\
+                   singleton, source_job_id, replay_json, accepted_at_ms\
+                 ) VALUES(1, 'legacy-json', ?1, ?2)",
+                params![replay_json, unix_ms()],
+            )
+            .map(|_| ())
+            .map_err(db_error("migrate legacy last-print replay"))
+    }
+
+    pub(super) fn clear_last_replay(&self) -> Result<(), String> {
+        self.lock()?
+            .execute("DELETE FROM native_last_print WHERE singleton = 1", [])
+            .map(|_| ())
+            .map_err(db_error("clear native last-print replay"))
     }
 
     pub(super) fn mark_uncertain(&self, job_id: &str, error: &str) -> Result<(), String> {
         self.mark_terminal_error(job_id, "uncertain", error, &["sending"])
     }
 
+    pub(super) fn mark_retry_queued(&self, job_id: &str, error: &str) -> Result<(), String> {
+        let changed = self
+            .lock()?
+            .execute(
+                "UPDATE printer_delivery_jobs SET state = 'queued', updated_at_ms = ?1, \
+                 last_error = ?2 WHERE job_id = ?3 AND state = 'sending'",
+                params![unix_ms(), bounded_error(error), job_id],
+            )
+            .map_err(db_error(
+                "requeue durable print job after unstarted delivery",
+            ))?;
+        self.expect_one_transition(job_id, changed, "sending", "queued")
+    }
+
     pub(super) fn mark_failed(&self, job_id: &str, error: &str) -> Result<(), String> {
-        self.mark_terminal_error(job_id, "failed", error, &["queued"])
+        self.mark_terminal_error(job_id, "failed", error, &["queued", "sending"])
     }
 
     fn mark_terminal_error(
@@ -537,7 +691,14 @@ fn initialize_schema(connection: &Connection) -> Result<(), String> {
                 updated_at_ms INTEGER NOT NULL,
                 accepted_at_ms INTEGER,
                 last_error TEXT,
-                receipt_json TEXT
+                receipt_json TEXT,
+                replay_json TEXT
+            );
+            CREATE TABLE IF NOT EXISTS native_last_print (
+                singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+                source_job_id TEXT NOT NULL,
+                replay_json TEXT NOT NULL,
+                accepted_at_ms INTEGER NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_printer_delivery_state_created
                 ON printer_delivery_jobs(state, created_at_ms DESC);
@@ -545,18 +706,70 @@ fn initialize_schema(connection: &Connection) -> Result<(), String> {
                 ON printer_delivery_jobs(physical_key, idempotency_key, created_at_ms DESC);
             "#,
         )
-        .map_err(db_error("initialize durable print schema"))
+        .map_err(db_error("initialize durable print schema"))?;
+    ensure_replay_column(connection)
+}
+
+fn ensure_replay_column(connection: &Connection) -> Result<(), String> {
+    let mut statement = connection
+        .prepare("PRAGMA table_info(printer_delivery_jobs)")
+        .map_err(db_error("inspect durable print schema"))?;
+    let columns = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(db_error("query durable print schema"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(db_error("decode durable print schema"))?;
+    drop(statement);
+    if !columns.iter().any(|column| column == "replay_json") {
+        connection
+            .execute(
+                "ALTER TABLE printer_delivery_jobs ADD COLUMN replay_json TEXT",
+                [],
+            )
+            .map_err(db_error("add last-print replay column"))?;
+    }
+    Ok(())
 }
 
 fn prune(connection: &mut Connection, now: i64) -> Result<(), String> {
+    let cutoff = now.saturating_sub(RETENTION_MS);
+    let has_pack_table = table_exists(connection, "pack")?;
+    if has_pack_table {
+        connection
+            .execute(
+                "UPDATE pack SET delivery_job_id = NULL \
+                 WHERE status != 'Pending' AND delivery_job_id IN ( \
+                   SELECT job_id FROM printer_delivery_jobs WHERE updated_at_ms < ?1 \
+                   AND state IN ('accepted', 'failed', 'cancelled') \
+                 )",
+                params![cutoff],
+            )
+            .map_err(db_error("release terminal pack delivery links"))?;
+    }
+    let delete_sql = if has_pack_table {
+        "DELETE FROM printer_delivery_jobs WHERE updated_at_ms < ?1 \
+         AND state IN ('accepted', 'failed', 'cancelled') \
+         AND NOT EXISTS (SELECT 1 FROM pack \
+           WHERE pack.delivery_job_id = printer_delivery_jobs.job_id \
+           AND pack.status = 'Pending')"
+    } else {
+        "DELETE FROM printer_delivery_jobs WHERE updated_at_ms < ?1 \
+         AND state IN ('accepted', 'failed', 'cancelled')"
+    };
     connection
-        .execute(
-            "DELETE FROM printer_delivery_jobs WHERE updated_at_ms < ?1 \
-             AND state IN ('accepted', 'failed', 'cancelled')",
-            params![now.saturating_sub(RETENTION_MS)],
-        )
+        .execute(delete_sql, params![cutoff])
         .map_err(db_error("prune durable print history"))?;
     Ok(())
+}
+
+fn table_exists(connection: &Connection, table: &str) -> Result<bool, String> {
+    connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+            params![table],
+            |row| row.get(0),
+        )
+        .map_err(db_error("check durable companion table"))
 }
 
 fn encode_action(action: &JobAction) -> Result<(&'static str, &[u8], String), String> {
@@ -832,6 +1045,72 @@ mod tests {
     }
 
     #[test]
+    fn replay_is_promoted_only_by_an_accepted_job() {
+        let store = DurablePrintStore::in_memory().unwrap();
+        let config = config(None);
+        let first_action = JobAction::Print(b"FIRST".to_vec());
+        let first_job = match store
+            .prepare_with_replay(
+                &config,
+                &config.physical_key(),
+                super::super::action_fingerprint(&first_action),
+                &first_action,
+                Some(r#"{"number":"first"}"#),
+            )
+            .unwrap()
+        {
+            PrepareOutcome::New(job_id) => job_id,
+            _ => unreachable!(),
+        };
+        assert_eq!(store.last_replay_json().unwrap(), None);
+        assert!(store.mark_sending(&first_job).unwrap());
+        let receipt = PrintReceipt {
+            printer_id: config.id.clone(),
+            physical_key: config.physical_key(),
+            bytes: 5,
+            queue_ms: 0,
+            send_ms: 1,
+            attempts: 1,
+            reused_connection: false,
+            delivery_state: "transport-accepted".to_owned(),
+            confirmation_mode: "transport-write".to_owned(),
+            idempotency_key: None,
+            deduplicated: false,
+            durable_job_id: Some(first_job.clone()),
+            durable_state: Some("accepted".to_owned()),
+            status_report: None,
+        };
+        store.mark_accepted(&first_job, &receipt).unwrap();
+        assert_eq!(
+            store.last_replay_json().unwrap().as_deref(),
+            Some(r#"{"number":"first"}"#)
+        );
+
+        let second_action = JobAction::Print(b"SECOND".to_vec());
+        let second_job = match store
+            .prepare_with_replay(
+                &config,
+                &config.physical_key(),
+                super::super::action_fingerprint(&second_action),
+                &second_action,
+                Some(r#"{"number":"second"}"#),
+            )
+            .unwrap()
+        {
+            PrepareOutcome::New(job_id) => job_id,
+            _ => unreachable!(),
+        };
+        assert!(store.mark_sending(&second_job).unwrap());
+        store
+            .mark_uncertain(&second_job, "injected timeout")
+            .unwrap();
+        assert_eq!(
+            store.last_replay_json().unwrap().as_deref(),
+            Some(r#"{"number":"first"}"#)
+        );
+    }
+
+    #[test]
     fn reopening_marks_inflight_uncertain_and_keeps_accepted_idempotency() {
         let path =
             std::env::temp_dir().join(format!("labelpilot-durable-{}.sqlite3", Uuid::new_v4()));
@@ -890,5 +1169,36 @@ mod tests {
         assert!(store.mark_sending(&job_id).unwrap());
         store.mark_uncertain(&job_id, "write timed out").unwrap();
         assert_eq!(store.summary().unwrap().uncertain, 1);
+    }
+
+    #[test]
+    fn unstarted_attempt_can_be_requeued_and_exhausted_as_failed() {
+        let store = DurablePrintStore::in_memory().unwrap();
+        let config = config(None);
+        let action = JobAction::Print(b"LABEL".to_vec());
+        let job_id = match store
+            .prepare(
+                &config,
+                &config.physical_key(),
+                super::super::action_fingerprint(&action),
+                &action,
+            )
+            .unwrap()
+        {
+            PrepareOutcome::New(job_id) => job_id,
+            _ => unreachable!(),
+        };
+        assert!(store.mark_sending(&job_id).unwrap());
+        store
+            .mark_retry_queued(&job_id, "connection refused")
+            .unwrap();
+        let queued = store.list(Some("queued"), Some(1)).unwrap();
+        assert_eq!(queued[0].attempt_count, 1);
+        assert_eq!(queued[0].last_error.as_deref(), Some("connection refused"));
+        assert!(store.mark_sending(&job_id).unwrap());
+        store.mark_failed(&job_id, "retry limit reached").unwrap();
+        let failed = store.list(Some("failed"), Some(1)).unwrap();
+        assert_eq!(failed[0].attempt_count, 2);
+        assert_eq!(store.summary().unwrap().uncertain, 0);
     }
 }

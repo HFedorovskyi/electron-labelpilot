@@ -2,9 +2,13 @@ import { useState } from 'react';
 import { useTranslation } from '../i18n';
 import { Printer, Network, Usb, Monitor, RefreshCw, Activity, Search, ChevronDown } from 'lucide-react';
 import {
+    effectiveSerialBaudRate,
+    effectiveSerialFlowControl,
+    effectiveZplGraphicEncoding,
     resolvePrinterProfile,
     type PrinterCompatibilityMode,
     type PrinterProfileId,
+    type ZplGraphicEncoding,
 } from '../../shared/printerProfiles';
 
 // Replicating types from main/config.ts since we can't import directly from main in renderer easily without shared types
@@ -22,11 +26,14 @@ interface PrinterCapabilityReport {
     manufacturer?: string;
     model?: string;
     firmware?: string;
+    linkOsVersion?: string;
     dpi?: 203 | 300 | 600;
     dotsPerMm?: number;
     status: DeviceOperationalStatus;
     statusDetails: string[];
     supportsBidirectionalStatus: boolean;
+    supportsUtf8Text?: boolean;
+    supportsZ64?: boolean;
     recommendedProfileId?: PrinterProfileId;
     endpointKey?: string;
     evidence: string[];
@@ -48,6 +55,9 @@ export interface PrinterDeviceConfig {
     port?: number;
     serialPort?: string;
     baudRate?: number;
+    flowControl?: 'none' | 'hardware' | 'software';
+    parity?: 'none' | 'even' | 'odd';
+    dataBits?: 5 | 6 | 7 | 8;
     driverName?: string;
 
     // UI only
@@ -56,7 +66,10 @@ export interface PrinterDeviceConfig {
     gapMm?: number; // TSPL die-cut label gap; 0 = continuous stock
     dpi?: number; // 203 | 300 | 600
     ramCache?: 'auto' | 'on' | 'off'; // image protocol: printer RAM-drive background caching
-    z64?: boolean;                    // image protocol: Z64 (zlib) graphic encoding vs hex RLE
+    zplCompression?: ZplGraphicEncoding;
+    z64?: boolean;                    // legacy two-state setting; zplCompression takes precedence
+    batchStatusPolling?: boolean;
+    confirmedPrint?: boolean;
 }
 
 interface PrinterSettingsProps {
@@ -97,8 +110,18 @@ const PrinterSettings = ({
             window.desktopBridge.send('log-to-main', { message: `[PrinterSettings] Updating ${field}`, data: value });
         }
         const next = { ...config, [field]: value } as PrinterDeviceConfig;
-        if (['connection', 'protocol', 'ip', 'port', 'serialPort', 'baudRate', 'driverName'].includes(field)) {
+        if (field === 'connection' && value === 'serial' && config.connection !== 'serial') {
+            next.baudRate = 115200;
+            next.flowControl = 'hardware';
+            next.parity = 'none';
+            next.dataBits = 8;
+        }
+        if (['connection', 'protocol', 'ip', 'port', 'serialPort', 'baudRate', 'flowControl', 'parity', 'dataBits', 'driverName'].includes(field)) {
             setCapabilities(null);
+            if (config.detectedProfileId === 'zpl-full' && effectiveZplGraphicEncoding(config) === 'z64') {
+                next.zplCompression = 'none';
+                next.z64 = false;
+            }
             delete next.detectedProfileId;
             delete next.detectedEndpointKey;
             delete next.detectedProfileAt;
@@ -107,6 +130,7 @@ const PrinterSettings = ({
     };
 
     const effectiveProfile = resolvePrinterProfile(config);
+    const effectiveGraphicEncoding = effectiveZplGraphicEncoding(config);
     const connectionLabel = config.connection === 'tcp'
         ? 'Ethernet'
         : config.connection === 'serial'
@@ -115,7 +139,7 @@ const PrinterSettings = ({
     const endpointLabel = config.connection === 'tcp'
         ? `${config.ip || '?'}:${config.port || 9100}`
         : config.connection === 'serial'
-            ? `${config.serialPort || '?'} ? ${config.baudRate || 9600}`
+            ? `${config.serialPort || '?'} · ${effectiveSerialBaudRate(config)} · ${config.dataBits ?? 8}${(config.parity ?? 'none').charAt(0).toUpperCase()}1 · ${effectiveSerialFlowControl(config) === 'hardware' ? 'RTS/CTS' : effectiveSerialFlowControl(config) === 'software' ? 'XON/XOFF' : 'no flow'}`
             : (config.driverName || t('settings.systemDefault'));
     const protocolLabel = config.protocol === 'image'
         ? 'ZPL bitmap'
@@ -156,6 +180,7 @@ const PrinterSettings = ({
                 ...config,
                 protocol: detectedProtocol,
                 ...(report.dpi ? { dpi: report.dpi } : {}),
+                ...(report.supportsZ64 ? { zplCompression: 'z64' as const, z64: true } : {}),
                 ...(report.recommendedProfileId && report.endpointKey ? {
                     detectedProfileId: report.recommendedProfileId,
                     detectedEndpointKey: report.endpointKey,
@@ -346,13 +371,47 @@ const PrinterSettings = ({
                                         <div>
                                             <label className="block text-sm text-neutral-600 dark:text-neutral-400 mb-2">{t('settings.baudRate')}</label>
                                             <select
-                                                value={config.baudRate || 9600}
+                                                value={effectiveSerialBaudRate(config)}
                                                 onChange={(e) => update('baudRate', Number(e.target.value))}
                                                 className="min-h-12 w-full bg-white dark:bg-black/30 border border-neutral-200 dark:border-neutral-600 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"
                                             >
                                                 {[9600, 19200, 38400, 57600, 115200].map(rate => (
                                                     <option key={rate} value={rate}>{rate}</option>
                                                 ))}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm text-neutral-600 dark:text-neutral-400 mb-2">{t('settings.flowControl')}</label>
+                                            <select
+                                                value={effectiveSerialFlowControl(config)}
+                                                onChange={(e) => update('flowControl', e.target.value)}
+                                                className="min-h-12 w-full bg-white dark:bg-black/30 border border-neutral-200 dark:border-neutral-600 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+                                            >
+                                                <option value="hardware">RTS/CTS</option>
+                                                <option value="software">XON/XOFF</option>
+                                                <option value="none">{t('settings.flowControlNone')}</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm text-neutral-600 dark:text-neutral-400 mb-2">{t('settings.parity')}</label>
+                                            <select
+                                                value={config.parity ?? 'none'}
+                                                onChange={(e) => update('parity', e.target.value)}
+                                                className="min-h-12 w-full bg-white dark:bg-black/30 border border-neutral-200 dark:border-neutral-600 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+                                            >
+                                                <option value="none">{t('settings.parityNone')}</option>
+                                                <option value="even">Even</option>
+                                                <option value="odd">Odd</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm text-neutral-600 dark:text-neutral-400 mb-2">{t('settings.dataBits')}</label>
+                                            <select
+                                                value={config.dataBits ?? 8}
+                                                onChange={(e) => update('dataBits', Number(e.target.value))}
+                                                className="min-h-12 w-full bg-white dark:bg-black/30 border border-neutral-200 dark:border-neutral-600 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+                                            >
+                                                {[5, 6, 7, 8].map(bits => <option key={bits} value={bits}>{bits}</option>)}
                                             </select>
                                         </div>
                                     </div>
@@ -480,13 +539,29 @@ const PrinterSettings = ({
                             )}
                         </div>
 
-                        {config.protocol === 'image' && (
+                        {(['zpl', 'image', 'tspl'] as PrinterProtocol[]).includes(config.protocol)
+                            && (config.connection === 'tcp' || config.connection === 'serial') && (
+                            <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border border-neutral-200 bg-neutral-50 p-4 dark:border-neutral-700 dark:bg-neutral-800/60">
+                                <input
+                                    type="checkbox"
+                                    checked={config.confirmedPrint === true}
+                                    onChange={(event) => update('confirmedPrint', event.target.checked)}
+                                    className="mt-1 h-5 w-5 accent-emerald-600"
+                                />
+                                <span>
+                                    <span className="block text-sm font-semibold">{t('settings.confirmedPrint')}</span>
+                                    <span className="mt-1 block text-xs text-neutral-500 dark:text-neutral-400">{t('settings.confirmedPrintHint')}</span>
+                                </span>
+                            </label>
+                        )}
+
+                        {(config.protocol === 'image' || config.protocol === 'zpl') && (
                             <div className="mt-4 border-t border-neutral-200 dark:border-neutral-700 pt-4">
                                 <h4 className="mb-3 text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
                                     {t('settings.printerSectionGraphics')}
                                 </h4>
                                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                                    <div>
+                                    {config.protocol === 'image' && <div>
                                         <label className="block text-sm text-neutral-600 dark:text-neutral-400 mb-2">{t('settings.ramCacheLabel')}</label>
                                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                                             {([
@@ -507,20 +582,25 @@ const PrinterSettings = ({
                                                 </button>
                                             ))}
                                         </div>
-                                    </div>
+                                    </div>}
 
                                     <div>
                                         <label className="block text-sm text-neutral-600 dark:text-neutral-400 mb-2">{t('settings.gfEncodingLabel')}</label>
-                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                                             {([
-                                                { id: false, label: t('settings.gfEncodingRle') },
-                                                { id: true, label: t('settings.gfEncodingZ64') },
+                                                { id: 'none', label: t('settings.gfEncodingNone') },
+                                                { id: 'ascii-rle', label: t('settings.gfEncodingRle') },
+                                                { id: 'z64', label: t('settings.gfEncodingZ64') },
                                             ] as const).map((encoding) => (
                                                 <button
                                                     type="button"
-                                                    key={String(encoding.id)}
-                                                    onClick={() => update('z64', encoding.id)}
-                                                    className={`min-h-12 p-3 rounded-xl border transition-colors duration-150 ${!!config.z64 === encoding.id
+                                                    key={encoding.id}
+                                                    onClick={() => onChange({
+                                                        ...config,
+                                                        zplCompression: encoding.id,
+                                                        z64: encoding.id === 'z64',
+                                                    })}
+                                                    className={`min-h-12 p-3 rounded-xl border transition-colors duration-150 ${effectiveGraphicEncoding === encoding.id
                                                         ? 'bg-emerald-50 dark:bg-emerald-500/15 border-emerald-400 dark:border-emerald-500/50 text-emerald-800 dark:text-emerald-200 ring-1 ring-emerald-200/70 dark:ring-emerald-500/20'
                                                         : 'bg-neutral-50 dark:bg-neutral-700/70 border-neutral-200 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700'
                                                         }`}

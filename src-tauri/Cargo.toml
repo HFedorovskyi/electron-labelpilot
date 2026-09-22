@@ -1,5 +1,6 @@
 [package]
 name = "labelpilot-tauri"
+default-run = "labelpilot-tauri"
 version = "2.0.5"
 description = "Parallel Rust desktop runtime for LabelPilot"
 edition = "2021"
@@ -38,6 +39,10 @@ required-features = ["slint-ui"]
 name = "settings_ui_probe"
 required-features = ["slint-ui"]
 
+[[example]]
+name = "zpl_emulator_probe"
+required-features = ["slint-ui"]
+
 [build-dependencies]
 tauri-winres = { version = "0.3.6", optional = true }
 tauri-build = { version = "2.6.3", features = [], optional = true }
@@ -49,6 +54,7 @@ aes = "0.8.4"
 base64 = "0.22.1"
 cbc = { version = "0.1.2", features = ["alloc"] }
 ed25519-dalek = "2.2.0"
+flate2 = "1.1.9"
 getrandom = "0.4.3"
 hkdf = "0.12.4"
 hmac = "0.12.1"
@@ -63,7 +69,8 @@ rxing = { version = "=0.9.2", default-features = false, features = ["encoders", 
 regex = "1.13.1"
 semver = "1.0.27"
 serialport = { version = "4", default-features = false }
-rusqlite = { version = "0.40.2", features = ["bundled"] }
+socket2 = { version = "0.6.5", features = ["all"] }
+rusqlite = { version = "0.40.2", features = ["bundled", "backup"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 slint = { version = "1.17.1", optional = true, default-features = false, features = ["std", "backend-winit", "renderer-skia-opengl", "renderer-femtovg", "compat-1-2"] }

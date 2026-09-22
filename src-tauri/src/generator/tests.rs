@@ -250,6 +250,46 @@ fn tspl_routes_complex_content_to_existing_bitmap_backend() {
 }
 
 #[test]
+fn generic_tspl_uses_legacy_text_syntax_and_rasterizes_alignment() {
+    let state = GeneratorState::default();
+    let config = serde_json::json!({
+        "protocol":"tspl",
+        "compatibilityMode":"compatible",
+        "dpi":203
+    });
+    let plain = serde_json::json!({
+        "widthMm":58,
+        "heightMm":40,
+        "canvas":{"width":400,"height":300},
+        "elements":[{
+            "id":"plain","type":"text","x":8,"y":9,"w":120,"h":20,
+            "fontSize":12,"text":"LEGACY"
+        }]
+    });
+    let generated = state
+        .generate(payload(config.clone(), plain, serde_json::json!({})))
+        .unwrap();
+    let stream = String::from_utf8(generated.bytes).unwrap();
+    assert!(stream.contains("TEXT 9,10,\"0\",0,9,9,\"LEGACY\"\r\n"));
+    assert!(!stream.contains("9,9,1,\"LEGACY\""));
+
+    let centered = serde_json::json!({
+        "widthMm":58,
+        "heightMm":40,
+        "canvas":{"width":400,"height":300},
+        "elements":[{
+            "id":"centered","type":"text","x":8,"y":9,"w":120,"h":20,
+            "fontSize":12,"textAlign":"center","text":"LEGACY"
+        }]
+    });
+    let request = payload(config, centered, serde_json::json!({}));
+    let plan = state.plan(&request).unwrap();
+    assert!(!plan.native_eligible);
+    assert_eq!(plan.reasons, ["centered:legacy-text-alignment"]);
+    assert!(state.generate_if_native(&request).unwrap().is_none());
+}
+
+#[test]
 fn summary_exposes_weak_device_bounds() {
     let state = GeneratorState::default();
     let summary = state.summary();
