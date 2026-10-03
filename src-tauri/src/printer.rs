@@ -319,10 +319,11 @@ impl PrinterDeviceConfig {
         }
         if config.confirmed_print
             && (!matches!(config.connection.as_str(), "tcp" | "serial")
-                || !matches!(config.protocol.as_str(), "zpl" | "image" | "tspl"))
+                || !matches!(config.protocol.as_str(), "zpl" | "image" | "tspl" | "dpl"))
         {
             return Err(
-                "confirmedPrint requires a TCP/serial ZPL, image-ZPL, or TSPL printer".to_owned(),
+                "confirmedPrint requires a TCP/serial ZPL, image-ZPL, TSPL, or DPL printer"
+                    .to_owned(),
             );
         }
         Ok(config)
@@ -2227,6 +2228,8 @@ fn print_confirmation_complete(
     Ok(match config.protocol.as_str() {
         "zpl" | "image" => report.queued_formats == Some(0),
         "tspl" => report.status == "ready",
+        // A peel-mode printer presents the finished label and waits for removal.
+        "dpl" => matches!(report.status.as_str(), "ready" | "label-presented"),
         _ => false,
     })
 }
@@ -2722,8 +2725,23 @@ mod tests {
             print_confirmation_complete(&zpl, &confirmation_report("paper-out", Some(0))).is_err()
         );
 
-        let invalid = serde_json::json!({
+        let dpl = PrinterDeviceConfig::from_value(serde_json::json!({
             "id":"confirmed-dpl", "connection":"tcp", "protocol":"dpl",
+            "ip":"127.0.0.1", "port":9100, "confirmedPrint":true
+        }))
+        .unwrap();
+        assert!(!print_confirmation_complete(&dpl, &confirmation_report("printing", None)).unwrap());
+        assert!(print_confirmation_complete(&dpl, &confirmation_report("ready", None)).unwrap());
+        assert!(
+            print_confirmation_complete(&dpl, &confirmation_report("label-presented", None))
+                .unwrap()
+        );
+        assert!(
+            print_confirmation_complete(&dpl, &confirmation_report("paper-out", None)).is_err()
+        );
+
+        let invalid = serde_json::json!({
+            "id":"confirmed-epl", "connection":"tcp", "protocol":"epl",
             "ip":"127.0.0.1", "port":9100, "confirmedPrint":true
         });
         assert!(PrinterDeviceConfig::from_value(invalid).is_err());

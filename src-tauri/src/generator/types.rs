@@ -46,6 +46,12 @@ pub(super) struct GenerationConfig {
     #[serde(default)]
     pub gap_mm: Option<f64>,
     #[serde(default)]
+    pub media_handling: Option<String>,
+    #[serde(default)]
+    pub media_sensor: Option<String>,
+    #[serde(default)]
+    pub print_method: Option<String>,
+    #[serde(default)]
     compatibility_mode: Option<String>,
     #[serde(default)]
     detected_profile_id: Option<String>,
@@ -69,6 +75,16 @@ pub(super) struct GenerationConfig {
     data_bits: Option<u8>,
     #[serde(default)]
     driver_name: Option<String>,
+}
+
+impl GenerationConfig {
+    pub(super) fn media(&self) -> super::media::MediaSettings<'_> {
+        super::media::MediaSettings {
+            handling: self.media_handling.as_deref(),
+            sensor: self.media_sensor.as_deref(),
+            method: self.print_method.as_deref(),
+        }
+    }
 }
 
 fn default_protocol() -> String {
@@ -315,6 +331,7 @@ impl ParsedInput {
             .ok_or_else(|| "label data must be an object".to_owned())?;
         validate_config(&config)?;
         validate_doc(&doc)?;
+        validate_gs1_barcodes(&doc, &data)?;
         let profile = resolve_profile(&config);
         Ok(Self {
             config,
@@ -496,6 +513,7 @@ fn validate_config(config: &GenerationConfig) -> Result<(), String> {
     ) {
         return Err(format!("unsupported printer protocol: {}", config.protocol));
     }
+    super::media::validate_media_settings(&config.protocol, config.media())?;
     if config
         .dpi
         .is_some_and(|dpi| !matches!(dpi, 203 | 300 | 600))
@@ -539,6 +557,31 @@ fn validate_config(config: &GenerationConfig) -> Result<(), String> {
     ] {
         if value.is_some_and(|value| !value.is_finite()) {
             return Err(format!("printer {name} must be finite"));
+        }
+    }
+    Ok(())
+}
+
+/// GS1 symbologies (and Code 128 carrying AIs) must hold a valid element
+/// string; a pack must not be recorded under a code retailers reject.
+fn validate_gs1_barcodes(doc: &LabelDoc, data: &Map<String, Value>) -> Result<(), String> {
+    for element in doc.elements.iter().filter(|element| element.kind == "barcode") {
+        let barcode = normalize_barcode(element.barcode_type.as_ref());
+        let value = interpolate(
+            element
+                .value
+                .as_deref()
+                .or(element.text.as_deref())
+                .unwrap_or(""),
+            data,
+        );
+        if value.is_empty() || value.contains("{{") {
+            continue;
+        }
+        let carries_ai = barcode == "code128" && needs_gs1_parse(&barcode, &value);
+        if crate::gs1::is_gs1_symbology(&barcode) || carries_ai {
+            crate::gs1::validate_element_string(&value)
+                .map_err(|error| format!("штрихкод «{}»: {error}", element.id))?;
         }
     }
     Ok(())

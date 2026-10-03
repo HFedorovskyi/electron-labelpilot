@@ -106,9 +106,10 @@ try {
     const bitmapMarker = Buffer.from('BITMAP 0,0,2,3,0,');
     const markerOffset = tspl.indexOf(bitmapMarker);
     assert.ok(markerOffset > 0);
+    // TSPL BITMAP uses 0 for a printed dot: canonical 1 = black is inverted.
     assert.deepEqual(
         tspl.subarray(markerOffset + bitmapMarker.length, markerOffset + bitmapMarker.length + sample.mono.length),
-        Buffer.from(sample.mono),
+        Buffer.from(Array.from(sample.mono, byte => byte ^ 0xff)),
     );
     assert.match(tspl.toString('latin1'), /PRINT 1,1\r\n$/);
 

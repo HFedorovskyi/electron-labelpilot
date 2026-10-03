@@ -4034,6 +4034,11 @@
     "Waage: Fehler",
     "Ваги: помилка"
   ],
+  "Весы: перегруз": [
+    "Scale: overload",
+    "Waage: Überlast",
+    "Ваги: перевантаження"
+  ],
   "Весы: подключение": [
     "Scale: connecting",
     "Waage: Verbindung wird hergestellt",

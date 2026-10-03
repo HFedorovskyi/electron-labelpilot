@@ -367,6 +367,8 @@ const WeighingStation = ({ activeTab }: { activeTab?: string }) => {
             // Skip weight updates while this station is hidden — avoids re-rendering an
             // off-screen component on every reading. Status/error listeners stay active.
             if (activeTabRef.current !== 'weighing') return;
+            // Overload is not a measurement: block printing, keep auto-print latched.
+            if (data && typeof data === 'object' && data.overload) { setIsStable(false); return; }
             if (data && typeof data === 'object' && 'weight' in data) {
                 const w = typeof data.weight === 'number' ? data.weight : parseFloat(String(data.weight));
                 console.log(`[WeighingStation] Event received: ${w.toFixed(3)} (stable: ${data.stable})`);

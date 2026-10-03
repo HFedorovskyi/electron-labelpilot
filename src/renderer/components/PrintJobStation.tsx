@@ -134,6 +134,8 @@ const PrintJobStation = (_props: { activeTab?: string }) => {
         // Scale listeners
         const removeScaleReading = window.desktopBridge.on('scale-reading', (data: any) => {
             if (activeTabRef.current !== 'printJob') return; // skip while hidden
+            // Overload is not a measurement: block printing, keep auto-print latched.
+            if (data && typeof data === 'object' && data.overload) { setIsStable(false); return; }
             if (data && typeof data === 'object' && 'weight' in data) {
                 const w = typeof data.weight === 'number' ? data.weight : parseFloat(String(data.weight));
                 setWeight(w.toFixed(3));

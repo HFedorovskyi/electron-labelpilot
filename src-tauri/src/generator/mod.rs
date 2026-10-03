@@ -1,6 +1,9 @@
+mod media;
 mod tspl;
 mod types;
 mod zpl;
+
+pub(crate) use media::{validate_media_settings, MediaSettings};
 
 #[cfg(feature = "slint-ui")]
 pub(crate) use zpl::barcode_requires_bitmap as zpl_barcode_requires_bitmap;

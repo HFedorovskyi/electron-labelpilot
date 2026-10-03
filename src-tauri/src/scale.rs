@@ -16,6 +16,7 @@ use tauri::AppHandle;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 const IO_TIMEOUT: Duration = Duration::from_millis(100);
 const WATCHDOG_TIMEOUT: Duration = Duration::from_secs(3);
+const WATCHDOG_RECONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const FRAME_IDLE_TIMEOUT: Duration = Duration::from_millis(25);
 const MAX_FRAME_BUFFER: usize = 64 * 1024;
 const READING_THROTTLE: Duration = Duration::from_millis(120);
@@ -57,6 +58,10 @@ pub struct ScaleConfig {
     pub polling_interval: u64,
     #[serde(default = "default_stability_count")]
     pub stability_count: usize,
+    /// Optional serial framing override such as "7E1" for an indicator that
+    /// was configured away from the protocol's factory framing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub serial_format: Option<String>,
 }
 
 impl ScaleConfig {
@@ -104,6 +109,13 @@ impl ScaleConfig {
                 return Err("scale baudRate must be in 300..3000000".to_owned());
             }
         }
+        if let Some(format) = config.serial_format.as_deref() {
+            if format.trim().is_empty() {
+                config.serial_format = None;
+            } else {
+                parse_serial_format(format)?;
+            }
+        }
         config.polling_interval = config.polling_interval.clamp(50, 60_000);
         config.stability_count = config.stability_count.clamp(2, 32);
         Ok(config)
@@ -137,6 +149,26 @@ pub struct ScaleReading {
     pub stable: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tare: Option<f64>,
+    /// The indicator reports overload/underload: the weight is not a valid
+    /// measurement and must never be printed or used to rearm auto-print.
+    #[serde(skip_serializing_if = "is_false")]
+    pub overload: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+impl ScaleReading {
+    fn overloaded() -> Self {
+        Self {
+            weight: 0.0,
+            unit: "kg",
+            stable: false,
+            tare: None,
+            overload: true,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -475,6 +507,23 @@ enum ParserKind {
     Generic,
 }
 
+impl ParserKind {
+    /// Parsers that decode an explicit stable/motion field of the frame
+    /// (not a heuristic). Their flag is trusted over the software detector.
+    fn reports_motion_flag(self) -> bool {
+        matches!(
+            self,
+            Self::Cas
+                | Self::Mettler
+                | Self::Massa100
+                | Self::MassaP1
+                | Self::MassaJ
+                | Self::AndStandard
+                | Self::DiniArgeo
+        )
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Framing {
     Lines,
@@ -482,7 +531,7 @@ enum Framing {
     MassaJ,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ProtocolParity {
     None,
     Even,
@@ -642,7 +691,8 @@ const PROTOCOLS: [Protocol; 20] = [
         description: "Стандартный ASCII-формат A&D (ST/US/OL) — A&D, Tscale и совместимые",
         polling_required: true,
         default_baud_rate: 2400,
-        parity: ProtocolParity::None,
+        // A&D indicators and balances ship with 7 data bits, even parity.
+        parity: ProtocolParity::Even,
         data_bits: 7,
         stop_bits: 1,
         parser: ParserKind::AndStandard,
@@ -753,6 +803,75 @@ fn protocol_by_id(id: &str) -> &'static Protocol {
         .unwrap_or_else(|| PROTOCOLS.last().expect("generic scale protocol"))
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct SerialFraming {
+    data_bits: u8,
+    parity: ProtocolParity,
+    stop_bits: u8,
+}
+
+impl SerialFraming {
+    fn for_config(config: &ScaleConfig, protocol: &Protocol) -> Result<Self, String> {
+        match config.serial_format.as_deref() {
+            Some(format) => parse_serial_format(format),
+            None => Ok(Self {
+                data_bits: protocol.data_bits,
+                parity: protocol.parity,
+                stop_bits: protocol.stop_bits,
+            }),
+        }
+    }
+
+    fn apply(self, builder: serialport::SerialPortBuilder) -> serialport::SerialPortBuilder {
+        builder
+            .flow_control(FlowControl::None)
+            .parity(match self.parity {
+                ProtocolParity::None => Parity::None,
+                ProtocolParity::Even => Parity::Even,
+                ProtocolParity::Odd => Parity::Odd,
+            })
+            .data_bits(match self.data_bits {
+                5 => DataBits::Five,
+                6 => DataBits::Six,
+                7 => DataBits::Seven,
+                _ => DataBits::Eight,
+            })
+            .stop_bits(if self.stop_bits == 2 {
+                StopBits::Two
+            } else {
+                StopBits::One
+            })
+    }
+
+    fn label(self) -> String {
+        let parity = match self.parity {
+            ProtocolParity::None => "N",
+            ProtocolParity::Even => "E",
+            ProtocolParity::Odd => "O",
+        };
+        format!("{}{}{}", self.data_bits, parity, self.stop_bits)
+    }
+}
+
+fn parse_serial_format(value: &str) -> Result<SerialFraming, String> {
+    let invalid = || format!("scale serialFormat must look like 8N1 or 7E1: {value}");
+    let bytes = value.trim().as_bytes();
+    let [data_bits @ b'5'..=b'8', parity, stop_bits @ (b'1' | b'2')] = bytes else {
+        return Err(invalid());
+    };
+    let parity = match parity.to_ascii_uppercase() {
+        b'N' => ProtocolParity::None,
+        b'E' => ProtocolParity::Even,
+        b'O' => ProtocolParity::Odd,
+        _ => return Err(invalid()),
+    };
+    Ok(SerialFraming {
+        data_bits: data_bits - b'0',
+        parity,
+        stop_bits: stop_bits - b'0',
+    })
+}
+
 impl Protocol {
     fn serial_format(self) -> String {
         let parity = match self.parity {
@@ -766,13 +885,17 @@ impl Protocol {
     fn weight_command(self) -> Option<Vec<u8>> {
         match self.parser {
             ParserKind::Cas => Some(b"W".to_vec()),
-            ParserKind::Mettler => Some(b"S\r\n".to_vec()),
+            ParserKind::Mettler => Some(b"SI\r\n".to_vec()),
             ParserKind::Massa100 => {
-                let data = [0x01, 0x00, 0xA0];
-                let crc = crc16(&data).to_le_bytes();
-                Some(vec![
-                    0xF8, 0x55, 0xCE, data[0], data[1], data[2], crc[0], crc[1],
-                ])
+                // CMD_GET_MASSA (0x23), body length 1; the CRC covers the body
+                // starting at the command byte ("Протокол 100", ред. 5, п. 6.2, 7.1).
+                let body = [MASSA_CMD_GET_MASSA];
+                let length = (body.len() as u16).to_le_bytes();
+                let crc = massa_crc16(&body).to_le_bytes();
+                let mut command = vec![0xF8, 0x55, 0xCE, length[0], length[1]];
+                command.extend_from_slice(&body);
+                command.extend_from_slice(&crc);
+                Some(command)
             }
             ParserKind::MassaP1 => Some(b"W\r\n".to_vec()),
             ParserKind::MassaLite => Some(vec![0x45]),
@@ -796,40 +919,25 @@ impl Protocol {
     }
 }
 
-fn crc16(data: &[u8]) -> u16 {
-    let mut crc = 0xFFFF_u16;
-    for byte in data {
-        crc ^= u16::from(*byte);
-        for _ in 0..8 {
-            crc = if crc & 1 != 0 {
-                (crc >> 1) ^ 0xA001
-            } else {
-                crc >> 1
-            };
-        }
-    }
-    crc
-}
-
 fn parse_protocol(protocol: &Protocol, data: &[u8]) -> Option<ScaleReading> {
     let reading = match protocol.parser {
         ParserKind::Cas => parse_cas(data),
         ParserKind::Mettler => parse_mettler(data),
         ParserKind::Massa100 => parse_massa_100(data),
         ParserKind::MassaP1 => parse_massa_p1(data),
-        ParserKind::MassaLite => parse_first_decimal(data, false, false),
+        ParserKind::MassaLite => parse_first_decimal(data, false, true),
         ParserKind::MassaAstb => parse_massa_astb(data),
         ParserKind::MassaContinuous | ParserKind::MassaAstbP => {
             parse_first_decimal(data, text(data).contains('S'), true)
         }
         ParserKind::MassaJ => parse_massa_j(data),
-        ParserKind::Shtrih => parse_first_decimal(data, false, false),
-        ParserKind::Mertech => parse_first_decimal(data, text(data).contains('S'), false),
+        ParserKind::Shtrih => parse_first_decimal(data, false, true),
+        ParserKind::Mertech => parse_first_decimal(data, text(data).contains('S'), true),
         ParserKind::AndStandard => parse_and_standard(data),
         ParserKind::Dibal => parse_dibal(data),
         ParserKind::CommonAscii => parse_common_ascii(data),
         ParserKind::DiniArgeo => parse_dini_argeo(data),
-        ParserKind::Generic => parse_first_decimal(data, false, false),
+        ParserKind::Generic => parse_first_decimal(data, false, true),
         ParserKind::Simulator => None,
     }?;
     normalize_reading_to_kg(reading)
@@ -867,19 +975,57 @@ fn parse_number(sign: &str, digits: &str) -> Option<f64> {
     value.is_finite().then_some(value)
 }
 
+fn first_weight_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| {
+        Regex::new(r"(?i)([+-]?)\s*(\d+\.\d+)\s*(?:(kg|g|lb|oz)\b)?").expect("weight regex")
+    })
+}
+
+/// An integer is accepted only with an explicit unit, so station numbers,
+/// counters or status codes in a frame are never mistaken for a weight.
+fn integer_weight_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| {
+        Regex::new(r"(?i)([+-]?)\s*(\d+)\s*(kg|g|lb|oz)\b").expect("integer weight regex")
+    })
+}
+
 fn parse_first_decimal(data: &[u8], stable: bool, signed: bool) -> Option<ScaleReading> {
     let value = text(data);
-    let capture = decimal_regex().captures(&value)?;
+    let capture = first_weight_regex()
+        .captures(&value)
+        .or_else(|| integer_weight_regex().captures(&value))?;
     let sign = if signed {
         capture.get(1).map_or("", |value| value.as_str())
     } else {
         ""
     };
+    let unit = match capture
+        .get(3)
+        .map(|unit| unit.as_str().to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("g") => "g",
+        Some("lb") => "lb",
+        Some("oz") => "oz",
+        _ => "kg",
+    };
     Some(ScaleReading {
         weight: parse_number(sign, capture.get(2)?.as_str())?,
-        unit: "kg",
+        unit,
         stable,
         tare: None,
+        overload: false,
+    })
+}
+
+fn starts_with_status(value: &str, statuses: &[&str]) -> bool {
+    let value = value.trim_start();
+    statuses.iter().any(|status| {
+        value
+            .get(..status.len())
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(status))
     })
 }
 
@@ -892,6 +1038,9 @@ fn cas_regex() -> &'static Regex {
 
 fn parse_cas(data: &[u8]) -> Option<ScaleReading> {
     let value = text(data);
+    if starts_with_status(&value, &["OL"]) {
+        return Some(ScaleReading::overloaded());
+    }
     let capture = cas_regex().captures(&value)?;
     let unit = match capture.get(4)?.as_str().to_ascii_lowercase().as_str() {
         "g" => "g",
@@ -903,12 +1052,16 @@ fn parse_cas(data: &[u8]) -> Option<ScaleReading> {
         unit,
         stable: capture.get(1)?.as_str() == "ST",
         tare: None,
+        overload: false,
     })
 }
 
 fn parse_mettler(data: &[u8]) -> Option<ScaleReading> {
     let value = text(data);
     let parts: Vec<&str> = value.split_whitespace().collect();
+    if parts.len() == 2 && parts[0] == "S" && matches!(parts[1], "+" | "-") {
+        return Some(ScaleReading::overloaded());
+    }
     if parts.len() < 3 || parts[0] != "S" || parts[1] == "I" {
         return None;
     }
@@ -926,24 +1079,71 @@ fn parse_mettler(data: &[u8]) -> Option<ScaleReading> {
         unit,
         stable: parts[1] == "S",
         tare: None,
+        overload: false,
     })
 }
 
+const MASSA_CMD_GET_MASSA: u8 = 0x23;
+const MASSA_CMD_ACK_MASSA: u8 = 0x24;
+const MASSA_CMD_ERROR: u8 = 0x28;
+const MASSA_ERROR_OVERLOAD: u8 = 0x08;
+
+/// Massa-K "Протокол 100": CMD_ACK_MASSA carries a signed net weight counted
+/// in the indicator's division (0 – 100 mg, 1 – 1 g, 2 – 10 g, 3 – 100 g,
+/// 4 – 1 kg), a stability flag and NET/zero flags; CMD_ERROR 0x08 means the
+/// load exceeds the maximum capacity. The response CRC is not enforced until
+/// it is confirmed on a device (docs/HARDWARE_VERIFICATION.md, S-P07).
 fn parse_massa_100(data: &[u8]) -> Option<ScaleReading> {
     let header = data
         .windows(3)
         .position(|window| window == [0xF8, 0x55, 0xCE])?;
     let packet = data.get(header..)?;
-    if packet.len() < 14 {
-        return None;
+    let length = usize::from(u16::from_le_bytes([*packet.get(3)?, *packet.get(4)?]));
+    let body = packet.get(5..5 + length)?;
+    match *body.first()? {
+        MASSA_CMD_ACK_MASSA if body.len() >= 9 => {
+            let raw = i32::from_le_bytes(body[1..5].try_into().ok()?);
+            let weight = match body[5] {
+                0 => f64::from(raw) / 10_000.0,
+                1 => f64::from(raw) / 1_000.0,
+                2 => f64::from(raw) / 100.0,
+                3 => f64::from(raw) / 10.0,
+                4 => f64::from(raw),
+                _ => return None,
+            };
+            Some(ScaleReading {
+                weight,
+                unit: "kg",
+                stable: body[6] == 1,
+                tare: None,
+                overload: false,
+            })
+        }
+        MASSA_CMD_ERROR if body.get(1) == Some(&MASSA_ERROR_OVERLOAD) => {
+            Some(ScaleReading::overloaded())
+        }
+        _ => None,
     }
-    let raw = i32::from_le_bytes(packet.get(6..10)?.try_into().ok()?);
-    Some(ScaleReading {
-        weight: f64::from(raw) / 1000.0,
-        unit: "kg",
-        stable: *packet.get(11)? == 1,
-        tare: None,
-    })
+}
+
+/// CRC-16-CCITT as published with "Протокол 100" (polynomial 0x1021, register
+/// starts at zero, message bytes shifted in at the low end).
+fn massa_crc16(data: &[u8]) -> u16 {
+    let mut crc = 0_u16;
+    for byte in data {
+        let mut accumulator = 0_u16;
+        let mut high = (crc >> 8) << 8;
+        for _ in 0..8 {
+            accumulator = if (high ^ accumulator) & 0x8000 != 0 {
+                (accumulator << 1) ^ 0x1021
+            } else {
+                accumulator << 1
+            };
+            high <<= 1;
+        }
+        crc = accumulator ^ (crc << 8) ^ u16::from(*byte);
+    }
+    crc
 }
 
 fn parse_massa_p1(data: &[u8]) -> Option<ScaleReading> {
@@ -969,6 +1169,7 @@ fn parse_massa_p1(data: &[u8]) -> Option<ScaleReading> {
             unit,
             stable: capture.get(1)?.as_str() == "S",
             tare: None,
+            overload: false,
         });
     }
     parse_first_decimal(data, value.contains('S'), true)
@@ -996,6 +1197,7 @@ fn parse_massa_astb(data: &[u8]) -> Option<ScaleReading> {
         unit,
         stable: value.contains('S'),
         tare: None,
+        overload: false,
     })
 }
 
@@ -1012,6 +1214,7 @@ fn parse_massa_j(data: &[u8]) -> Option<ScaleReading> {
         unit: "kg",
         stable: status & 0x80 != 0,
         tare: None,
+        overload: false,
     })
 }
 
@@ -1025,10 +1228,13 @@ fn and_regex() -> &'static Regex {
 
 fn parse_and_standard(data: &[u8]) -> Option<ScaleReading> {
     let value = text(data);
+    if starts_with_status(&value, &["OL"]) {
+        return Some(ScaleReading::overloaded());
+    }
     let capture = and_regex().captures(&value)?;
     let status = capture.get(1)?.as_str();
     if status == "OL" {
-        return None;
+        return Some(ScaleReading::overloaded());
     }
     let mut weight = parse_number(
         capture.get(2).map_or("", |value| value.as_str()),
@@ -1051,6 +1257,7 @@ fn parse_and_standard(data: &[u8]) -> Option<ScaleReading> {
         unit,
         stable: status == "ST",
         tare: None,
+        overload: false,
     })
 }
 
@@ -1067,6 +1274,7 @@ fn parse_dibal(data: &[u8]) -> Option<ScaleReading> {
         // is established by ReadingFilter over consecutive equal readings.
         stable: false,
         tare: None,
+        overload: false,
     })
 }
 
@@ -1103,6 +1311,7 @@ fn parse_common_ascii(data: &[u8]) -> Option<ScaleReading> {
         unit,
         stable: false,
         tare: None,
+        overload: false,
     })
 }
 
@@ -1118,6 +1327,9 @@ fn dini_regex() -> &'static Regex {
 
 fn parse_dini_argeo(data: &[u8]) -> Option<ScaleReading> {
     let value = text(data);
+    if starts_with_status(&value, &["OL", "UL"]) {
+        return Some(ScaleReading::overloaded());
+    }
     let capture = dini_regex().captures(&value)?;
     let status = capture.get(1)?.as_str();
     if !matches!(status, "ST" | "US") {
@@ -1141,6 +1353,7 @@ fn parse_dini_argeo(data: &[u8]) -> Option<ScaleReading> {
         unit,
         stable: status == "ST",
         tare: None,
+        overload: false,
     })
 }
 struct FrameDecoder {
@@ -1274,28 +1487,47 @@ impl FrameDecoder {
 struct ReadingFilter {
     recent: VecDeque<f64>,
     stability_count: usize,
+    /// The protocol carries the indicator's own motion flag. A legally
+    /// verified indicator is authoritative: a quiet window of frames must
+    /// not promote a reading the device reports as "in motion".
+    trust_motion_flag: bool,
     last_weight: Option<f64>,
     last_stable: Option<bool>,
+    last_overload: bool,
     last_sent: Option<Instant>,
 }
 
 impl ReadingFilter {
-    fn new(stability_count: usize) -> Self {
+    fn new(stability_count: usize, trust_motion_flag: bool) -> Self {
         Self {
             recent: VecDeque::with_capacity(stability_count),
             stability_count,
+            trust_motion_flag,
             last_weight: None,
             last_stable: None,
+            last_overload: false,
             last_sent: None,
         }
     }
 
     fn filter(&mut self, mut reading: ScaleReading) -> Option<ScaleReading> {
+        if reading.overload {
+            self.recent.clear();
+            if self.last_overload {
+                return None;
+            }
+            self.last_overload = true;
+            self.last_weight = None;
+            self.last_stable = Some(false);
+            self.last_sent = Some(Instant::now());
+            return Some(reading);
+        }
+        let overload_cleared = std::mem::take(&mut self.last_overload);
         self.recent.push_back(reading.weight);
         while self.recent.len() > self.stability_count {
             self.recent.pop_front();
         }
-        if self.recent.len() >= self.stability_count {
+        if !self.trust_motion_flag && self.recent.len() >= self.stability_count {
             let minimum = self.recent.iter().copied().fold(f64::INFINITY, f64::min);
             let maximum = self
                 .recent
@@ -1308,11 +1540,12 @@ impl ReadingFilter {
             .last_weight
             .is_none_or(|weight| (reading.weight - weight).abs() > WEIGHT_EPSILON);
         let stable_changed = self.last_stable != Some(reading.stable);
-        if !weight_changed && !stable_changed {
+        if !weight_changed && !stable_changed && !overload_cleared {
             return None;
         }
         let now = Instant::now();
         if !stable_changed
+            && !overload_cleared
             && self
                 .last_sent
                 .is_some_and(|sent| now.duration_since(sent) < READING_THROTTLE)
@@ -1393,6 +1626,7 @@ fn probe_scale_config(config: &ScaleConfig, timeout: Duration) -> Result<ScalePr
                 unit: "kg",
                 stable: true,
                 tare: None,
+                overload: false,
             }),
         });
     }
@@ -1417,32 +1651,15 @@ fn probe_scale_config(config: &ScaleConfig, timeout: Duration) -> Result<ScalePr
     } else {
         let path = config.path.as_deref().unwrap_or_default();
         let baud_rate = config.baud_rate.unwrap_or(protocol.default_baud_rate);
-        let builder = serialport::new(path, baud_rate)
-            .timeout(IO_TIMEOUT)
-            .flow_control(FlowControl::None)
-            .parity(match protocol.parity {
-                ProtocolParity::None => Parity::None,
-                ProtocolParity::Even => Parity::Even,
-                ProtocolParity::Odd => Parity::Odd,
-            })
-            .data_bits(match protocol.data_bits {
-                5 => DataBits::Five,
-                6 => DataBits::Six,
-                7 => DataBits::Seven,
-                _ => DataBits::Eight,
-            })
-            .stop_bits(if protocol.stop_bits == 2 {
-                StopBits::Two
-            } else {
-                StopBits::One
-            });
-        let mut port = builder
+        let framing = SerialFraming::for_config(config, &protocol)?;
+        let mut port = framing
+            .apply(serialport::new(path, baud_rate).timeout(IO_TIMEOUT))
             .open()
             .map_err(|error| format!("serial open {path}: {error}"))?;
         let _ = port.write_data_terminal_ready(true);
         let _ = port.write_request_to_send(true);
         (
-            format!("{path} · {baud_rate} · {}", protocol.serial_format()),
+            format!("{path} · {baud_rate} · {}", framing.label()),
             probe_transport(config, &protocol, &mut *port, false, timeout)?,
         )
     };
@@ -1640,26 +1857,9 @@ fn run_serial_once(
 ) -> Result<(), String> {
     let path = config.path.as_deref().unwrap_or_default();
     let baud_rate = config.baud_rate.unwrap_or(protocol.default_baud_rate);
-    let builder = serialport::new(path, baud_rate)
-        .timeout(IO_TIMEOUT)
-        .flow_control(FlowControl::None)
-        .parity(match protocol.parity {
-            ProtocolParity::None => Parity::None,
-            ProtocolParity::Even => Parity::Even,
-            ProtocolParity::Odd => Parity::Odd,
-        })
-        .data_bits(match protocol.data_bits {
-            5 => DataBits::Five,
-            6 => DataBits::Six,
-            7 => DataBits::Seven,
-            _ => DataBits::Eight,
-        })
-        .stop_bits(if protocol.stop_bits == 2 {
-            StopBits::Two
-        } else {
-            StopBits::One
-        });
-    let mut port = builder
+    let framing = SerialFraming::for_config(config, protocol)?;
+    let mut port = framing
+        .apply(serialport::new(path, baud_rate).timeout(IO_TIMEOUT))
         .open()
         .map_err(|error| format!("serial open {path}: {error}"))?;
     let _ = port.write_data_terminal_ready(true);
@@ -1668,7 +1868,10 @@ fn run_serial_once(
     log_scale(
         app,
         "INFO",
-        &format!("serial scale opened {path} at {baud_rate}"),
+        &format!(
+            "serial scale opened {path} at {baud_rate} {}",
+            framing.label()
+        ),
     );
     run_transport(
         inner, app, config, protocol, generation, stop, &mut *port, false,
@@ -1687,7 +1890,10 @@ fn run_transport<T: Read + Write + ?Sized>(
     zero_means_closed: bool,
 ) -> Result<(), String> {
     let mut decoder = FrameDecoder::new(protocol.framing);
-    let mut filter = ReadingFilter::new(config.stability_count);
+    let mut filter = ReadingFilter::new(
+        config.stability_count,
+        protocol.parser.reports_motion_flag(),
+    );
     let interval = Duration::from_millis(config.polling_interval);
     let command = protocol.weight_command();
     let mut next_poll = Instant::now();
@@ -1745,8 +1951,18 @@ fn run_transport<T: Read + Write + ?Sized>(
             }
             Err(error) => return Err(format!("scale read: {error}")),
         }
-        if status_of(inner) == ScaleStatus::Connected && last_valid.elapsed() > WATCHDOG_TIMEOUT {
+        let silent_for = last_valid.elapsed();
+        if status_of(inner) == ScaleStatus::Connected && silent_for > WATCHDOG_TIMEOUT {
             set_status(inner, app, generation, ScaleStatus::Connecting);
+        }
+        // A rebooted TCP indicator leaves a half-open socket and a wedged
+        // USB-serial bridge keeps the port open without data. Neither ever
+        // reports an error, so sustained silence reopens the transport.
+        if silent_for > WATCHDOG_RECONNECT_TIMEOUT {
+            return Err(format!(
+                "scale sent no valid frame for {} s; reopening the connection",
+                WATCHDOG_RECONNECT_TIMEOUT.as_secs()
+            ));
         }
     }
     Ok(())
@@ -1789,7 +2005,7 @@ fn run_simulator(
         .map(|duration| duration.as_nanos() as u64)
         .unwrap_or(1);
     let mut random = Lcg::new(seed);
-    let mut filter = ReadingFilter::new(config.stability_count);
+    let mut filter = ReadingFilter::new(config.stability_count, false);
     set_status(inner, app, generation, ScaleStatus::Connected);
     while active(inner, generation, stop) {
         let zero = random.next_f64() > 0.8;
@@ -1803,6 +2019,7 @@ fn run_simulator(
             unit: "kg",
             stable: random.next_f64() > 0.2,
             tare: None,
+            overload: false,
         };
         inner.stats.received_frames.fetch_add(1, Ordering::AcqRel);
         if let Some(reading) = filter.filter(reading) {
@@ -2054,12 +2271,13 @@ mod tests {
 
     #[test]
     fn stability_transition_bypasses_weight_throttle() {
-        let mut filter = ReadingFilter::new(4);
+        let mut filter = ReadingFilter::new(4, false);
         let reading = |weight| ScaleReading {
             weight,
             unit: "kg",
             stable: false,
             tare: None,
+            overload: false,
         };
         assert!(filter.filter(reading(1.000)).is_some());
         assert!(filter.filter(reading(1.001)).is_none());
@@ -2114,6 +2332,7 @@ mod tests {
             port: None,
             polling_interval: 250,
             stability_count: 4,
+            serial_format: None,
         };
         assert_eq!(
             map_scale_error(&config, "Access denied"),
@@ -2136,11 +2355,10 @@ mod tests {
             protocol_by_id("dibal_delta").weight_command().unwrap(),
             [0x44, 0x0D, 0x0A]
         );
-        let command = protocol_by_id("massak_100").weight_command().unwrap();
-        assert_eq!(&command[..6], &[0xF8, 0x55, 0xCE, 0x01, 0x00, 0xA0]);
         assert_eq!(
-            u16::from_le_bytes([command[6], command[7]]),
-            crc16(&[0x01, 0x00, 0xA0])
+            protocol_by_id("massak_100").weight_command().unwrap(),
+            [0xF8, 0x55, 0xCE, 0x01, 0x00, 0x23, 0x23, 0x00],
+            "CMD_GET_MASSA with its CRC-16-CCITT"
         );
     }
 
@@ -2196,5 +2414,173 @@ mod tests {
         }
         assert_eq!(parsed, 20_000);
         assert!(decoder.buffer.is_empty());
+    }
+
+    fn parse(id: &str, frame: &str) -> Option<ScaleReading> {
+        parse_protocol(protocol_by_id(id), frame.as_bytes())
+    }
+
+    #[test]
+    fn flagless_text_protocols_keep_the_sign_of_a_tared_empty_scale() {
+        for id in ["generic", "shtrih_m", "massak_lite", "mertech"] {
+            let reading = parse(id, "-0.250\r\n").expect(id);
+            assert_eq!(reading.weight, -0.25, "{id} dropped the minus sign");
+        }
+        assert_eq!(parse("mertech", "S -1.500\r").unwrap().weight, -1.5);
+    }
+
+    #[test]
+    fn generic_text_honours_units_and_integer_weights_with_a_unit() {
+        let grams = parse("generic", "  1250 g\r\n").unwrap();
+        assert!((grams.weight - 1.25).abs() < 1e-9);
+        assert_eq!(grams.unit, "kg");
+        let decimal_grams = parse("generic", "+ 125.5 g\r\n").unwrap();
+        assert!((decimal_grams.weight - 0.1255).abs() < 1e-9);
+        assert_eq!(parse("generic", "3.125kg\r\n").unwrap().weight, 3.125);
+        assert_eq!(parse("generic", "1.250kgS\r\n").unwrap().weight, 1.25);
+        let pounds = parse("generic", "2 lb\r\n").unwrap();
+        assert!((pounds.weight - 0.907_184_74).abs() < 1e-9);
+        // A bare integer is a counter or a station id, never a weight.
+        assert!(parse("generic", "ID 12 N 15\r\n").is_none());
+    }
+
+    #[test]
+    fn overload_frames_are_reported_instead_of_dropped() {
+        for (id, frame) in [
+            ("cas_simple", "OL,GS,+  .   kg\r\n"),
+            ("and_standard", "OL,+9999999E+19\r\n"),
+            ("mettler_sics", "S +\r\n"),
+            ("mettler_sics", "S -\r\n"),
+            ("dini_argeo", "OL,GS,99999,kg\r\n"),
+            ("dini_argeo", "UL,GS,-99999,kg\r\n"),
+        ] {
+            let reading = parse(id, frame).unwrap_or_else(|| panic!("{id} ignored {frame:?}"));
+            assert!(reading.overload, "{id} {frame:?} is an overload frame");
+            assert!(!reading.stable);
+        }
+        assert!(!parse("cas_simple", "ST,GS,+  1.500kg\r\n").unwrap().overload);
+        let payload = serde_json::to_value(parse("cas_simple", "ST,GS,+  1.500kg\r\n").unwrap())
+            .unwrap();
+        assert!(payload.get("overload").is_none(), "normal readings keep the old payload");
+    }
+
+    fn massa_ack(weight: i32, division: u8, stable: u8) -> Vec<u8> {
+        let mut body = vec![MASSA_CMD_ACK_MASSA];
+        body.extend_from_slice(&weight.to_le_bytes());
+        body.extend_from_slice(&[division, stable, 0, 0]);
+        let mut frame = vec![0xF8, 0x55, 0xCE, body.len() as u8, 0];
+        frame.extend_from_slice(&body);
+        frame.extend_from_slice(&massa_crc16(&body).to_le_bytes());
+        frame
+    }
+
+    #[test]
+    fn massa_100_scales_the_weight_by_the_reported_division() {
+        for (division, raw, expected) in [
+            (0_u8, 12_345, 1.2345),
+            (1, 1_234, 1.234),
+            (2, 123, 1.23),
+            (3, 12, 1.2),
+            (4, 1, 1.0),
+            (1, -250, -0.25),
+        ] {
+            let reading = parse_massa_100(&massa_ack(raw, division, 1)).unwrap();
+            assert!((reading.weight - expected).abs() < 1e-9, "division {division}");
+            assert!(reading.stable);
+        }
+        assert!(!parse_massa_100(&massa_ack(1_234, 1, 0)).unwrap().stable);
+        assert!(parse_massa_100(&massa_ack(1_234, 9, 1)).is_none(), "unknown division");
+    }
+
+    #[test]
+    fn massa_100_reports_overload_and_ignores_other_answers() {
+        // CMD_ERROR 0x28 with code 0x08: load exceeds the maximum capacity.
+        let overload = hex("f855ce020028080828");
+        assert!(parse_massa_100(&overload).unwrap().overload);
+        // CMD_ERROR "not in weighing mode" and CMD_NACK carry no weight.
+        assert!(parse_massa_100(&hex("f855ce020028090000")).is_none());
+        assert!(parse_massa_100(&hex("f855ce0100f00000")).is_none());
+        // A truncated acknowledgement is rejected rather than read past its end.
+        assert!(parse_massa_100(&massa_ack(1_234, 1, 1)[..10]).is_none());
+        assert_eq!(massa_crc16(&[MASSA_CMD_GET_MASSA]), 0x0023);
+    }
+
+    #[test]
+    fn mettler_polls_the_immediate_weight_command() {
+        assert_eq!(
+            protocol_by_id("mettler_sics").weight_command().unwrap(),
+            b"SI\r\n"
+        );
+        assert_eq!(protocol_by_id("and_standard").serial_format(), "7E1");
+    }
+
+    fn reading(weight: f64, stable: bool) -> ScaleReading {
+        ScaleReading {
+            weight,
+            unit: "kg",
+            stable,
+            tare: None,
+            overload: false,
+        }
+    }
+
+    #[test]
+    fn trusted_motion_flag_is_never_promoted_by_the_software_detector() {
+        let mut trusted = ReadingFilter::new(2, true);
+        assert!(!trusted.filter(reading(1.000, false)).unwrap().stable);
+        // Identical frames would satisfy the software window, but the
+        // indicator still reports motion.
+        assert!(trusted.filter(reading(1.000, false)).is_none());
+        assert!(trusted.filter(reading(1.000, true)).unwrap().stable);
+
+        let mut flagless = ReadingFilter::new(2, false);
+        assert!(!flagless.filter(reading(1.000, false)).unwrap().stable);
+        assert!(flagless.filter(reading(1.000, false)).unwrap().stable);
+    }
+
+    #[test]
+    fn overload_is_emitted_once_and_the_next_weight_always_follows() {
+        let mut filter = ReadingFilter::new(4, true);
+        assert!(filter.filter(reading(2.000, true)).is_some());
+        assert!(filter.filter(ScaleReading::overloaded()).unwrap().overload);
+        assert!(filter.filter(ScaleReading::overloaded()).is_none());
+        // Back in range with the same weight: must not be suppressed as a
+        // duplicate of the reading before the overload.
+        let back = filter.filter(reading(2.000, true)).expect("recovery frame");
+        assert!(!back.overload);
+        assert_eq!(back.weight, 2.0);
+    }
+
+    #[test]
+    fn serial_format_override_is_validated_and_applied() {
+        assert_eq!(
+            parse_serial_format("7e1").unwrap(),
+            SerialFraming {
+                data_bits: 7,
+                parity: ProtocolParity::Even,
+                stop_bits: 1,
+            }
+        );
+        assert_eq!(parse_serial_format(" 8N2 ").unwrap().label(), "8N2");
+        for invalid in ["", "9N1", "8X1", "8N3", "8N"] {
+            assert!(parse_serial_format(invalid).is_err(), "{invalid:?}");
+        }
+        use serde_json::json;
+        let config = ScaleConfig::from_value(json!({
+            "type": "serial",
+            "protocolId": "and_standard",
+            "path": "COM3",
+            "serialFormat": "8N1",
+        }))
+        .unwrap();
+        let framing = SerialFraming::for_config(&config, protocol_by_id("and_standard")).unwrap();
+        assert_eq!(framing.label(), "8N1");
+        assert!(ScaleConfig::from_value(json!({
+            "type": "serial",
+            "protocolId": "generic",
+            "path": "COM3",
+            "serialFormat": "8Q1",
+        }))
+        .is_err());
     }
 }

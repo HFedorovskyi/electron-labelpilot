@@ -863,7 +863,7 @@ export component WeighingPrototype inherits Window {
     callback change-ui-theme(bool);
     callback open-preferences;
     open-preferences => { root.preferences-error = ""; root.preferences-visible = true; }
-    init => { WidgetPalette.color-scheme = root.dark-theme ? ColorScheme.dark : ColorScheme.light; }
+    init => { WidgetPalette.color-scheme = root.dark-theme ? ColorScheme.dark : ColorScheme.light; scanner-scope.focus(); }
     changed dark-theme => { WidgetPalette.color-scheme = root.dark-theme ? ColorScheme.dark : ColorScheme.light; }
     property <string> preferences-title: root.ui-language == "en" ? "Language and theme" : root.ui-language == "de" ? "Sprache und Design" : root.ui-language == "uk" ? "Мова й тема" : "Язык и тема";
     property <string> preferences-language-label: root.ui-language == "en" ? "Interface language" : root.ui-language == "de" ? "Sprache der Oberfläche" : root.ui-language == "uk" ? "Мова інтерфейсу" : "Язык интерфейса";
@@ -1099,6 +1099,9 @@ export component WeighingPrototype inherits Window {
     in-out property <string> settings-dpi: "203";
     in-out property <string> settings-ram-cache: "auto";
     in-out property <string> settings-zpl-compression: "none";
+    in-out property <string> settings-media-handling: "printer";
+    in-out property <string> settings-media-sensor: "printer";
+    in-out property <string> settings-print-method: "printer";
     in-out property <bool> settings-confirmed-print: false;
     in-out property <string> settings-darkness: "";
     in-out property <string> settings-print-speed: "";
@@ -1152,6 +1155,20 @@ export component WeighingPrototype inherits Window {
     property <string> form-working: root.ui-language == "en" ? "Working…" : root.ui-language == "de" ? "Wird ausgeführt…" : root.ui-language == "uk" ? "Виконується…" : "Выполняется…";
     property <string> form-graphics: root.ui-language == "en" ? "Memory and compression" : root.ui-language == "de" ? "Speicher und Komprimierung" : root.ui-language == "uk" ? "Пам’ять і стиснення" : "Память и сжатие";
     property <string> form-compression: root.ui-language == "en" ? "Z64 compression" : root.ui-language == "de" ? "Z64-Komprimierung" : root.ui-language == "uk" ? "Стиснення Z64" : "Сжатие Z64";
+    property <string> form-media-output: root.ui-language == "en" ? "Label output" : root.ui-language == "de" ? "Etikettenausgabe" : root.ui-language == "uk" ? "Видача етикетки" : "Выдача этикетки";
+    property <string> form-media-output-hint: root.ui-language == "en" ? "\"As printer\" sends no commands and keeps the printer's own setup." : root.ui-language == "de" ? "„Wie Drucker“ sendet keine Befehle; die Einstellung des Druckers bleibt erhalten." : root.ui-language == "uk" ? "«Як у принтері» не надсилає команд і зберігає налаштування принтера." : "«Как в принтере» не отправляет команд и сохраняет настройку принтера.";
+    property <string> form-as-printer: root.ui-language == "en" ? "As printer" : root.ui-language == "de" ? "Wie Drucker" : root.ui-language == "uk" ? "Як у принтері" : "Как в принтере";
+    property <string> form-media-tear: root.ui-language == "en" ? "Tear-off" : root.ui-language == "de" ? "Abreißen" : root.ui-language == "uk" ? "Відрив" : "Отрыв";
+    property <string> form-media-peel: root.ui-language == "en" ? "Peel-off" : root.ui-language == "de" ? "Spenden" : root.ui-language == "uk" ? "Відокремлювач" : "Отделитель";
+    property <string> form-media-cutter: root.ui-language == "en" ? "Cutter" : root.ui-language == "de" ? "Schneider" : root.ui-language == "uk" ? "Різак" : "Резак";
+    property <string> form-media-applicator: root.ui-language == "en" ? "Applicator" : root.ui-language == "de" ? "Applikator" : root.ui-language == "uk" ? "Аплікатор" : "Аппликатор";
+    property <string> form-media-sensor: root.ui-language == "en" ? "Media sensor" : root.ui-language == "de" ? "Mediensensor" : root.ui-language == "uk" ? "Датчик носія" : "Датчик носителя";
+    property <string> form-media-gap: root.ui-language == "en" ? "Gap" : root.ui-language == "de" ? "Lücke" : root.ui-language == "uk" ? "Зазор" : "Зазор";
+    property <string> form-media-mark: root.ui-language == "en" ? "Black mark" : root.ui-language == "de" ? "Schwarzmarke" : root.ui-language == "uk" ? "Чорна мітка" : "Чёрная метка";
+    property <string> form-media-continuous: root.ui-language == "en" ? "Continuous" : root.ui-language == "de" ? "Endlos" : root.ui-language == "uk" ? "Безперервна" : "Непрерывная";
+    property <string> form-print-method: root.ui-language == "en" ? "Print method" : root.ui-language == "de" ? "Druckverfahren" : root.ui-language == "uk" ? "Метод друку" : "Метод печати";
+    property <string> form-print-thermal: root.ui-language == "en" ? "Direct thermal" : root.ui-language == "de" ? "Thermodirekt" : root.ui-language == "uk" ? "Пряма термо" : "Прямая термо";
+    property <string> form-print-transfer: root.ui-language == "en" ? "Thermal transfer" : root.ui-language == "de" ? "Thermotransfer" : root.ui-language == "uk" ? "Термотрансфер" : "Термотрансфер";
     property <string> form-flow-control: root.ui-language == "en" ? "Flow control" : root.ui-language == "de" ? "Flusssteuerung" : root.ui-language == "uk" ? "Керування потоком" : "Управление потоком";
     property <string> form-parity: root.ui-language == "en" ? "Parity" : root.ui-language == "de" ? "Parität" : root.ui-language == "uk" ? "Парність" : "Чётность";
     property <string> form-data-bits: root.ui-language == "en" ? "Data bits" : root.ui-language == "de" ? "Datenbits" : root.ui-language == "uk" ? "Біти даних" : "Биты данных";
@@ -1184,6 +1201,12 @@ export component WeighingPrototype inherits Window {
     in-out property <string> scale-settings-port: "4001";
     in-out property <string> scale-settings-polling: "250";
     in-out property <string> scale-settings-stability-count: "4";
+    in-out property <string> scale-settings-min-weight: "";
+    in-out property <string> scale-settings-max-weight: "";
+    property <string> form-weighing-range: root.ui-language == "en" ? "Weighing range" : root.ui-language == "de" ? "Wägebereich" : root.ui-language == "uk" ? "Діапазон зважування" : "Диапазон взвешивания";
+    property <string> form-weighing-range-hint: root.ui-language == "en" ? "Min and Max from the scale's data plate. Below Min or above Max no label is printed (EU legal metrology). Empty — no check." : root.ui-language == "de" ? "Min und Max vom Typenschild der Waage. Unter Min oder über Max wird kein Etikett gedruckt (EU-Eichrecht). Leer — keine Prüfung." : root.ui-language == "uk" ? "Min і Max з таблички ваг. Нижче Min або вище Max етикетка не друкується (метрологія ЄС). Порожньо — без перевірки." : "Min и Max с шильдика весов. Ниже Min и выше Max этикетка не печатается (метрология ЕС). Пусто — без проверки.";
+    property <string> form-weighing-min: root.ui-language == "en" ? "Min, kg" : root.ui-language == "de" ? "Min, kg" : root.ui-language == "uk" ? "Min, кг" : "Min, кг";
+    property <string> form-weighing-max: root.ui-language == "en" ? "Max, kg" : root.ui-language == "de" ? "Max, kg" : root.ui-language == "uk" ? "Max, кг" : "Max, кг";
     in-out property <string> scale-settings-runtime-status: "disconnected";
     in-out property <bool> scale-settings-dirty: false;
     in-out property <bool> scale-settings-busy: false;
@@ -1626,6 +1649,8 @@ export component WeighingPrototype inherits Window {
         if root.settings-input-target == "scale-baud" && root.scale-settings-baud-rate != root.settings-input-draft { root.scale-settings-baud-rate = root.settings-input-draft; root.scale-settings-dirty = true; }
         if root.settings-input-target == "scale-polling" && root.scale-settings-polling != root.settings-input-draft { root.scale-settings-polling = root.settings-input-draft; root.scale-settings-dirty = true; }
         if root.settings-input-target == "scale-samples" && root.scale-settings-stability-count != root.settings-input-draft { root.scale-settings-stability-count = root.settings-input-draft; root.scale-settings-dirty = true; }
+        if root.settings-input-target == "scale-min" && root.scale-settings-min-weight != root.settings-input-draft { root.scale-settings-min-weight = root.settings-input-draft; root.scale-settings-dirty = true; }
+        if root.settings-input-target == "scale-max" && root.scale-settings-max-weight != root.settings-input-draft { root.scale-settings-max-weight = root.settings-input-draft; root.scale-settings-dirty = true; }
         if root.settings-input-target == "device-search" { root.settings-picker-search = root.settings-input-draft; root.settings-picker-scroll-y = 0px; }
         root.settings-input-keyboard-visible = false;
         }
@@ -1673,6 +1698,28 @@ export component WeighingPrototype inherits Window {
     callback install-update;
     callback rollback-update;
     callback stage-offline-update(string);
+    callback scanner-key(string);
+    out property <string> scanner-not-found-label: root.ui-language == "en" ? "Code not found in the product list" : root.ui-language == "de" ? "Code nicht in der Artikelliste gefunden" : root.ui-language == "uk" ? "Код не знайдено в номенклатурі" : "Код не найден в номенклатуре";
+    out property <string> scanner-not-fixed-label: root.ui-language == "en" ? "Not a fixed-weight product" : root.ui-language == "de" ? "Kein Festgewichtsartikel" : root.ui-language == "uk" ? "Товар не з фіксованою вагою" : "Товар не с фиксированным весом";
+
+    // Keyboard-wedge barcode scanners type a code followed by Enter. On the
+    // weighing pages this scope owns keyboard focus; settings fields still
+    // receive typing when the operator focuses them.
+    scanner-scope := FocusScope {
+        x: 0; y: 0; width: root.width; height: root.height;
+        key-pressed(event) => {
+            if root.active-page == 0 || root.active-page == 5 {
+                root.scanner-key(event.text);
+                return accept;
+            }
+            return reject;
+        }
+    }
+    changed active-page => {
+        if root.active-page == 0 || root.active-page == 5 {
+            scanner-scope.focus();
+        }
+    }
 
 
     HorizontalLayout {
@@ -2688,7 +2735,7 @@ export component WeighingPrototype inherits Window {
                             title: root.settings-pack-role-label;
                             SettingsToggle { label: root.settings-auto-print-label; description: root.settings-auto-print-hint; state-label: root.settings-auto-print ? root.settings-on-label : root.settings-off-label; checked: root.settings-auto-print; enabled: !root.settings-busy; toggled => { root.settings-auto-print = !root.settings-auto-print; root.settings-dirty = true; } }
                         }
-                        if (root.settings-connection == "tcp" || root.settings-connection == "serial") && (root.settings-protocol == "zpl" || root.settings-protocol == "image" || root.settings-protocol == "tspl"): SettingsCard {
+                        if (root.settings-connection == "tcp" || root.settings-connection == "serial") && (root.settings-protocol == "zpl" || root.settings-protocol == "image" || root.settings-protocol == "tspl" || root.settings-protocol == "dpl"): SettingsCard {
                             title: root.settings-confirmed-print-label;
                             SettingsToggle { label: root.settings-confirmed-print-label; description: root.settings-confirmed-print-hint; state-label: root.settings-confirmed-print ? root.settings-on-label : root.settings-off-label; checked: root.settings-confirmed-print; enabled: !root.settings-busy; toggled => { root.settings-confirmed-print = !root.settings-confirmed-print; root.settings-dirty = true; } }
                         }
@@ -2700,7 +2747,7 @@ export component WeighingPrototype inherits Window {
                             HorizontalLayout {
                                 spacing: 12px;
                                 SettingsTab { horizontal-stretch: 1; text: "ZPL"; selected: root.settings-protocol == "zpl"; enabled: !root.settings-busy; clicked => { root.settings-protocol = "zpl"; root.settings-dirty = true; } }
-                                SettingsTab { horizontal-stretch: 1; text: "TSPL"; selected: root.settings-protocol == "tspl"; enabled: !root.settings-busy; clicked => { root.settings-protocol = "tspl"; root.settings-dirty = true; } }
+                                SettingsTab { horizontal-stretch: 1; text: "TSPL"; selected: root.settings-protocol == "tspl"; enabled: !root.settings-busy; clicked => { root.settings-protocol = "tspl"; if root.settings-media-handling == "applicator" { root.settings-media-handling = "printer"; } root.settings-dirty = true; } }
                                 SettingsTab { horizontal-stretch: 1; text: "EPL"; selected: root.settings-protocol == "epl"; enabled: !root.settings-busy; clicked => { root.settings-protocol = "epl"; root.settings-dirty = true; } }
                                 SettingsTab { horizontal-stretch: 1; text: "CPCL"; selected: root.settings-protocol == "cpcl"; enabled: !root.settings-busy; clicked => { root.settings-protocol = "cpcl"; root.settings-dirty = true; } }
                             }
@@ -2736,6 +2783,32 @@ export component WeighingPrototype inherits Window {
                                 SettingsTab { horizontal-stretch: 1; text: "Hex"; selected: root.settings-zpl-compression == "none"; enabled: !root.settings-busy; clicked => { root.settings-zpl-compression = "none"; root.settings-dirty = true; } }
                                 SettingsTab { horizontal-stretch: 1; text: "ASCII-RLE"; selected: root.settings-zpl-compression == "ascii-rle"; enabled: !root.settings-busy; clicked => { root.settings-zpl-compression = "ascii-rle"; root.settings-dirty = true; } }
                                 SettingsTab { horizontal-stretch: 1; text: "Z64"; selected: root.settings-zpl-compression == "z64"; enabled: !root.settings-busy; clicked => { root.settings-zpl-compression = "z64"; root.settings-dirty = true; } }
+                            }
+                        }
+                        if root.settings-protocol == "zpl" || root.settings-protocol == "image" || root.settings-protocol == "tspl": SettingsCard {
+                            title: root.form-media-output; description: root.form-media-output-hint;
+                            HorizontalLayout {
+                                spacing: 12px;
+                                SettingsTab { horizontal-stretch: 1; text: root.form-as-printer; selected: root.settings-media-handling == "printer"; enabled: !root.settings-busy; clicked => { root.settings-media-handling = "printer"; root.settings-dirty = true; } }
+                                SettingsTab { horizontal-stretch: 1; text: root.form-media-tear; selected: root.settings-media-handling == "tear"; enabled: !root.settings-busy; clicked => { root.settings-media-handling = "tear"; root.settings-dirty = true; } }
+                                SettingsTab { horizontal-stretch: 1; text: root.form-media-peel; selected: root.settings-media-handling == "peel"; enabled: !root.settings-busy; clicked => { root.settings-media-handling = "peel"; root.settings-dirty = true; } }
+                                SettingsTab { horizontal-stretch: 1; text: root.form-media-cutter; selected: root.settings-media-handling == "cutter"; enabled: !root.settings-busy; clicked => { root.settings-media-handling = "cutter"; root.settings-dirty = true; } }
+                                if root.settings-protocol != "tspl": SettingsTab { horizontal-stretch: 1; text: root.form-media-applicator; selected: root.settings-media-handling == "applicator"; enabled: !root.settings-busy; clicked => { root.settings-media-handling = "applicator"; root.settings-dirty = true; } }
+                            }
+                            Text { text: root.form-media-sensor; color: Palette.n700; font-size: 13px; }
+                            HorizontalLayout {
+                                spacing: 12px;
+                                SettingsTab { horizontal-stretch: 1; text: root.form-as-printer; selected: root.settings-media-sensor == "printer"; enabled: !root.settings-busy; clicked => { root.settings-media-sensor = "printer"; root.settings-dirty = true; } }
+                                SettingsTab { horizontal-stretch: 1; text: root.form-media-gap; selected: root.settings-media-sensor == "gap"; enabled: !root.settings-busy; clicked => { root.settings-media-sensor = "gap"; root.settings-dirty = true; } }
+                                SettingsTab { horizontal-stretch: 1; text: root.form-media-mark; selected: root.settings-media-sensor == "mark"; enabled: !root.settings-busy; clicked => { root.settings-media-sensor = "mark"; root.settings-dirty = true; } }
+                                SettingsTab { horizontal-stretch: 1; text: root.form-media-continuous; selected: root.settings-media-sensor == "continuous"; enabled: !root.settings-busy; clicked => { root.settings-media-sensor = "continuous"; root.settings-dirty = true; } }
+                            }
+                            Text { text: root.form-print-method; color: Palette.n700; font-size: 13px; }
+                            HorizontalLayout {
+                                spacing: 12px;
+                                SettingsTab { horizontal-stretch: 1; text: root.form-as-printer; selected: root.settings-print-method == "printer"; enabled: !root.settings-busy; clicked => { root.settings-print-method = "printer"; root.settings-dirty = true; } }
+                                SettingsTab { horizontal-stretch: 1; text: root.form-print-thermal; selected: root.settings-print-method == "thermal"; enabled: !root.settings-busy; clicked => { root.settings-print-method = "thermal"; root.settings-dirty = true; } }
+                                SettingsTab { horizontal-stretch: 1; text: root.form-print-transfer; selected: root.settings-print-method == "transfer"; enabled: !root.settings-busy; clicked => { root.settings-print-method = "transfer"; root.settings-dirty = true; } }
                             }
                         }
                     }
@@ -2849,6 +2922,14 @@ export component WeighingPrototype inherits Window {
                                 spacing: 12px;
                                 SettingsField { horizontal-stretch: 1;  label: root.form-polling; text <=> root.scale-settings-polling; hint: "50–60000"; placeholder: ""; enabled: !root.scale-settings-busy; edited => { root.scale-settings-dirty = true; } keyboard => { root.open-settings-input("scale-polling", root.form-polling, root.scale-settings-polling, 2); } }
                                 SettingsField { horizontal-stretch: 1;  label: root.form-samples; text <=> root.scale-settings-stability-count; hint: "2–32"; placeholder: ""; enabled: !root.scale-settings-busy; edited => { root.scale-settings-dirty = true; } keyboard => { root.open-settings-input("scale-samples", root.form-samples, root.scale-settings-stability-count, 2); } }
+                            }
+                        }
+                        SettingsCard {
+                            title: root.form-weighing-range; description: root.form-weighing-range-hint;
+                            HorizontalLayout {
+                                spacing: 12px;
+                                SettingsField { horizontal-stretch: 1;  label: root.form-weighing-min; text <=> root.scale-settings-min-weight; hint: "0,04"; placeholder: ""; enabled: !root.scale-settings-busy; edited => { root.scale-settings-dirty = true; } keyboard => { root.open-settings-input("scale-min", root.form-weighing-min, root.scale-settings-min-weight, 2); } }
+                                SettingsField { horizontal-stretch: 1;  label: root.form-weighing-max; text <=> root.scale-settings-max-weight; hint: "15"; placeholder: ""; enabled: !root.scale-settings-busy; edited => { root.scale-settings-dirty = true; } keyboard => { root.open-settings-input("scale-max", root.form-weighing-max, root.scale-settings-max-weight, 2); } }
                             }
                         }
                     }

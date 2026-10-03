@@ -54,7 +54,7 @@ assert.ok(tsplMarkerOffset >= 0, 'TSPL BITMAP marker is missing');
 const tsplDataStart = tsplMarkerOffset + tsplMarker.length;
 assert.deepEqual(
     Buffer.from(tspl).subarray(tsplDataStart, tsplDataStart + bitmap.mono.length),
-    Buffer.from(bitmap.mono),
+    invertedMono,
 );
 
 const epl = encoders.encodeEplBitmap(bitmap, config);
@@ -109,6 +109,21 @@ for (const protocol of ['epl', 'cpcl', 'dpl', 'sbpl']) {
     const routed = await encoders.encodePortableRaster(protocol, bitmap, config);
     assert.deepEqual(Buffer.from(routed), Buffer.from(direct), protocol);
 }
+
+// Label output settings mirror src-tauri/src/generator/media.rs; absent means no command.
+const zplConfig = { ...config, protocol: 'zpl', zplCompression: 'none' };
+const plainZpl = ascii(await encoders.encodeZplBitmap(bitmap, zplConfig));
+assert.ok(!/\^M[MNT]/.test(plainZpl), 'default ZPL raster must not change the printer setup');
+const mediaConfig = { ...config, mediaHandling: 'peel', mediaSensor: 'mark', printMethod: 'transfer' };
+const mediaZpl = ascii(await encoders.encodeZplBitmap(bitmap, { ...zplConfig, ...mediaConfig }));
+assert.ok(mediaZpl.startsWith('^XA\n^PW10\n^LL9\n^PON\n^MMP\n^MNM\n^MTT\n'), mediaZpl.slice(0, 60));
+const mediaTspl = ascii(encoders.encodeTsplBitmap(bitmap, mediaConfig));
+assert.ok(mediaTspl.includes('BLINE 2 mm,0 mm\r\n'));
+assert.ok(mediaTspl.includes('SET CUTTER OFF\r\nSET PEEL ON\r\nSET RIBBON ON\r\nCLS\r\n'));
+const continuousTspl = ascii(encoders.encodeTsplBitmap(bitmap, { ...config, mediaSensor: 'continuous', mediaHandling: 'cutter' }));
+assert.ok(continuousTspl.includes('GAP 0 mm,0 mm\r\n'));
+assert.ok(continuousTspl.includes('SET PEEL OFF\r\nSET CUTTER 1\r\nCLS\r\n'));
+assert.ok(!ascii(encoders.encodeTsplBitmap(bitmap, config)).includes('SET '), 'default TSPL raster must not change the printer setup');
 
 console.log('raster adapters: TSPL BITMAP, EPL GW, CPCL EG, DPL 1-bit BMP, SBPL GH');
 console.log('fixture: 10x9 dots, 2 bytes/row, exact binary/hex geometry verified');

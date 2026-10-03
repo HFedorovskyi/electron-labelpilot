@@ -238,7 +238,7 @@ fn tspl_routes_complex_content_to_existing_bitmap_backend() {
                 },
                 {
                     "id":"gs1","type":"barcode","x":0,"y":50,"w":100,"h":40,
-                    "barcodeType":"gs1-128","value":"(01)123"
+                    "barcodeType":"gs1-128","value":"(01)04870254930134"
                 }
             ]
         }),
@@ -615,4 +615,122 @@ fn p1_zpl_barcode_literal_policy_preserves_supported_streams() {
             "{kind}"
         );
     }
+}
+
+fn native_text(config: Value) -> String {
+    let doc = serde_json::json!({
+        "widthMm":58,
+        "heightMm":40,
+        "canvas":{"width":400,"height":300},
+        "elements":[{
+            "id":"text","type":"text","x":0,"y":0,"w":100,"h":20,
+            "text":"LOT A1"
+        }]
+    });
+    let generated = GeneratorState::default()
+        .generate(payload(config, doc, serde_json::json!({})))
+        .unwrap();
+    String::from_utf8(generated.bytes).unwrap()
+}
+
+#[test]
+fn label_output_settings_reach_native_zpl_and_tspl_headers() {
+    let default_zpl = native_text(serde_json::json!({"protocol":"zpl"}));
+    assert!(!default_zpl.contains("^MM") && !default_zpl.contains("^MN") && !default_zpl.contains("^MT"));
+    let zpl = native_text(serde_json::json!({
+        "protocol":"zpl",
+        "mediaHandling":"applicator",
+        "mediaSensor":"mark",
+        "printMethod":"transfer"
+    }));
+    let format_start = zpl.find("^XA").unwrap();
+    let first_field = zpl.find("^FO").unwrap();
+    for command in ["^MMA", "^MNM", "^MTT"] {
+        let at = zpl.find(command).unwrap_or_else(|| panic!("missing {command}"));
+        assert!(format_start < at && at < first_field, "{command} must precede fields");
+    }
+
+    let default_tspl = native_text(serde_json::json!({"protocol":"tspl","gapMm":3}));
+    assert!(default_tspl.contains("GAP 3 mm,0 mm"));
+    assert!(!default_tspl.contains("SET "));
+    let tspl = native_text(serde_json::json!({
+        "protocol":"tspl",
+        "gapMm":3,
+        "mediaHandling":"peel",
+        "mediaSensor":"mark",
+        "printMethod":"thermal"
+    }));
+    assert!(tspl.contains("BLINE 3 mm,0 mm"));
+    assert!(!tspl.contains("GAP "));
+    let cls = tspl.find("CLS").unwrap();
+    for command in ["SET CUTTER OFF", "SET PEEL ON", "SET RIBBON OFF"] {
+        let at = tspl.find(command).unwrap_or_else(|| panic!("missing {command}"));
+        assert!(at < cls, "{command} must precede CLS");
+    }
+    let continuous = native_text(serde_json::json!({
+        "protocol":"tspl",
+        "gapMm":3,
+        "mediaSensor":"continuous"
+    }));
+    assert!(continuous.contains("GAP 0 mm,0 mm"));
+}
+
+#[test]
+fn rejects_label_output_settings_the_printer_language_cannot_apply() {
+    let doc = serde_json::json!({
+        "widthMm":58,"heightMm":40,"canvas":{"width":400,"height":300},"elements":[]
+    });
+    for config in [
+        serde_json::json!({"protocol":"tspl","mediaHandling":"applicator"}),
+        serde_json::json!({"protocol":"zpl","mediaSensor":"web"}),
+        serde_json::json!({"protocol":"zpl","printMethod":"ribbon"}),
+    ] {
+        assert!(
+            GeneratorState::default()
+                .generate(payload(config.clone(), doc.clone(), serde_json::json!({})))
+                .is_err(),
+            "{config}"
+        );
+    }
+}
+
+
+fn native_barcode_zpl(dpi: u16, kind: &str, value: &str, x: f64) -> Result<String, String> {
+    let doc = serde_json::json!({
+        "widthMm":50.8,"heightMm":25.4,"canvas":{"width":600,"height":300},
+        "elements":[{
+            "id":"code","type":"barcode","x":x,"y":10,"w":400,"h":120,
+            "barcodeType":kind,"value":value
+        }]
+    });
+    GeneratorState::default()
+        .generate(payload(
+            serde_json::json!({"protocol":"zpl","dpi":dpi}),
+            doc,
+            serde_json::json!({}),
+        ))
+        .map(|generated| String::from_utf8(generated.bytes).unwrap())
+}
+
+#[test]
+fn ean13_module_never_drops_below_the_print_floor() {
+    // The legacy module is 2 dots at every resolution: 0.17 mm at 300 dpi and
+    // 0.08 mm at 600 dpi. Whole dots reaching 0.25 mm are 2, 3 and 6.
+    for (dpi, module) in [(203, "^BY2,"), (300, "^BY3,"), (600, "^BY6,")] {
+        let zpl = native_barcode_zpl(dpi, "ean13", "4870254930240", 10.0).unwrap();
+        assert!(zpl.contains(module), "{dpi} dpi: {zpl}");
+    }
+    let error = native_barcode_zpl(600, "ean13", "4870254930240", 500.0).unwrap_err();
+    assert!(error.contains("слишком узкий"), "{error}");
+}
+
+#[test]
+fn invalid_gs1_element_strings_never_reach_the_printer() {
+    let error = native_barcode_zpl(203, "gs1-128", "(01)04870254930135(10)LOT", 10.0)
+        .unwrap_err();
+    assert!(error.contains("штрихкод «code»") && error.contains("контрольная цифра"), "{error}");
+    let error = native_barcode_zpl(203, "code128", "(17)261399", 10.0).unwrap_err();
+    assert!(error.contains("недопустимая дата"), "{error}");
+    // Code 128 without AIs and plain QR content are not GS1 strings.
+    assert!(native_barcode_zpl(203, "code128", "LP-2026-000001", 10.0).is_ok());
 }

@@ -354,11 +354,20 @@ pub(crate) fn open_database(persisted: &PersistedState) -> Result<Connection, St
     connection
         .busy_timeout(Duration::from_secs(5))
         .map_err(|error| format!("failed to set SQLite busy timeout: {error}"))?;
+    let schema_version = database_schema_version(&connection)?;
+    if schema_version > SCHEMA_VERSION {
+        return Err(format!(
+            "База данных создана более новой версией LabelPilot (схема {schema_version}, \
+             эта версия поддерживает {SCHEMA_VERSION}). Обновите программу или восстановите \
+             резервную копию из обновления."
+        ));
+    }
     connection
         .execute_batch(
             r#"
             PRAGMA journal_mode = WAL;
             PRAGMA synchronous = FULL;
+            PRAGMA journal_size_limit = 67108864;
             PRAGMA temp_store = MEMORY;
             PRAGMA foreign_keys = ON;
 
@@ -538,9 +547,32 @@ pub(crate) fn open_database(persisted: &PersistedState) -> Result<Connection, St
             )
         })?;
     connection
+        .execute_batch(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_pack_deleted_cursor
+                ON pack(deleted_at, id) WHERE deleted_at IS NOT NULL;
+            "#,
+        )
+        .map_err(|error| format!("failed to index deleted packs: {error}"))?;
+    connection
         .execute_batch(include_str!("operational_counters.sql"))
         .map_err(|error| format!("failed to initialize operational counters: {error}"))?;
+    if schema_version < SCHEMA_VERSION {
+        connection
+            .pragma_update(None, "user_version", SCHEMA_VERSION)
+            .map_err(|error| format!("failed to stamp database schema version: {error}"))?;
+    }
     Ok(connection)
+}
+
+/// Bumped whenever a release changes the persisted schema. An older binary
+/// refuses a newer database instead of writing rows it cannot describe.
+pub(crate) const SCHEMA_VERSION: i64 = 1;
+
+fn database_schema_version(connection: &Connection) -> Result<i64, String> {
+    connection
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .map_err(|error| format!("failed to read database schema version: {error}"))
 }
 
 fn ensure_column(
@@ -1008,6 +1040,29 @@ mod tests {
             .query_row("PRAGMA synchronous", [], |row| row.get(0))
             .unwrap();
         assert_eq!(synchronous, 2, "SQLite FULL synchronous mode");
+    }
+
+    #[test]
+    fn stamps_the_schema_version_and_refuses_a_newer_database() {
+        let directory = TestDirectory::new("schema-version");
+        let persisted = PersistedState::for_data_dir(directory.0.clone());
+        let connection = open_database(&persisted).expect("open fresh database");
+        assert_eq!(database_schema_version(&connection).unwrap(), SCHEMA_VERSION);
+        let deleted_index: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_pack_deleted_cursor'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(deleted_index, 1);
+        connection
+            .pragma_update(None, "user_version", SCHEMA_VERSION + 1)
+            .unwrap();
+        drop(connection);
+
+        let error = open_database(&persisted).expect_err("newer schema must be refused");
+        assert!(error.contains("более новой версией"), "{error}");
     }
 
     #[test]

@@ -1,4 +1,4 @@
-use crate::generator::GenerationPayload;
+use crate::generator::{GenerationPayload, MediaSettings};
 use ab_glyph::{point, Font, Glyph, GlyphId, PxScale, ScaleFont};
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
@@ -1058,6 +1058,17 @@ fn zpl_barcode(
         _ => value.chars().count() * 11 + 35,
     };
     let module = (width / modules).clamp(1, 10);
+    let dots_per_mm = geometry.width_dots as f64 / geometry.width_mm;
+    if let Some(minimum) = crate::gs1::retail_min_module_dots(&kind, dots_per_mm) {
+        if module < minimum {
+            return Err(crate::gs1::narrow_retail_symbol_error(
+                &kind,
+                width as f64 / dots_per_mm,
+                (modules * minimum) as f64 / dots_per_mm,
+                minimum,
+            ));
+        }
+    }
     let symbol_width = modules * module;
     let symbol_x = x + width.saturating_sub(symbol_width) / 2;
     let show_text = element
@@ -1145,6 +1156,8 @@ fn native_zpl_barcode_eligible(
     Ok(eligible)
 }
 
+const RASTER_LINEAR_MARGIN_MODULES: usize = 10;
+
 fn draw_barcode(
     mono: &mut [u8],
     stride: usize,
@@ -1189,6 +1202,9 @@ fn draw_barcode(
         }
         return Err(error);
     }
+    if gs1 && (crate::gs1::is_gs1_symbology(&kind) || kind == "code128") {
+        crate::gs1::validate_element_string(&value)?;
+    }
     let content = rxing_content(&value, format, gs1)?;
     let x = scaled(element, "x", geometry.scale_x).round() as i32;
     let y = scaled(element, "y", geometry.scale_y).round() as i32;
@@ -1213,6 +1229,23 @@ fn draw_barcode(
         0
     };
     let symbol_height = local_height.saturating_sub(text_height).max(1);
+    let dots_per_mm = geometry.width_dots as f64 / geometry.width_mm;
+    if let (Some(minimum), Some(modules)) = (
+        crate::gs1::retail_min_module_dots(&kind, dots_per_mm),
+        crate::gs1::retail_symbol_modules(&kind),
+    ) {
+        // The 1D writer spreads the symbol plus a 10-module margin over the
+        // element width in whole multiples of the module.
+        let encoded_modules = modules + RASTER_LINEAR_MARGIN_MODULES;
+        if local_width / encoded_modules < minimum {
+            return Err(crate::gs1::narrow_retail_symbol_error(
+                &kind,
+                local_width as f64 / dots_per_mm,
+                (encoded_modules * minimum) as f64 / dots_per_mm,
+                minimum,
+            ));
+        }
+    }
     let mut hints = EncodeHints {
         CharacterSet: Some("UTF-8".to_owned()),
         Gs1Format: Some(gs1),
@@ -1221,7 +1254,7 @@ fn draw_barcode(
                 BarcodeFormat::QR_CODE => 4,
                 BarcodeFormat::DATA_MATRIX => 1,
                 BarcodeFormat::AZTEC => 2,
-                _ => 10,
+                _ => RASTER_LINEAR_MARGIN_MODULES,
             }
             .to_string(),
         ),
@@ -1863,6 +1896,7 @@ fn encode_zpl(bitmap: &RasterizedLabel, config: &Map<String, Value>) -> Result<V
         "^XA\n^PW{}\n^LL{}\n^PON\n",
         bitmap.width_dots, bitmap.height_dots
     );
+    stream.push_str(&MediaSettings::from_config(config).zpl_commands());
     if let Some(value) = finite(config.get("darkness")) {
         stream.push_str(&format!("^MD{value}\n"));
     }
@@ -2074,9 +2108,19 @@ fn encode_tspl(bitmap: &RasterizedLabel, config: &Map<String, Value>) -> Result<
         .unwrap_or(4.0)
         .round()
         .clamp(1.0, 12.0);
-    let gap = finite(config.get("gapMm")).unwrap_or(2.0).max(0.0);
-    let mut bytes = format!("SIZE {width_mm:.2} mm,{height_mm:.2} mm\r\nGAP {gap} mm,0 mm\r\nSPEED {speed}\r\nDENSITY {density}\r\nCLS\r\nBITMAP 0,0,{},{},0,", bitmap.bytes_per_row, bitmap.height_dots).into_bytes();
-    bytes.extend_from_slice(&bitmap.mono);
+    let media = MediaSettings::from_config(config);
+    let gap = media.tspl_gap_mm(finite(config.get("gapMm")).unwrap_or(2.0).max(0.0));
+    let sensor = media.tspl_sensor_keyword();
+    let setup: String = media
+        .tspl_commands()
+        .iter()
+        .map(|command| format!("{command}\r\n"))
+        .collect();
+    let mut bytes = format!("SIZE {width_mm:.2} mm,{height_mm:.2} mm\r\n{sensor} {gap} mm,0 mm\r\nSPEED {speed}\r\nDENSITY {density}\r\n{setup}CLS\r\nBITMAP 0,0,{},{},0,", bitmap.bytes_per_row, bitmap.height_dots).into_bytes();
+    // TSPL BITMAP, like EPL2 GW, uses 0 for a printed dot and 1 for an
+    // unprinted dot, opposite to the renderer's canonical 1 = black
+    // representation. Row padding stays unprinted after the inversion.
+    bytes.extend(bitmap.mono.iter().map(|byte| !*byte));
     bytes.extend_from_slice(b"\r\nPRINT 1,1\r\n");
     Ok(bytes)
 }
@@ -2331,6 +2375,77 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn raster_ean13_narrower_than_the_print_floor_is_refused() {
+        let payload = |width: u32| GenerationPayload {
+            config: json!({"connection":"windows_driver", "protocol":"image", "dpi":300}),
+            doc: json!({
+                "canvas":{"width":600,"height":300,"widthCm":5.08,"heightCm":2.54,"dpi":300},
+                "elements":[
+                    {"id":"barcode","type":"barcode","x":10,"y":40,"w":width,"h":120,"barcodeType":"ean13","value":"{{barcode}}"}
+                ]
+            }),
+            data: json!({"barcode":"4870254930240"}),
+        };
+        let error = render(&payload(150)).err().expect("1-dot module must be refused");
+        assert!(error.contains("слишком узкий"), "{error}");
+        // (95 + 10 margin modules) x 3 dots = 315 dots fits a 330-dot element.
+        assert!(render(&payload(330)).is_ok());
+    }
+
+    #[test]
+    fn raster_gs1_codes_are_validated_before_encoding() {
+        let payload = GenerationPayload {
+            config: json!({"connection":"windows_driver", "protocol":"image", "dpi":203}),
+            doc: json!({
+                "canvas":{"width":400,"height":300,"widthCm":5.8,"heightCm":4.0,"dpi":203},
+                "elements":[
+                    {"id":"dm","type":"barcode","x":10,"y":10,"w":120,"h":120,"barcodeType":"gs1datamatrix","value":"(01)04870254930135(10)A1"}
+                ]
+            }),
+            data: json!({}),
+        };
+        let error = render(&payload).err().expect("bad GTIN check digit");
+        assert!(error.contains("контрольная цифра"), "{error}");
+    }
+
+    #[test]
+    fn raster_encoders_carry_label_output_settings() {
+        let bitmap = RasterizedLabel {
+            width_dots: 16,
+            height_dots: 2,
+            bytes_per_row: 2,
+            width_mm: 2.0,
+            height_mm: 2.0,
+            mono: vec![0x80, 0x00, 0xff, 0x55],
+            native_zpl_commands: Vec::new(),
+            zpl_raster_regions: None,
+            render_micros: 0,
+        };
+        let plain = String::from_utf8(encode_zpl(&bitmap, &Map::new()).unwrap()).unwrap();
+        assert!(!plain.contains("^MM") && !plain.contains("^MN") && !plain.contains("^MT"));
+        let config = serde_json::json!({
+            "mediaHandling": "cutter",
+            "mediaSensor": "continuous",
+            "printMethod": "thermal",
+            "gapMm": 3
+        });
+        let config = config.as_object().unwrap();
+        let zpl = String::from_utf8(encode_zpl(&bitmap, config).unwrap()).unwrap();
+        assert!(zpl.starts_with("^XA\n^PW16\n^LL2\n^PON\n^MMC\n^MNN\n^MTD\n"));
+
+        let tspl = encode_tspl(&bitmap, config).unwrap();
+        let header = String::from_utf8_lossy(&tspl).into_owned();
+        assert!(header.contains("GAP 0 mm,0 mm"));
+        let cls = header.find("CLS").unwrap();
+        for command in ["SET PEEL OFF\r\n", "SET CUTTER 1\r\n", "SET RIBBON OFF\r\n"] {
+            assert!(header.find(command).unwrap() < cls, "{command:?}");
+        }
+        let mark = serde_json::json!({"mediaSensor": "mark", "gapMm": 3});
+        let mark = encode_tspl(&bitmap, mark.as_object().unwrap()).unwrap();
+        assert!(String::from_utf8_lossy(&mark).contains("BLINE 3 mm,0 mm"));
+    }
+
+    #[test]
     fn raster_encoders_apply_protocol_specific_pixel_polarity() {
         let bitmap = RasterizedLabel {
             width_dots: 16,
@@ -2354,7 +2469,7 @@ mod tests {
             + tspl_marker.len();
         assert_eq!(
             &tspl[tspl_data_start..tspl_data_start + bitmap.mono.len()],
-            bitmap.mono.as_slice()
+            &[0x7f, 0xff, 0x00, 0xaa]
         );
 
         let epl = encode_epl(&bitmap, &config).unwrap();

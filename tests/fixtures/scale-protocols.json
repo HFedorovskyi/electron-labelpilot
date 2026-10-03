@@ -2,7 +2,7 @@
   "protocols": [
     { "id": "cas_simple", "encoding": "utf8", "data": "ST,GS,+  1.500kg\r\n", "expected": { "weight": 1.5, "unit": "kg", "stable": true } },
     { "id": "mettler_sics", "encoding": "utf8", "data": "S S 100.00 g\r\n", "expected": { "weight": 0.1, "unit": "kg", "stable": true } },
-    { "id": "massak_100", "encoding": "hex", "data": "f855ce070010d204000000010000", "expected": { "weight": 1.234, "unit": "kg", "stable": true } },
+    { "id": "massak_100", "encoding": "hex", "data": "f855ce090024d2040000010100002ad2", "expected": { "weight": 1.234, "unit": "kg", "stable": true } },
     { "id": "massak_p1", "encoding": "utf8", "data": "S +001.234 kg\r\n", "expected": { "weight": 1.234, "unit": "kg", "stable": true } },
     { "id": "massak_astb", "encoding": "utf8", "data": "S + 1.235 kg\r", "expected": { "weight": 1.235, "unit": "kg", "stable": true } },
     { "id": "massak_astbp", "encoding": "utf8", "data": "S +2.750\r\n", "expected": { "weight": 2.75, "unit": "kg", "stable": true } },

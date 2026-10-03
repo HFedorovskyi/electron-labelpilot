@@ -653,6 +653,31 @@ async function encodeZ64(mono: Uint8Array): Promise<string> {
     return `:Z64:${encoded}:${crc}`;
 }
 
+// Label output settings mirror src-tauri/src/generator/media.rs. A missing value
+// or "printer" sends nothing, keeping the printer's own setup.
+const ZPL_MEDIA_HANDLING = new Map([['tear', '^MMT\n'], ['peel', '^MMP\n'], ['cutter', '^MMC\n'], ['applicator', '^MMA\n']]);
+const ZPL_MEDIA_SENSOR = new Map([['gap', '^MNY\n'], ['mark', '^MNM\n'], ['continuous', '^MNN\n']]);
+const ZPL_PRINT_METHOD = new Map([['thermal', '^MTD\n'], ['transfer', '^MTT\n']]);
+const TSPL_MEDIA_HANDLING = new Map<string, readonly string[]>([
+    ['tear', ['SET CUTTER OFF', 'SET PEEL OFF', 'SET TEAR ON']],
+    ['peel', ['SET CUTTER OFF', 'SET PEEL ON']],
+    ['cutter', ['SET PEEL OFF', 'SET CUTTER 1']],
+]);
+const TSPL_PRINT_METHOD = new Map([['thermal', 'SET RIBBON OFF'], ['transfer', 'SET RIBBON ON']]);
+
+function zplMediaCommands(config: Record<string, unknown>): string {
+    return (ZPL_MEDIA_HANDLING.get(String(config.mediaHandling)) ?? '')
+        + (ZPL_MEDIA_SENSOR.get(String(config.mediaSensor)) ?? '')
+        + (ZPL_PRINT_METHOD.get(String(config.printMethod)) ?? '');
+}
+
+function tsplMediaCommands(config: Record<string, unknown>): string[] {
+    const commands = [...(TSPL_MEDIA_HANDLING.get(String(config.mediaHandling)) ?? [])];
+    const method = TSPL_PRINT_METHOD.get(String(config.printMethod));
+    if (method) commands.push(method);
+    return commands;
+}
+
 export async function encodeZplBitmap(
     bitmap: TauriRenderedBitmap,
     config: Record<string, unknown>,
@@ -666,6 +691,7 @@ export async function encodeZplBitmap(
             ? await encodeZ64(bitmap.mono)
             : compressZplBitmap(bitmap.mono, bitmap.bytesPerRow, bitmap.heightDots);
     let stream = `^XA\n^PW${bitmap.widthDots}\n^LL${bitmap.heightDots}\n^PON\n`;
+    stream += zplMediaCommands(config);
     if (config.darkness !== undefined) stream += `^MD${finite(config.darkness)}\n`;
     if (config.printSpeed !== undefined) stream += `^PR${finite(config.printSpeed)}\n`;
     stream += `^FO0,0^GFA,${total},${total},${bitmap.bytesPerRow},${graphic}^FS\n`;
@@ -682,10 +708,16 @@ export function encodeTsplBitmap(bitmap: TauriRenderedBitmap, config: Record<str
     const heightMm = bitmap.heightDots * 25.4 / dpi;
     const density = Math.max(0, Math.min(15, Math.round(finite(config.darkness, 15) / 2)));
     const speed = Math.max(1, Math.min(12, Math.round(finite(config.printSpeed, 4))));
-    const gap = Math.max(0, finite(config.gapMm, 2));
-    const prefix = ascii(`SIZE ${widthMm.toFixed(2)} mm,${heightMm.toFixed(2)} mm\r\nGAP ${gap} mm,0 mm\r\nSPEED ${speed}\r\nDENSITY ${density}\r\nCLS\r\nBITMAP 0,0,${bitmap.bytesPerRow},${bitmap.heightDots},0,`);
+    const gap = config.mediaSensor === 'continuous' ? 0 : Math.max(0, finite(config.gapMm, 2));
+    const sensor = config.mediaSensor === 'mark' ? 'BLINE' : 'GAP';
+    const setup = tsplMediaCommands(config).map(command => `${command}\r\n`).join('');
+    const prefix = ascii(`SIZE ${widthMm.toFixed(2)} mm,${heightMm.toFixed(2)} mm\r\n${sensor} ${gap} mm,0 mm\r\nSPEED ${speed}\r\nDENSITY ${density}\r\n${setup}CLS\r\nBITMAP 0,0,${bitmap.bytesPerRow},${bitmap.heightDots},0,`);
     const suffix = ascii('\r\nPRINT 1,1\r\n');
-    const bytes = concat([prefix, bitmap.mono, suffix]);
+    // TSPL BITMAP, like EPL2 GW, uses 0 for a printed dot and 1 for an
+    // unprinted dot, opposite to the renderer's canonical 1 = black
+    // representation. Row padding stays unprinted after the inversion.
+    const tsplMono = bitmap.mono.map(byte => byte ^ 0xff);
+    const bytes = concat([prefix, tsplMono, suffix]);
     if (bytes.length > MAX_OUTPUT_BYTES) throw new Error(`TSPL bitmap exceeds ${MAX_OUTPUT_BYTES} bytes`);
     return bytes;
 }

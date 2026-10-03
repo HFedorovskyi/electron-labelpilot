@@ -611,7 +611,17 @@ impl AutoPrintGate {
                 AutoPrintDecision::None
             };
         }
-        self.below_since = None;
+        // The scale core suppresses repeated identical readings, so a scale
+        // that holds exactly zero emits no further frame after the hold
+        // window. Judge the empty period when the next product arrives.
+        if self
+            .below_since
+            .take()
+            .is_some_and(|since| since.elapsed() >= self.rearm_hold)
+        {
+            self.fired = false;
+            self.failed = false;
+        }
         if weight_kg <= 0.010
             || !self.enabled
             || !self.ready
@@ -628,6 +638,87 @@ impl AutoPrintGate {
         AutoPrintDecision::Fire
     }
 }
+/// Selects a product on the weighing page, from a tap or a scan, honouring
+/// the open-box and busy guards.
+fn request_weighing_product(
+    ui: &WeighingPrototype,
+    runtime: &NativeUiRuntime,
+    selected_product: &Rc<Cell<Option<i64>>>,
+    auto_print_gate: &Rc<RefCell<AutoPrintGate>>,
+    message_tx: &UiMessageSender,
+    product_id: i64,
+) {
+    let previous_product_id = selected_product.get();
+    let busy = ui.get_product_selection_busy()
+        || auto_print_gate.borrow().printing
+        || ui.get_fixed_busy()
+        || ui.get_production_jobs_busy();
+    if let Some(reason) =
+        product_change_block(previous_product_id, product_id, ui.get_units_in_box(), busy)
+    {
+        let message = match reason {
+            ProductChangeBlock::OpenBox => ui.get_product_change_blocked_label(),
+            ProductChangeBlock::Busy => ui.get_product_change_busy_label(),
+        };
+        show_alert(ui, message.as_str());
+        return;
+    }
+    if previous_product_id == Some(product_id) {
+        ui.set_product_modal_visible(false);
+        ui.set_touch_keyboard_visible(false);
+        return;
+    }
+    ui.set_product_selection_busy(true);
+    let runtime = runtime.clone();
+    let message_tx = message_tx.clone();
+    spawn_ui_task(move || {
+        let _ = message_tx.send(UiMessage::ProductSelected {
+            previous_product_id,
+            outcome: runtime.select_weighing_product(previous_product_id, product_id),
+        });
+    });
+}
+
+/// Keyboard-wedge scanners type a code and Enter in a few milliseconds. A
+/// pause longer than the idle limit starts a new code, so stray keystrokes
+/// never prefix the next scan.
+#[derive(Default)]
+struct ScanBuffer {
+    text: String,
+    last_key: Option<Instant>,
+}
+
+const SCAN_IDLE_RESET: Duration = Duration::from_secs(2);
+const SCAN_MIN_LENGTH: usize = 3;
+const SCAN_MAX_LENGTH: usize = 512;
+
+impl ScanBuffer {
+    fn push(&mut self, key: &str, now: Instant) -> Option<String> {
+        if self
+            .last_key
+            .is_some_and(|last| now.duration_since(last) > SCAN_IDLE_RESET)
+        {
+            self.text.clear();
+        }
+        self.last_key = Some(now);
+        if matches!(key, "\n" | "\r" | "\t") {
+            let code = std::mem::take(&mut self.text);
+            let code = code.trim();
+            return (code.chars().count() >= SCAN_MIN_LENGTH).then(|| code.to_owned());
+        }
+        for character in key.chars() {
+            // GS (FNC1) separates GS1 fields; other controls and the private
+            // use area (arrow and function keys) are not part of a code.
+            let printable = character == '\u{1d}'
+                || !(character.is_control() || ('\u{e000}'..='\u{f8ff}').contains(&character));
+            if printable && self.text.len() < SCAN_MAX_LENGTH {
+                self.text.push(character);
+            }
+        }
+        None
+    }
+}
+
 fn show_toast(ui: &WeighingPrototype, message: &str) {
     ui.set_toast_text(message.into());
     ui.set_toast_visible(true);
@@ -1434,6 +1525,9 @@ fn apply_printer_role_editor(ui: &WeighingPrototype, role: &NativePrinterRoleSet
     ui.set_settings_dpi(role.dpi.to_string().into());
     ui.set_settings_ram_cache(role.ram_cache.clone().into());
     ui.set_settings_zpl_compression(role.zpl_compression.clone().into());
+    ui.set_settings_media_handling(role.media_handling.clone().into());
+    ui.set_settings_media_sensor(role.media_sensor.clone().into());
+    ui.set_settings_print_method(role.print_method.clone().into());
     ui.set_settings_confirmed_print(role.confirmed_print);
     ui.set_settings_darkness(format_optional_setting(role.darkness).into());
     ui.set_settings_print_speed(format_optional_setting(role.print_speed).into());
@@ -1514,6 +1608,9 @@ fn printer_settings_input(
         dpi: parse_settings_i32("DPI", &ui.get_settings_dpi())?,
         ram_cache: ui.get_settings_ram_cache().to_string(),
         zpl_compression: ui.get_settings_zpl_compression().to_string(),
+        media_handling: ui.get_settings_media_handling().to_string(),
+        media_sensor: ui.get_settings_media_sensor().to_string(),
+        print_method: ui.get_settings_print_method().to_string(),
         confirmed_print: ui.get_settings_confirmed_print(),
         darkness: parse_optional_settings_f64("Темнота", &ui.get_settings_darkness())?,
         print_speed: parse_optional_settings_f64(
@@ -1557,6 +1654,8 @@ fn apply_scale_settings_snapshot(ui: &WeighingPrototype, snapshot: NativeScaleSe
     ui.set_scale_settings_port(snapshot.port.to_string().into());
     ui.set_scale_settings_polling(snapshot.polling_interval.to_string().into());
     ui.set_scale_settings_stability_count(snapshot.stability_count.to_string().into());
+    ui.set_scale_settings_min_weight(optional_settings_number(snapshot.min_weight_kg).into());
+    ui.set_scale_settings_max_weight(optional_settings_number(snapshot.max_weight_kg).into());
     ui.set_scale_settings_runtime_status(snapshot.runtime_status.into());
     ui.set_scale_settings_status(
         format!("{} · {}", snapshot.catalog_status, chrono_like_time()).into(),
@@ -1579,7 +1678,13 @@ fn scale_settings_input(ui: &WeighingPrototype) -> Result<NativeScaleSettingsInp
             "Отсчёты стабильности",
             &ui.get_scale_settings_stability_count(),
         )?,
+        min_weight_kg: parse_optional_settings_f64("Min весов", &ui.get_scale_settings_min_weight())?,
+        max_weight_kg: parse_optional_settings_f64("Max весов", &ui.get_scale_settings_max_weight())?,
     })
+}
+
+fn optional_settings_number(value: Option<f64>) -> String {
+    value.map(|value| value.to_string()).unwrap_or_default()
 }
 
 fn zpl_test_label(number: &str, gross_weight: &str) -> Vec<u8> {
@@ -2668,9 +2773,24 @@ fn apply_snapshot(
     );
 }
 
+fn reading_is_overload(payload: &Value) -> bool {
+    payload
+        .get("overload")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
 fn apply_core_event(ui: &WeighingPrototype, event: CoreEvent) {
     match event {
         CoreEvent::Event { name, payload } if name == "scale-reading" => {
+            if reading_is_overload(&payload) {
+                ui.set_gross_weight("OL".into());
+                ui.set_net_weight("OL".into());
+                ui.set_stable(false);
+                ui.set_scale_online(true);
+                ui.set_scale_status("Весы: перегруз".into());
+                return;
+            }
             if let Some(weight) = payload.get("weight").and_then(Value::as_f64) {
                 ui.set_gross_weight(format!("{weight:.3}").into());
                 ui.set_net_weight(
@@ -3186,34 +3306,75 @@ pub fn run() -> Result<(), String> {
             else {
                 return;
             };
-            let previous_product_id = selected_product.get();
-            let busy = ui.get_product_selection_busy()
-                || auto_print_gate.borrow().printing
-                || ui.get_fixed_busy()
-                || ui.get_production_jobs_busy();
-            if let Some(reason) =
-                product_change_block(previous_product_id, product_id, ui.get_units_in_box(), busy)
-            {
-                let message = match reason {
-                    ProductChangeBlock::OpenBox => ui.get_product_change_blocked_label(),
-                    ProductChangeBlock::Busy => ui.get_product_change_busy_label(),
-                };
-                show_alert(&ui, message.as_str());
+            request_weighing_product(
+                &ui,
+                &runtime,
+                &selected_product,
+                &auto_print_gate,
+                &message_tx,
+                product_id,
+            );
+        }
+    });
+
+    ui.on_scanner_key({
+        let weak = ui.as_weak();
+        let runtime = runtime.clone();
+        let buffer = Rc::new(RefCell::new(ScanBuffer::default()));
+        let selected_product = Rc::clone(&selected_product);
+        let auto_print_gate = Rc::clone(&auto_print_gate);
+        let selected_fixed_product = Rc::clone(&selected_fixed_product);
+        let fixed_weight_refresh_gate = Rc::clone(&fixed_weight_refresh_gate);
+        let message_tx = message_tx.clone();
+        move |key| {
+            let Some(code) = buffer.borrow_mut().push(key.as_str(), Instant::now()) else {
                 return;
-            }
-            if previous_product_id == Some(product_id) {
-                ui.set_product_modal_visible(false);
-                ui.set_touch_keyboard_visible(false);
+            };
+            let Some(ui) = weak.upgrade() else { return };
+            let Some(runtime) = runtime.as_ref() else {
                 return;
+            };
+            let product = match runtime.product_by_scan(&code) {
+                Ok(Some(product)) => product,
+                Ok(None) => {
+                    show_toast(&ui, &format!("{}: {code}", ui.get_scanner_not_found_label()));
+                    return;
+                }
+                Err(error) => {
+                    show_alert(&ui, &error);
+                    return;
+                }
+            };
+            match ui.get_active_page() {
+                0 => request_weighing_product(
+                    &ui,
+                    runtime,
+                    &selected_product,
+                    &auto_print_gate,
+                    &message_tx,
+                    product.id,
+                ),
+                5 if !product.fixed_weight => show_toast(
+                    &ui,
+                    &format!("{}: {}", ui.get_scanner_not_fixed_label(), product.name),
+                ),
+                5 if ui.get_fixed_busy() => {
+                    show_alert(&ui, ui.get_product_change_busy_label().as_str())
+                }
+                5 => {
+                    selected_fixed_product.set(Some(product.id));
+                    ui.set_fixed_product_modal_visible(false);
+                    ui.set_fixed_busy(true);
+                    schedule_fixed_weight_refresh(
+                        &fixed_weight_refresh_gate,
+                        runtime,
+                        &message_tx,
+                        Some(product.id),
+                        None,
+                    );
+                }
+                _ => {}
             }
-            ui.set_product_selection_busy(true);
-            let message_tx = message_tx.clone();
-            spawn_ui_task(move || {
-                let _ = message_tx.send(UiMessage::ProductSelected {
-                    previous_product_id,
-                    outcome: runtime.select_weighing_product(previous_product_id, product_id),
-                });
-            });
         }
     });
 
@@ -4733,7 +4894,11 @@ pub fn run() -> Result<(), String> {
                 match message {
                     Ok(UiMessage::Core(event)) => {
                         let reading = match &event {
-                            CoreEvent::Event { name, payload } if name == "scale-reading" => {
+                            // An overload frame is not a measurement: it must
+                            // neither fire nor rearm auto-print.
+                            CoreEvent::Event { name, payload }
+                                if name == "scale-reading" && !reading_is_overload(payload) =>
+                            {
                                 payload.get("weight").and_then(Value::as_f64).map(|weight| {
                                     (
                                         weight,
@@ -6503,7 +6668,10 @@ mod adaptive_layout_tests {
 }
 #[cfg(test)]
 mod auto_print_gate_tests {
-    use super::{select_auto_print_target, AutoPrintDecision, AutoPrintGate, AutoPrintTarget};
+    use super::{
+        select_auto_print_target, AutoPrintDecision, AutoPrintGate, AutoPrintTarget, ScanBuffer,
+        SCAN_IDLE_RESET,
+    };
     use std::time::{Duration, Instant};
 
     #[test]
@@ -6623,6 +6791,70 @@ mod auto_print_gate_tests {
         gate.below_since = Some(Instant::now() - Duration::from_millis(2_000));
         assert_eq!(gate.observe(0.0, true, true), AutoPrintDecision::Rearmed);
         assert_eq!(gate.observe(1.250, true, true), AutoPrintDecision::Fire);
+    }
+
+    #[test]
+    fn scan_buffer_collects_a_code_until_enter() {
+        let mut buffer = ScanBuffer::default();
+        let start = Instant::now();
+        for (offset, key) in "4870254930240".chars().enumerate() {
+            assert_eq!(
+                buffer.push(&key.to_string(), start + Duration::from_millis(offset as u64)),
+                None
+            );
+        }
+        assert_eq!(
+            buffer.push("\n", start + Duration::from_millis(20)).as_deref(),
+            Some("4870254930240")
+        );
+        // GS separators survive; arrow keys and controls do not.
+        buffer.push("01", start);
+        buffer.push("\u{1d}", start);
+        buffer.push("\u{f700}", start);
+        buffer.push("\u{8}", start);
+        buffer.push("10A", start);
+        assert_eq!(buffer.push("\r", start).as_deref(), Some("01\u{1d}10A"));
+        // Too short to be a code.
+        buffer.push("12", start);
+        assert_eq!(buffer.push("\n", start), None);
+    }
+
+    #[test]
+    fn scan_buffer_drops_stale_keystrokes() {
+        let mut buffer = ScanBuffer::default();
+        let start = Instant::now();
+        buffer.push("x", start);
+        let later = start + SCAN_IDLE_RESET + Duration::from_millis(1);
+        buffer.push("ART-42", later);
+        assert_eq!(buffer.push("\n", later).as_deref(), Some("ART-42"));
+    }
+
+    #[test]
+    fn rearms_when_a_silent_empty_scale_receives_the_next_product() {
+        let mut gate = AutoPrintGate::new(true);
+        gate.mark_ready();
+
+        assert_eq!(gate.observe(1.250, true, true), AutoPrintDecision::Fire);
+        gate.finish_print();
+        // The product is removed. The last deduplicated zero frame arrives
+        // inside the hold window and the scale then stays silent.
+        assert_eq!(gate.observe(0.0, true, true), AutoPrintDecision::None);
+        gate.below_since = Some(Instant::now() - Duration::from_millis(2_000));
+        // The next product is the first frame after the silent empty period.
+        assert_eq!(gate.observe(0.980, true, true), AutoPrintDecision::Fire);
+    }
+
+    #[test]
+    fn silent_empty_scale_also_clears_the_failure_latch() {
+        let mut gate = AutoPrintGate::new(true);
+        gate.mark_ready();
+
+        assert_eq!(gate.observe(2.400, true, true), AutoPrintDecision::Fire);
+        gate.finish_print();
+        gate.mark_failed();
+        assert_eq!(gate.observe(0.0, true, true), AutoPrintDecision::None);
+        gate.below_since = Some(Instant::now() - Duration::from_millis(2_000));
+        assert_eq!(gate.observe(2.400, true, true), AutoPrintDecision::Fire);
     }
 
     #[test]

@@ -185,6 +185,62 @@ impl OperationalState {
             )
         })
     }
+    /// Finds the product a scanned code names. A code carrying a GTIN is
+    /// matched against articles without leading zeros, so GTIN-13 and GTIN-14
+    /// spellings of one item are the same product and a GTIN entered twice
+    /// is caught; other codes match the article verbatim. Two products
+    /// sharing the code are an error, never a silent pick.
+    #[cfg(feature = "slint-ui")]
+    pub fn product_by_scan(&self, code: &str) -> Result<Option<ScannedProduct>, String> {
+        let code = code.trim();
+        if code.is_empty() || code.chars().count() > 512 {
+            return Ok(None);
+        }
+        let gtin = crate::gs1::scanned_gtin(code);
+        self.with_connection(|connection| {
+            let mut found = Vec::new();
+            for (sql, key) in [
+                (
+                    "SELECT id, name, is_fixed_weight FROM nomenclature \
+                     WHERE ltrim(trim(article), '0') = ?1 ORDER BY id LIMIT 2",
+                    gtin.clone(),
+                ),
+                (
+                    "SELECT id, name, is_fixed_weight FROM nomenclature \
+                     WHERE trim(article) = ?1 ORDER BY id LIMIT 2",
+                    Some(code.to_owned()),
+                ),
+            ] {
+                let Some(key) = key else { continue };
+                let mut statement = connection
+                    .prepare_cached(sql)
+                    .map_err(db_error("prepare scanned product lookup"))?;
+                found = statement
+                    .query_map(params![key], |row| {
+                        Ok(ScannedProduct {
+                            id: row.get(0)?,
+                            name: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                            fixed_weight: row.get::<_, Option<i64>>(2)?.unwrap_or(0) != 0,
+                        })
+                    })
+                    .map_err(db_error("query scanned product"))?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(db_error("read scanned product"))?;
+                if !found.is_empty() {
+                    break;
+                }
+            }
+            match found.len() {
+                0 => Ok(None),
+                1 => Ok(found.pop()),
+                _ => Err(format!(
+                    "код {code} относится к нескольким товарам ({} и {}); исправьте артикулы в номенклатуре",
+                    found[0].name, found[1].name
+                )),
+            }
+        })
+    }
+
     #[cfg(feature = "slint-ui")]
     pub fn latest_active_pack_id(&self, nomenclature_id: i64) -> Result<Option<i64>, String> {
         require_positive_id(nomenclature_id, "nomenclatureId")?;
@@ -688,6 +744,14 @@ pub struct OperatorCredentials {
     pub full_name: String,
     pub short_code: String,
     pub pin_hash: Option<String>,
+}
+
+#[cfg(feature = "slint-ui")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ScannedProduct {
+    pub id: i64,
+    pub name: String,
+    pub fixed_weight: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1708,6 +1772,47 @@ mod tests {
                 data: Map::new(),
             }),
         }
+    }
+
+    #[cfg(feature = "slint-ui")]
+    #[test]
+    fn scanned_codes_find_products_by_article_or_gtin() {
+        let (_directory, _persisted, state) = fixture("scan-lookup");
+        state
+            .with_connection(|connection| {
+                connection
+                    .execute_batch(
+                        r#"
+                        INSERT INTO nomenclature (id, name, article, exp_date, is_fixed_weight)
+                        VALUES (2, 'Ham', '4870254930240', 10, 1),
+                               (3, 'Brisket', 'ART-42', 10, 0),
+                               (4, 'Dup A', '2000000000015', 10, 0),
+                               (5, 'Dup B', '02000000000015', 10, 0);
+                        "#,
+                    )
+                    .map_err(db_error("seed scan lookup"))
+            })
+            .unwrap();
+
+        let by_ean = state.product_by_scan("4870254930240").unwrap().unwrap();
+        assert_eq!((by_ean.id, by_ean.fixed_weight), (2, true));
+        // GTIN-14 and a keyboard-wedge GS1 DataMatrix name the same item.
+        assert_eq!(state.product_by_scan("04870254930240").unwrap().unwrap().id, 2);
+        assert_eq!(
+            state
+                .product_by_scan("]d20104870254930240\u{1d}10LOT7")
+                .unwrap()
+                .unwrap()
+                .id,
+            2
+        );
+        // Internal article codes match verbatim.
+        let by_article = state.product_by_scan(" ART-42 ").unwrap().unwrap();
+        assert_eq!((by_article.id, by_article.fixed_weight), (3, false));
+        assert_eq!(state.product_by_scan("9999999999994").unwrap(), None);
+        // Two products sharing one GTIN must be fixed in the catalogue.
+        let error = state.product_by_scan("2000000000015").unwrap_err();
+        assert!(error.contains("Dup A"), "{error}");
     }
 
     #[test]

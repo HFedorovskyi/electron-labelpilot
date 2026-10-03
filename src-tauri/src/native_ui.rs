@@ -272,6 +272,9 @@ pub struct NativePrinterRoleSettings {
     pub dpi: i32,
     pub ram_cache: String,
     pub zpl_compression: String,
+    pub media_handling: String,
+    pub media_sensor: String,
+    pub print_method: String,
     pub confirmed_print: bool,
     pub darkness: Option<f64>,
     pub print_speed: Option<f64>,
@@ -299,6 +302,9 @@ pub struct NativePrinterRoleSettingsInput {
     pub dpi: i32,
     pub ram_cache: String,
     pub zpl_compression: String,
+    pub media_handling: String,
+    pub media_sensor: String,
+    pub print_method: String,
     pub confirmed_print: bool,
     pub darkness: Option<f64>,
     pub print_speed: Option<f64>,
@@ -356,6 +362,8 @@ pub struct NativeScaleSettingsSnapshot {
     pub port: i32,
     pub polling_interval: i32,
     pub stability_count: i32,
+    pub min_weight_kg: Option<f64>,
+    pub max_weight_kg: Option<f64>,
     pub runtime_status: String,
     pub protocols: Vec<NativeScaleProtocolSettings>,
     pub serial_ports: Vec<NativePrinterChoice>,
@@ -372,6 +380,9 @@ pub struct NativeScaleSettingsInput {
     pub port: i32,
     pub polling_interval: i32,
     pub stability_count: i32,
+    /// Minimum and maximum capacity from the scale's data plate (NAWI).
+    pub min_weight_kg: Option<f64>,
+    pub max_weight_kg: Option<f64>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -675,6 +686,8 @@ impl NativeUiRuntime {
             port: value_i64(config.get("port")).unwrap_or(4_001) as i32,
             polling_interval: value_i64(config.get("pollingInterval")).unwrap_or(250) as i32,
             stability_count: value_i64(config.get("stabilityCount")).unwrap_or(4) as i32,
+            min_weight_kg: value_f64(config.get("minWeightKg")),
+            max_weight_kg: value_f64(config.get("maxWeightKg")),
             runtime_status: self.scale.status().to_owned(),
             protocols,
             serial_ports,
@@ -732,6 +745,8 @@ impl NativeUiRuntime {
         object.insert("port".to_owned(), json!(input.port));
         object.insert("pollingInterval".to_owned(), json!(input.polling_interval));
         object.insert("stabilityCount".to_owned(), json!(input.stability_count));
+        set_optional_number(object, "minWeightKg", input.min_weight_kg);
+        set_optional_number(object, "maxWeightKg", input.max_weight_kg);
         ScaleConfig::from_value(config.clone())?;
         Ok(config)
     }
@@ -1065,8 +1080,21 @@ impl NativeUiRuntime {
         device.insert("dpi".to_owned(), json!(input.dpi));
         set_string(device, "ramCache", &input.ram_cache);
         set_string(device, "zplCompression", &input.zpl_compression);
+        let supports_media = matches!(input.protocol.as_str(), "zpl" | "image" | "tspl");
+        for (key, value) in [
+            ("mediaHandling", &input.media_handling),
+            ("mediaSensor", &input.media_sensor),
+            ("printMethod", &input.print_method),
+        ] {
+            // "printer" keeps the printer's own setup: no key, no command.
+            if supports_media && value != "printer" {
+                set_string(device, key, value);
+            } else {
+                device.remove(key);
+            }
+        }
         let supports_confirmation = matches!(input.connection.as_str(), "tcp" | "serial")
-            && matches!(input.protocol.as_str(), "zpl" | "image" | "tspl");
+            && matches!(input.protocol.as_str(), "zpl" | "image" | "tspl" | "dpl");
         device.insert(
             "confirmedPrint".to_owned(),
             Value::Bool(input.confirmed_print && supports_confirmation),
@@ -1744,6 +1772,14 @@ impl NativeUiRuntime {
     }
 
     #[cfg(feature = "slint-ui")]
+    /// Product named by a scanned barcode (article or GTIN).
+    pub fn product_by_scan(
+        &self,
+        code: &str,
+    ) -> Result<Option<crate::operational::ScannedProduct>, String> {
+        self.operational()?.product_by_scan(code)
+    }
+
     fn production_product(&self, product_id: i64) -> Result<NativeUiProduct, String> {
         let value = self
             .operational()?
@@ -1845,6 +1881,16 @@ fn validate_scale_settings_input(input: &NativeScaleSettingsInput) -> Result<(),
     if !(2..=32).contains(&input.stability_count) {
         return Err("число отсчётов стабильности должно быть в диапазоне 2–32".to_owned());
     }
+    for (label, value) in [("Min", input.min_weight_kg), ("Max", input.max_weight_kg)] {
+        if value.is_some_and(|value| !value.is_finite() || value <= 0.0 || value > 100_000.0) {
+            return Err(format!("{label} весов должен быть в диапазоне 0–100000 кг"));
+        }
+    }
+    if let (Some(min), Some(max)) = (input.min_weight_kg, input.max_weight_kg) {
+        if min >= max {
+            return Err("Min весов должен быть меньше Max".to_owned());
+        }
+    }
     match input.connection_type.as_str() {
         "serial" if input.serial_path.trim().is_empty() => {
             return Err("выберите последовательный порт весов".to_owned())
@@ -1943,6 +1989,12 @@ fn printer_role_settings(
         dpi: normalized_dpi(value_i64(device.get("dpi")).unwrap_or(203) as i32),
         ram_cache: value_string(device.get("ramCache")).unwrap_or_else(|| "auto".to_owned()),
         zpl_compression: printer_zpl_graphic_encoding(&device),
+        media_handling: value_string(device.get("mediaHandling"))
+            .unwrap_or_else(|| "printer".to_owned()),
+        media_sensor: value_string(device.get("mediaSensor"))
+            .unwrap_or_else(|| "printer".to_owned()),
+        print_method: value_string(device.get("printMethod"))
+            .unwrap_or_else(|| "printer".to_owned()),
         confirmed_print: device
             .get("confirmedPrint")
             .and_then(Value::as_bool)
@@ -1989,6 +2041,23 @@ fn validate_printer_settings_input(
     }
     if !matches!(input.zpl_compression.as_str(), "none" | "ascii-rle" | "z64") {
         return Err("кодирование ZPL: none, ascii-rle или z64".to_owned());
+    }
+    if matches!(input.protocol.as_str(), "zpl" | "image" | "tspl") {
+        crate::generator::validate_media_settings(
+            &input.protocol,
+            crate::generator::MediaSettings {
+                handling: Some(&input.media_handling),
+                sensor: Some(&input.media_sensor),
+                method: Some(&input.print_method),
+            },
+        )
+        .map_err(|error| {
+            if input.media_handling == "applicator" && input.protocol == "tspl" {
+                "аппликатор поддерживается только для ZPL".to_owned()
+            } else {
+                format!("выдача этикетки: {error}")
+            }
+        })?;
     }
     if !(1..=65_535).contains(&input.port) {
         return Err("TCP-порт должен быть в диапазоне 1–65535".to_owned());
@@ -3093,6 +3162,8 @@ mod tests {
             port: i32::from(port),
             polling_interval: 100,
             stability_count: 3,
+            min_weight_kg: None,
+            max_weight_kg: None,
         };
         let probe = runtime.test_scale_settings(input.clone()).unwrap();
         server.join().unwrap();
@@ -3122,8 +3193,12 @@ mod tests {
             port: 4_001,
             polling_interval: 150,
             stability_count: 3,
+            min_weight_kg: Some(0.04),
+            max_weight_kg: Some(15.0),
         };
         let saved = runtime.save_scale_settings(simulator.clone()).unwrap();
+        assert_eq!(saved.min_weight_kg, Some(0.04));
+        assert_eq!(saved.max_weight_kg, Some(15.0));
         assert_eq!(saved.connection_type, "simulator");
         assert_eq!(saved.protocol_id, "simulator");
         let reloaded = runtime.persisted().unwrap().load_scale_config();
@@ -3133,6 +3208,14 @@ mod tests {
         assert_eq!(reloaded["path"], "COM77");
         assert_eq!(reloaded["host"], "saved-host");
         assert_eq!(reloaded["pollingInterval"], 150);
+        assert_eq!(reloaded["minWeightKg"], 0.04);
+        assert_eq!(reloaded["maxWeightKg"], 15.0);
+        let mut inverted = simulator.clone();
+        inverted.min_weight_kg = Some(20.0);
+        assert!(runtime
+            .save_scale_settings(inverted)
+            .unwrap_err()
+            .contains("меньше Max"));
 
         let mut invalid = simulator;
         invalid.port = 0;
@@ -3209,6 +3292,9 @@ mod tests {
             dpi: 300,
             ram_cache: "auto".to_owned(),
             zpl_compression: "none".to_owned(),
+            media_handling: "peel".to_owned(),
+            media_sensor: "mark".to_owned(),
+            print_method: "printer".to_owned(),
             confirmed_print: false,
             darkness: Some(12.0),
             print_speed: Some(6.0),
@@ -3259,6 +3345,14 @@ mod tests {
         assert_eq!(reloaded["packPrinter"]["darkness"], 12.0);
         assert_eq!(reloaded["packPrinter"]["dpi"], 300);
         assert_eq!(reloaded["packPrinter"]["zplCompression"], "none");
+        assert_eq!(reloaded["packPrinter"]["mediaHandling"], "peel");
+        assert_eq!(reloaded["packPrinter"]["mediaSensor"], "mark");
+        assert!(
+            reloaded["packPrinter"].get("printMethod").is_none(),
+            "\"printer\" keeps the printer's own setup and stores nothing"
+        );
+        assert_eq!(saved.roles[0].media_handling, "peel");
+        assert_eq!(saved.roles[0].print_method, "printer");
         assert!(reloaded["packPrinter"].get("detectedProfileId").is_none());
         assert!(reloaded["packPrinter"]
             .get("persistentConnection")
@@ -3270,12 +3364,22 @@ mod tests {
             .save_printer_role_settings(invalid, false)
             .unwrap_err()
             .contains("1–65535"));
+        let mut tspl_applicator = input.clone();
+        tspl_applicator.protocol = "tspl".to_owned();
+        tspl_applicator.media_handling = "applicator".to_owned();
+        assert!(runtime
+            .save_printer_role_settings(tspl_applicator, false)
+            .unwrap_err()
+            .contains("аппликатор"));
 
         let receipt = runtime.test_printer_settings(input).unwrap();
         assert!(receipt["bytes"].as_u64().unwrap_or_default() > 0);
         let printed = printed_rx.recv_timeout(Duration::from_secs(5)).unwrap();
         assert!(printed.starts_with(b"^XA"));
         assert!(printed.windows(3).any(|window| window == b"^XZ"));
+        assert!(printed.windows(4).any(|window| window == b"^MMP"));
+        assert!(printed.windows(4).any(|window| window == b"^MNM"));
+        assert!(!printed.windows(3).any(|window| window == b"^MT"));
         server.join().unwrap();
         assert!(emitted.lock().unwrap().iter().any(|event| {
             matches!(

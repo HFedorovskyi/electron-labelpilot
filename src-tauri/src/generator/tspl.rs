@@ -14,9 +14,14 @@ pub(super) fn generate(input: &ParsedInput, geometry: Geometry) -> Result<Vec<u8
             number(geometry.height_mm)
         ),
     );
+    let media = input.config.media();
     push(
         &mut output,
-        &format!("GAP {} mm,0 mm", number(input.config.gap_mm.unwrap_or(2.0))),
+        &format!(
+            "{} {} mm,0 mm",
+            media.tspl_sensor_keyword(),
+            number(media.tspl_gap_mm(input.config.gap_mm.unwrap_or(2.0)))
+        ),
     );
     push(&mut output, "DIRECTION 1");
     push(&mut output, "REFERENCE 0,0");
@@ -44,6 +49,9 @@ pub(super) fn generate(input: &ParsedInput, geometry: Geometry) -> Result<Vec<u8
     );
     if input.profile.native_utf8_text {
         push(&mut output, "CODEPAGE UTF-8");
+    }
+    for command in media.tspl_commands() {
+        push(&mut output, command);
     }
     push(&mut output, "CLS");
 

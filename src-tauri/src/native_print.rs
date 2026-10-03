@@ -212,6 +212,7 @@ impl NativePrintService {
         events: &RuntimeEventSink,
         request: PackPrintRequest,
     ) -> Result<NativePrintOutcome, String> {
+        persisted.ensure_production_weight(request.gross_weight_kg)?;
         let _operation = self.lock_production()?;
         let started = Instant::now();
         let snapshot = self.capture_pack_snapshot(persisted, operational, session, request)?;

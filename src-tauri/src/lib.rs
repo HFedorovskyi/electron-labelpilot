@@ -11,6 +11,8 @@ mod diagnostic;
 #[cfg(any(feature = "desktop", feature = "slint-ui"))]
 mod generator;
 #[cfg(any(feature = "desktop", feature = "slint-ui"))]
+mod gs1;
+#[cfg(any(feature = "desktop", feature = "slint-ui"))]
 mod ingress;
 #[cfg(feature = "desktop")]
 mod lifecycle;

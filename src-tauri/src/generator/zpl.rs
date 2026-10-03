@@ -9,6 +9,7 @@ pub(super) fn generate(input: &ParsedInput, geometry: Geometry) -> Result<Vec<u8
     output.push_str(&format!("^PW{}\n", geometry.width_dots));
     output.push_str(&format!("^LL{}\n", geometry.height_dots));
     output.push_str("^PON\n");
+    output.push_str(&input.config.media().zpl_commands());
     if let Some(darkness) = input.config.darkness {
         output.push_str(&format!("^MD{}\n", js_number(darkness)));
     }
@@ -105,9 +106,30 @@ fn append_element(
                 data,
             );
             let height = js_round(element.h * geometry.scale_y);
-            let module = js_round(2.0 * (geometry.scale_x / 2.1)).max(2);
-            let human = if element.show_text { "Y" } else { "N" };
             let barcode = normalize_barcode(element.barcode_type.as_ref());
+            let mut module = js_round(2.0 * (geometry.scale_x / 2.1)).max(2);
+            let dots_per_mm = geometry.width_dots as f64 / geometry.width_mm;
+            if let (Some(minimum), Some(modules)) = (
+                crate::gs1::retail_min_module_dots(&barcode, dots_per_mm),
+                crate::gs1::retail_symbol_modules(&barcode),
+            ) {
+                module = module.max(minimum as i64);
+                // Rotated by 90/270 degrees the symbol runs down the label.
+                let available = if matches!(orientation, "R" | "B") {
+                    geometry.height_dots - y
+                } else {
+                    geometry.width_dots - x
+                };
+                if modules as i64 * module > available {
+                    return Err(crate::gs1::narrow_retail_symbol_error(
+                        &barcode,
+                        available.max(0) as f64 / dots_per_mm,
+                        (modules * minimum) as f64 / dots_per_mm,
+                        minimum,
+                    ));
+                }
+            }
+            let human = if element.show_text { "Y" } else { "N" };
             match barcode.as_str() {
                 "code128" | "gs1-128" => output.push_str(&format!(
                     "^BY{module},3.0,{height}^BC{orientation},{height},{human},N,N"

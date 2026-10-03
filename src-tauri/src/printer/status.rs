@@ -160,7 +160,9 @@ fn status_command(protocol: &str) -> Option<&'static [u8]> {
     match protocol {
         "zpl" | "image" => Some(b"~HS\r\n"),
         "tspl" => Some(b"\x1b!?"),
-        "epl" | "cpcl" | "dpl" | "sbpl" => None,
+        // DPL <SOH>A: "Send ASCII Status String".
+        "dpl" => Some(b"\x01A"),
+        "epl" | "cpcl" | "sbpl" => None,
         _ => None,
     }
 }
@@ -391,6 +393,7 @@ fn parse_link_os_version(response: &[u8]) -> Option<String> {
 fn response_complete(protocol: &str, response: &[u8]) -> bool {
     match protocol {
         "tspl" => !response.is_empty(),
+        "dpl" => dpl_status_flags(response).is_some(),
         "zpl" | "image" => zpl_frames(response).is_some(),
         _ => true,
     }
@@ -437,6 +440,7 @@ fn parse_protocol_response(protocol: &str, response: Vec<u8>) -> StatusObservati
     }
     match protocol {
         "tspl" => parse_tspl_response(response),
+        "dpl" => parse_dpl_response(response),
         "zpl" | "image" => parse_zpl_response(response),
         _ => parse_text_response(response),
     }
@@ -552,6 +556,73 @@ fn parse_tspl_response(response: Vec<u8>) -> StatusObservation {
     }
     if details.is_empty() {
         details.push("TSC real-time status reports ready".to_owned());
+    }
+    StatusObservation {
+        reachable: true,
+        status,
+        details,
+        supports_bidirectional_status: true,
+        response,
+        ..StatusObservation::default()
+    }
+}
+
+/// DPL <SOH>A answers "abcdefgh<CR>", each position Y or N: a interpreter
+/// busy, b paper out or fault, c ribbon out or fault, d printing batch,
+/// e busy printing, f paused, g label presented, h always N.
+fn dpl_status_flags(response: &[u8]) -> Option<[bool; 8]> {
+    let start = response
+        .iter()
+        .position(|byte| !byte.is_ascii_whitespace())?;
+    let record = response.get(start..start + 8)?;
+    if !response[start + 8..].contains(&b'\r') {
+        return None;
+    }
+    let mut flags = [false; 8];
+    for (flag, byte) in flags.iter_mut().zip(record) {
+        *flag = match byte {
+            b'Y' => true,
+            b'N' => false,
+            _ => return None,
+        };
+    }
+    Some(flags)
+}
+
+fn parse_dpl_response(response: Vec<u8>) -> StatusObservation {
+    let Some(flags) = dpl_status_flags(&response) else {
+        return unknown_status(response, "invalid DPL <SOH>A status string");
+    };
+    let [imaging, paper, ribbon, batch, printing, paused, presented, _] = flags;
+    let mut details = Vec::new();
+    for (set, detail) in [
+        (paper, "paper out or fault"),
+        (ribbon, "ribbon out or fault"),
+        (paused, "paused"),
+        (imaging, "interpreter busy"),
+        (batch, "printing batch"),
+        (printing, "busy printing"),
+        (presented, "label presented"),
+    ] {
+        if set {
+            details.push(detail.to_owned());
+        }
+    }
+    let status = if paper {
+        "paper-out"
+    } else if ribbon {
+        "ribbon-out"
+    } else if paused {
+        "paused"
+    } else if imaging || batch || printing {
+        "printing"
+    } else if presented {
+        "label-presented"
+    } else {
+        "ready"
+    };
+    if details.is_empty() {
+        details.push("DPL status reports ready".to_owned());
     }
     StatusObservation {
         reachable: true,
@@ -840,6 +911,45 @@ mod tests {
         server.join().unwrap();
         assert_eq!(report.status, "paper-out");
         assert_eq!(report.raw_response_hex.as_deref(), Some("04"));
+    }
+
+    #[test]
+    fn dpl_ascii_status_string_maps_every_flag() {
+        let cases: [(&[u8], &str); 6] = [
+            (b"NNNNNNNN\r", "ready"),
+            (b"NYNNNNNN\r", "paper-out"),
+            (b"NNYNNNNN\r", "ribbon-out"),
+            (b"NNNNNYNN\r", "paused"),
+            (b"NNNYYNNN\r", "printing"),
+            (b"\r\nNNNNNNYN\r", "label-presented"),
+        ];
+        for (response, expected) in cases {
+            let observation = parse_protocol_response("dpl", response.to_vec());
+            assert_eq!(observation.status, expected, "{response:?}");
+            assert!(observation.supports_bidirectional_status);
+        }
+        assert!(!response_complete("dpl", b"NNNN"));
+        assert!(!response_complete("dpl", b"NNNNNNNN"));
+        assert!(response_complete("dpl", b"NNNNNNNN\r"));
+        let garbled = parse_protocol_response("dpl", b"NNXNNNNN\r".to_vec());
+        assert!(!garbled.supports_bidirectional_status);
+    }
+
+    #[test]
+    fn dpl_status_query_sends_soh_a() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut command = [0_u8; 2];
+            stream.read_exact(&mut command).unwrap();
+            assert_eq!(command, [0x01, b'A']);
+            stream.write_all(b"NYNNNNNN\r").unwrap();
+        });
+        let report = query(&tcp_config(port, "dpl")).unwrap();
+        server.join().unwrap();
+        assert_eq!(report.status, "paper-out");
+        assert!(report.supports_bidirectional_status);
     }
 
     #[test]

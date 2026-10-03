@@ -16,6 +16,8 @@ const IDENTITY_FILE: &str = "identity.json";
 const DATABASE_FILE: &str = "client_data.db";
 const SEQUENCE_FILE: &str = "sequence-store.json";
 const LICENSE_TOKEN_FILE: &str = "license.token";
+const WEIGHT_LIMIT_TOLERANCE_KG: f64 = 1e-9;
+const SIMULATED_WEIGHT_BLOCKED: &str = "Весы работают в режиме симулятора: на лицензированной станции производственная печать запрещена. Подключите реальные весы в настройках.";
 const MAX_SEQUENCE_LENGTH: i64 = 4096;
 static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -91,6 +93,42 @@ impl PersistedState {
     }
     pub fn load_scale_config(&self) -> Value {
         normalize_scale(read_json(&self.data_dir.join(SCALE_FILE)).ok().flatten())
+    }
+
+    /// Checks a measured gross weight before a production pack is recorded:
+    /// - a station bound to a licensed server never records packs weighed by
+    ///   the built-in simulator (unbound trial stations may);
+    /// - NAWI 2014/31/EU: below the instrument's minimum capacity (Min) or
+    ///   above its maximum capacity (Max) a weighing is not a legal trade
+    ///   measurement. Min/Max come from the scale's data plate; absent = off.
+    pub fn ensure_production_weight(&self, gross_weight_kg: f64) -> Result<(), String> {
+        let config = self.load_scale_config();
+        let simulated = config.get("type").and_then(Value::as_str) == Some("simulator");
+        if simulated && self.load_license_token().is_some() {
+            return Err(SIMULATED_WEIGHT_BLOCKED.to_owned());
+        }
+        let limit = |key: &str| {
+            config
+                .get(key)
+                .and_then(Value::as_f64)
+                .filter(|value| value.is_finite() && *value > 0.0)
+        };
+        if let Some(min) = limit("minWeightKg") {
+            if gross_weight_kg + WEIGHT_LIMIT_TOLERANCE_KG < min {
+                return Err(format!(
+                    "Вес {gross_weight_kg:.3} кг ниже минимальной нагрузки весов Min = {min:.3} кг: \
+                     такое взвешивание не является законным измерением (NAWI 2014/31/EU)."
+                ));
+            }
+        }
+        if let Some(max) = limit("maxWeightKg") {
+            if gross_weight_kg - WEIGHT_LIMIT_TOLERANCE_KG > max {
+                return Err(format!(
+                    "Вес {gross_weight_kg:.3} кг выше максимальной нагрузки весов Max = {max:.3} кг."
+                ));
+            }
+        }
+        Ok(())
     }
 
     pub fn save_scale_config(&self, value: Value) -> Result<(), String> {
@@ -413,6 +451,9 @@ fn validate_scale(value: &Value) -> Result<(), String> {
     expect_string(object, "protocolId")?;
     optional_string(object, "path")?;
     optional_string(object, "host")?;
+    optional_string(object, "serialFormat")?;
+    optional_number(object, "minWeightKg")?;
+    optional_number(object, "maxWeightKg")?;
     for field in ["baudRate", "port", "pollingInterval", "stabilityCount"] {
         optional_integer(object, field)?;
     }
@@ -488,6 +529,18 @@ fn validate_printer(value: &Value) -> Result<(), String> {
         }
         optional_enum(device, "ramCache", &["auto", "on", "off"])?;
         optional_enum(device, "zplCompression", &["none", "ascii-rle", "z64"])?;
+        for field in ["mediaHandling", "mediaSensor", "printMethod"] {
+            optional_string(device, field)?;
+        }
+        let protocol = device
+            .get("protocol")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        crate::generator::validate_media_settings(
+            protocol,
+            crate::generator::MediaSettings::from_config(device),
+        )
+        .map_err(|error| format!("{role}: {error}"))?;
         optional_boolean(device, "z64")?;
         optional_enum(device, "tcpJobBoundary", &["stream", "eof"])?;
     }
@@ -1060,5 +1113,55 @@ mod tests {
             .is_err());
         assert!(!directory.0.join(SCALE_FILE).exists());
         assert!(state.next_sequence("invalid").is_err());
+    }
+
+    #[test]
+    fn simulated_weight_is_refused_only_on_a_licensed_station() {
+        let directory = TestDirectory::new("simulated-weight");
+        let state = PersistedState::for_data_dir(directory.0.clone());
+        let simulator = json!({"type": "simulator", "protocolId": "simulator"});
+
+        // Default real scale on an unlicensed station.
+        assert!(state.ensure_production_weight(1.0).is_ok());
+        // Trial station without a server licence may demonstrate printing.
+        state.save_scale_config(simulator.clone()).unwrap();
+        assert!(state.ensure_production_weight(1.0).is_ok());
+        // A station bound to a licensed server must not record simulated packs.
+        state.save_license_token("licence-token").unwrap();
+        let error = state.ensure_production_weight(1.0).unwrap_err();
+        assert!(error.contains("симулятора"), "{error}");
+        state
+            .save_scale_config(json!({"type": "serial", "protocolId": "cas_simple", "path": "COM3"}))
+            .unwrap();
+        assert!(state.ensure_production_weight(1.0).is_ok());
+    }
+
+    #[test]
+    fn weighings_outside_the_scale_min_max_are_refused() {
+        let directory = TestDirectory::new("scale-range");
+        let state = PersistedState::for_data_dir(directory.0.clone());
+        state
+            .save_scale_config(json!({
+                "type": "serial", "protocolId": "mettler_sics", "path": "COM3",
+                "minWeightKg": 0.04, "maxWeightKg": 15.0
+            }))
+            .unwrap();
+        assert!(state.ensure_production_weight(0.04).is_ok(), "Min itself is legal");
+        assert!(state.ensure_production_weight(15.0).is_ok(), "Max itself is legal");
+        let below = state.ensure_production_weight(0.038).unwrap_err();
+        assert!(below.contains("Min = 0.040"), "{below}");
+        let above = state.ensure_production_weight(15.002).unwrap_err();
+        assert!(above.contains("Max = 15.000"), "{above}");
+        // Absent limits disable the check.
+        state
+            .save_scale_config(json!({"type": "serial", "protocolId": "generic", "path": "COM3"}))
+            .unwrap();
+        assert!(state.ensure_production_weight(0.001).is_ok());
+        assert!(state
+            .save_scale_config(json!({
+                "type": "serial", "protocolId": "generic", "path": "COM3",
+                "minWeightKg": "0.04"
+            }))
+            .is_err());
     }
 }
