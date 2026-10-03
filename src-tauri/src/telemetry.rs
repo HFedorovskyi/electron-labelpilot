@@ -16,6 +16,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -33,6 +34,10 @@ const MAX_REPORT_DELETIONS: usize = 2_000;
 const MAX_REPORT_LOGS: usize = 500;
 const MAX_FLUSH_FILES: usize = 32;
 const MAX_EVENT_MESSAGE_BYTES: usize = 16 * 1024;
+const EVENT_QUEUE_CAPACITY: usize = 1_024;
+const EVENT_BATCH_SIZE: usize = 64;
+const EVENT_BATCH_DELAY: Duration = Duration::from_millis(20);
+const EVENT_FLUSH_TIMEOUT: Duration = Duration::from_secs(10);
 const RETAIN_REPORTED_LOG_ROWS: i64 = 10_000;
 const DEFAULT_INTERVAL: Duration = Duration::from_secs(5 * 60);
 const STARTUP_DELAY: Duration = Duration::from_secs(8);
@@ -55,6 +60,10 @@ pub struct TelemetrySummary {
     pub interval_ms: u64,
     pub uptime_ms: u64,
     pub recorded_events: u64,
+    pub pending_event_writes: u64,
+    pub dropped_events: u64,
+    pub event_write_failures: u64,
+    pub event_queue_capacity: usize,
     pub report_cycles: u64,
     pub sent_reports: u64,
     pub spooled_reports: u64,
@@ -72,6 +81,9 @@ pub struct TelemetrySummary {
 #[derive(Default)]
 struct TelemetryStats {
     recorded_events: AtomicU64,
+    pending_event_writes: AtomicU64,
+    dropped_events: AtomicU64,
+    event_write_failures: AtomicU64,
     report_cycles: AtomicU64,
     sent_reports: AtomicU64,
     spooled_reports: AtomicU64,
@@ -87,6 +99,9 @@ struct TelemetryInner {
     stop: AtomicBool,
     wake: (Mutex<bool>, Condvar),
     worker: Mutex<Option<JoinHandle<()>>>,
+    event_sender: SyncSender<EventWriterMessage>,
+    event_receiver: Mutex<Option<Receiver<EventWriterMessage>>>,
+    event_worker: Mutex<Option<JoinHandle<()>>>,
     cycle_guard: Mutex<()>,
     stats: TelemetryStats,
     last_success_at: Mutex<Option<String>>,
@@ -96,6 +111,20 @@ struct TelemetryInner {
 #[derive(Clone)]
 pub struct TelemetryState {
     inner: Arc<TelemetryInner>,
+}
+
+#[derive(Debug)]
+struct TelemetryEvent {
+    event_uid: String,
+    level: String,
+    message: String,
+    created_at: String,
+}
+
+enum EventWriterMessage {
+    Event(TelemetryEvent),
+    Flush(SyncSender<Result<(), String>>),
+    Shutdown(SyncSender<Result<(), String>>),
 }
 
 #[derive(Debug)]
@@ -116,6 +145,7 @@ enum UploadResult {
 
 impl TelemetryState {
     pub fn new(data_dir: PathBuf) -> Self {
+        let (event_sender, event_receiver) = mpsc::sync_channel(EVENT_QUEUE_CAPACITY);
         Self {
             inner: Arc::new(TelemetryInner {
                 data_dir,
@@ -124,6 +154,9 @@ impl TelemetryState {
                 stop: AtomicBool::new(false),
                 wake: (Mutex::new(false), Condvar::new()),
                 worker: Mutex::new(None),
+                event_sender,
+                event_receiver: Mutex::new(Some(event_receiver)),
+                event_worker: Mutex::new(None),
                 cycle_guard: Mutex::new(()),
                 stats: TelemetryStats::default(),
                 last_success_at: Mutex::new(None),
@@ -141,21 +174,30 @@ impl TelemetryState {
         if worker.is_some() {
             return Ok(());
         }
+        self.start_event_writer()?;
         self.inner.stop.store(false, Ordering::Release);
-        self.record_event(
+        if let Err(error) = self.record_event(
             &app,
             "INFO",
             "runtime",
             "runtime_started",
             json!({ "version": app.package_info().version.to_string() }),
-        )?;
+        ) {
+            let _ = self.stop_event_writer();
+            return Err(error);
+        }
         let state = self.clone();
-        *worker = Some(
-            thread::Builder::new()
-                .name("labelpilot-telemetry".to_owned())
-                .spawn(move || run_worker(state, app))
-                .map_err(|error| format!("failed to start telemetry worker: {error}"))?,
-        );
+        let report_worker = thread::Builder::new()
+            .name("labelpilot-telemetry".to_owned())
+            .spawn(move || run_worker(state, app))
+            .map_err(|error| format!("failed to start telemetry worker: {error}"));
+        match report_worker {
+            Ok(handle) => *worker = Some(handle),
+            Err(error) => {
+                let _ = self.stop_event_writer();
+                return Err(error);
+            }
+        }
         Ok(())
     }
 
@@ -174,6 +216,13 @@ impl TelemetryState {
             "runtime_stopped",
             json!({ "uptimeMs": self.inner.started.elapsed().as_millis() }),
         );
+        if let Err(error) = self.stop_event_writer() {
+            self.inner
+                .stats
+                .event_write_failures
+                .fetch_add(1, Ordering::AcqRel);
+            self.set_last_error(&error);
+        }
         if auto_report_enabled(app.state::<PersistedState>().load_printer_config()) {
             if let Err(error) = self.spool_pending(app, "shutdown") {
                 self.note_failure(app, &error);
@@ -213,6 +262,18 @@ impl TelemetryState {
                 .as_millis()
                 .min(u64::MAX as u128) as u64,
             recorded_events: self.inner.stats.recorded_events.load(Ordering::Acquire),
+            pending_event_writes: self
+                .inner
+                .stats
+                .pending_event_writes
+                .load(Ordering::Acquire),
+            dropped_events: self.inner.stats.dropped_events.load(Ordering::Acquire),
+            event_write_failures: self
+                .inner
+                .stats
+                .event_write_failures
+                .load(Ordering::Acquire),
+            event_queue_capacity: EVENT_QUEUE_CAPACITY,
             report_cycles: self.inner.stats.report_cycles.load(Ordering::Acquire),
             sent_reports: self.inner.stats.sent_reports.load(Ordering::Acquire),
             spooled_reports: self.inner.stats.spooled_reports.load(Ordering::Acquire),
@@ -250,30 +311,123 @@ impl TelemetryState {
         event: &str,
         fields: Value,
     ) -> Result<(), String> {
-        let persisted = app.state::<PersistedState>();
-        let connection = open_database(&persisted)?;
-        let message = event_message(
-            app.package_info().version.to_string(),
-            component,
-            event,
-            fields,
-        );
-        connection
-            .execute(
-                "INSERT INTO print_errors (event_uid, level, message, created_at) VALUES (?1, ?2, ?3, ?4)",
-                params![
-                    Uuid::new_v4().to_string(),
-                    normalize_level(level),
-                    message,
-                    now_rfc3339(),
-                ],
-            )
-            .map_err(|error| format!("failed to persist telemetry event: {error}"))?;
         self.inner
             .stats
-            .recorded_events
+            .pending_event_writes
             .fetch_add(1, Ordering::AcqRel);
+        let message = EventWriterMessage::Event(TelemetryEvent {
+            event_uid: Uuid::new_v4().to_string(),
+            level: normalize_level(level).to_owned(),
+            message: event_message(
+                app.package_info().version.to_string(),
+                component,
+                event,
+                fields,
+            ),
+            created_at: now_rfc3339(),
+        });
+        match self.inner.event_sender.try_send(message) {
+            Ok(()) => Ok(()),
+            Err(TrySendError::Full(_)) => {
+                self.drop_queued_event();
+                Err("telemetry event queue is full".to_owned())
+            }
+            Err(TrySendError::Disconnected(_)) => {
+                self.drop_queued_event();
+                Err("telemetry event writer is not running".to_owned())
+            }
+        }
+    }
+
+    fn start_event_writer(&self) -> Result<(), String> {
+        let mut worker = self
+            .inner
+            .event_worker
+            .lock()
+            .map_err(|_| "telemetry event worker lock is poisoned".to_owned())?;
+        if worker.is_some() {
+            return Ok(());
+        }
+        let receiver = self
+            .inner
+            .event_receiver
+            .lock()
+            .map_err(|_| "telemetry event receiver lock is poisoned".to_owned())?
+            .take()
+            .ok_or_else(|| "telemetry event writer cannot be restarted".to_owned())?;
+        let persisted = PersistedState::for_data_dir(self.inner.data_dir.clone());
+        let connection = open_database(&persisted)?;
+        let state = self.clone();
+        *worker = Some(
+            thread::Builder::new()
+                .name("labelpilot-telemetry-db".to_owned())
+                .spawn(move || run_event_writer(state, connection, receiver))
+                .map_err(|error| format!("failed to start telemetry event writer: {error}"))?,
+        );
         Ok(())
+    }
+
+    fn flush_event_queue(&self) -> Result<(), String> {
+        let running = self
+            .inner
+            .event_worker
+            .lock()
+            .map(|worker| worker.as_ref().is_some_and(|handle| !handle.is_finished()))
+            .unwrap_or(false);
+        if !running {
+            return Ok(());
+        }
+        let (response_sender, response_receiver) = mpsc::sync_channel(0);
+        self.inner
+            .event_sender
+            .send(EventWriterMessage::Flush(response_sender))
+            .map_err(|_| "telemetry event writer stopped before flush".to_owned())?;
+        response_receiver
+            .recv_timeout(EVENT_FLUSH_TIMEOUT)
+            .map_err(|_| "timed out flushing telemetry event queue".to_owned())?
+    }
+
+    fn stop_event_writer(&self) -> Result<(), String> {
+        let mut worker = self
+            .inner
+            .event_worker
+            .lock()
+            .map_err(|_| "telemetry event worker lock is poisoned".to_owned())?;
+        let Some(handle) = worker.take() else {
+            return Ok(());
+        };
+        let (response_sender, response_receiver) = mpsc::sync_channel(0);
+        let send_result = self
+            .inner
+            .event_sender
+            .send(EventWriterMessage::Shutdown(response_sender));
+        let flush_result = if send_result.is_ok() {
+            match response_receiver.recv_timeout(EVENT_FLUSH_TIMEOUT) {
+                Ok(result) => result,
+                Err(_) => Err("timed out stopping telemetry event writer".to_owned()),
+            }
+        } else {
+            Err("telemetry event writer stopped unexpectedly".to_owned())
+        };
+        let join_result = handle
+            .join()
+            .map_err(|_| "telemetry event writer panicked".to_owned());
+        match (flush_result, join_result) {
+            (Err(error), _) => Err(error),
+            (Ok(()), Err(error)) => Err(error),
+            (Ok(()), Ok(())) => Ok(()),
+        }
+    }
+
+    fn drop_queued_event(&self) {
+        self.inner
+            .stats
+            .pending_event_writes
+            .fetch_sub(1, Ordering::AcqRel);
+        self.inner
+            .stats
+            .dropped_events
+            .fetch_add(1, Ordering::AcqRel);
     }
 
     fn run_cycle(&self, app: &AppHandle, reason: &str) -> Result<(), String> {
@@ -291,6 +445,7 @@ impl TelemetryState {
             .report_cycles
             .fetch_add(1, Ordering::AcqRel);
         self.record_heartbeat(app, reason)?;
+        self.flush_event_queue()?;
 
         if app.state::<NetworkState>().status() == ConnectionStatus::Connected {
             self.flush_outbox(app)?;
@@ -502,6 +657,121 @@ pub fn record_subsystem_log(app: &AppHandle, component: &str, level: &str, messa
             event,
             json!({ "message": bounded(message, 2_000) }),
         );
+    }
+}
+
+fn run_event_writer(
+    state: TelemetryState,
+    mut connection: Connection,
+    receiver: Receiver<EventWriterMessage>,
+) {
+    enum WriterInput {
+        Message(EventWriterMessage),
+        FlushBatch,
+        Disconnected,
+    }
+
+    let mut pending = Vec::with_capacity(EVENT_BATCH_SIZE);
+    loop {
+        let input = if pending.is_empty() {
+            match receiver.recv() {
+                Ok(message) => WriterInput::Message(message),
+                Err(_) => WriterInput::Disconnected,
+            }
+        } else {
+            match receiver.recv_timeout(EVENT_BATCH_DELAY) {
+                Ok(message) => WriterInput::Message(message),
+                Err(mpsc::RecvTimeoutError::Timeout) => WriterInput::FlushBatch,
+                Err(mpsc::RecvTimeoutError::Disconnected) => WriterInput::Disconnected,
+            }
+        };
+
+        match input {
+            WriterInput::Message(EventWriterMessage::Event(event)) => {
+                pending.push(event);
+                if pending.len() >= EVENT_BATCH_SIZE {
+                    let _ = flush_event_batch(&state, &mut connection, &mut pending);
+                }
+            }
+            WriterInput::Message(EventWriterMessage::Flush(response)) => {
+                let result = flush_event_batch(&state, &mut connection, &mut pending);
+                let _ = response.send(result);
+            }
+            WriterInput::Message(EventWriterMessage::Shutdown(response)) => {
+                let result = flush_event_batch(&state, &mut connection, &mut pending);
+                let _ = response.send(result);
+                break;
+            }
+            WriterInput::FlushBatch => {
+                let _ = flush_event_batch(&state, &mut connection, &mut pending);
+            }
+            WriterInput::Disconnected => {
+                let _ = flush_event_batch(&state, &mut connection, &mut pending);
+                break;
+            }
+        }
+    }
+}
+
+fn flush_event_batch(
+    state: &TelemetryState,
+    connection: &mut Connection,
+    pending: &mut Vec<TelemetryEvent>,
+) -> Result<(), String> {
+    if pending.is_empty() {
+        return Ok(());
+    }
+    let result = (|| -> Result<(), String> {
+        let transaction = connection
+            .transaction()
+            .map_err(|error| format!("failed to begin telemetry event batch: {error}"))?;
+        {
+            let mut statement = transaction
+                .prepare_cached(
+                    "INSERT INTO print_errors (event_uid, level, message, created_at) VALUES (?1, ?2, ?3, ?4)",
+                )
+                .map_err(|error| format!("failed to prepare telemetry event batch: {error}"))?;
+            for event in pending.iter() {
+                statement
+                    .execute(params![
+                        &event.event_uid,
+                        &event.level,
+                        &event.message,
+                        &event.created_at,
+                    ])
+                    .map_err(|error| format!("failed to persist telemetry event batch: {error}"))?;
+            }
+        }
+        transaction
+            .commit()
+            .map_err(|error| format!("failed to commit telemetry event batch: {error}"))
+    })();
+
+    match result {
+        Ok(()) => {
+            let count = pending.len() as u64;
+            pending.clear();
+            state
+                .inner
+                .stats
+                .pending_event_writes
+                .fetch_sub(count, Ordering::AcqRel);
+            state
+                .inner
+                .stats
+                .recorded_events
+                .fetch_add(count, Ordering::AcqRel);
+            Ok(())
+        }
+        Err(error) => {
+            state
+                .inner
+                .stats
+                .event_write_failures
+                .fetch_add(1, Ordering::AcqRel);
+            state.set_last_error(&error);
+            Err(error)
+        }
     }
 }
 
@@ -1028,6 +1298,55 @@ mod tests {
         let parsed: Value = serde_json::from_str(&message).unwrap();
         assert_eq!(parsed["schema"], "labelpilot.telemetry.v1");
         assert_eq!(parsed["fields"]["truncated"], true);
+    }
+
+    #[test]
+    fn telemetry_events_commit_as_one_batch() {
+        let (root, persisted) = fixture();
+        let state = TelemetryState::new(root.clone());
+        let mut connection = open_database(&persisted).unwrap();
+        let mut pending = vec![
+            TelemetryEvent {
+                event_uid: "event-1".to_owned(),
+                level: "WARNING".to_owned(),
+                message: "first".to_owned(),
+                created_at: "2026-09-14T10:00:00Z".to_owned(),
+            },
+            TelemetryEvent {
+                event_uid: "event-2".to_owned(),
+                level: "ERROR".to_owned(),
+                message: "second".to_owned(),
+                created_at: "2026-09-14T10:00:01Z".to_owned(),
+            },
+        ];
+        state
+            .inner
+            .stats
+            .pending_event_writes
+            .store(pending.len() as u64, Ordering::Release);
+
+        flush_event_batch(&state, &mut connection, &mut pending).unwrap();
+
+        assert!(pending.is_empty());
+        assert_eq!(state.inner.stats.recorded_events.load(Ordering::Acquire), 2);
+        assert_eq!(
+            state
+                .inner
+                .stats
+                .pending_event_writes
+                .load(Ordering::Acquire),
+            0
+        );
+        let rows: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM print_errors WHERE event_uid IN ('event-1', 'event-2')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(rows, 2);
+        drop(connection);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
