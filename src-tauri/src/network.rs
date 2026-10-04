@@ -1,4 +1,5 @@
 use crate::persisted::PersistedState;
+use crate::station_fingerprint::station_fingerprint;
 use reqwest::blocking::Client;
 use serde::Serialize;
 use serde_json::{json, Map, Value};
@@ -254,9 +255,13 @@ pub fn test_connection_full(
         return ServerInfo::offline();
     };
     let url = format!("{base_url}/stations/ping/");
+    let mut query = vec![("station_uuid", station_uuid.unwrap_or_default())];
+    if let Some(fingerprint) = station_fingerprint() {
+        query.push(("fingerprint", fingerprint));
+    }
     let response = match client
         .get(url)
-        .query(&[("station_uuid", station_uuid.unwrap_or_default())])
+        .query(&query)
         .send()
         .and_then(reqwest::blocking::Response::error_for_status)
     {
@@ -390,13 +395,19 @@ fn broadcast_announcement(socket: &UdpSocket, mode: DiscoveryMode, app: &AppHand
         .and_then(|identity| identity.get("station_uuid"))
         .and_then(Value::as_str)
         .unwrap_or_default();
-    let message = json!({
+    let mut message = json!({
         "type": mode.announcement_type(),
         "ip": local_ipv4().to_string(),
         "uuid": uuid,
         "port": STATION_INGRESS_PORT,
         "timestamp": unix_time_millis()
     });
+    if mode == DiscoveryMode::Station {
+        // Lets the server tell this computer apart from a copy of its identity.
+        if let Some(fingerprint) = station_fingerprint() {
+            message["fingerprint"] = json!(fingerprint);
+        }
+    }
     if let Ok(bytes) = serde_json::to_vec(&message) {
         let _ = socket.send_to(
             &bytes,

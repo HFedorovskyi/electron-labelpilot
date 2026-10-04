@@ -5523,5 +5523,110 @@
     "Universal Mertech Protocol",
     "Universelles Mertech-Protokoll",
     "Універсальний протокол Mertech"
+  ],
+  "Место этой станции": [
+    "This station's seat",
+    "Platz dieser Station",
+    "Місце цієї станції"
+  ],
+  "Лицензия станции": [
+    "Station license",
+    "Stationslizenz",
+    "Ліцензія станції"
+  ],
+  "Нет лицензии продавца": [
+    "No vendor license",
+    "Keine Herstellerlizenz",
+    "Немає ліцензії постачальника"
+  ],
+  "Место выдано · {0} из {1}": [
+    "Seat assigned · {0} of {1}",
+    "Platz zugewiesen · {0} von {1}",
+    "Місце видано · {0} з {1}"
+  ],
+  "Место выдано · без лимита": [
+    "Seat assigned · unlimited",
+    "Platz zugewiesen · unbegrenzt",
+    "Місце видано · без ліміту"
+  ],
+  "Ожидает места": [
+    "Waiting for a seat",
+    "Wartet auf einen Platz",
+    "Очікує місця"
+  ],
+  "Место освобождено": [
+    "Seat released",
+    "Platz freigegeben",
+    "Місце звільнено"
+  ],
+  "Другое оборудование": [
+    "Different hardware",
+    "Andere Hardware",
+    "Інше обладнання"
+  ],
+  "Этот идентификатор станции привязан на сервере к другому компьютеру, поэтому данные сюда не передаются. Если оборудование заменили, подтвердите замену на сервере: Станции → «Заменено оборудование».": [
+    "The server has bound this station identity to another computer, so no data is sent here. If the hardware was replaced, confirm it on the server: Stations → \"Hardware replaced\".",
+    "Der Server hat diese Stationskennung an einen anderen Computer gebunden, daher werden hierher keine Daten gesendet. Wurde die Hardware ersetzt, bestätigen Sie es auf dem Server: Stationen → „Hardware ersetzt“.",
+    "Сервер прив’язав цей ідентифікатор станції до іншого комп’ютера, тому дані сюди не передаються. Якщо обладнання замінили, підтвердьте заміну на сервері: Станції → «Обладнання замінено»."
+  ],
+  "Все места по лицензии заняты: станция не получает данные с сервера. Освободите место другой станции на сервере или докупите места.": [
+    "All licensed seats are taken: this station receives no data from the server. Release another station's seat on the server or buy more seats.",
+    "Alle lizenzierten Plätze sind belegt: Diese Station erhält keine Daten vom Server. Geben Sie auf dem Server den Platz einer anderen Station frei oder erwerben Sie weitere Plätze.",
+    "Усі місця за ліцензією зайняті: станція не отримує даних із сервера. Звільніть місце іншої станції на сервері або докупіть місця."
+  ],
+  "Администратор освободил место этой станции: она не получает данные с сервера, пока место не выдадут снова.": [
+    "An administrator released this station's seat: it receives no data from the server until a seat is assigned again.",
+    "Ein Administrator hat den Platz dieser Station freigegeben: Sie erhält keine Daten vom Server, bis wieder ein Platz zugewiesen wird.",
+    "Адміністратор звільнив місце цієї станції: вона не отримує даних із сервера, доки місце не видадуть знову."
+  ],
+  "ЭТИКЕТКИ С ПОМЕТКОЙ DEMO": [
+    "LABELS CARRY A DEMO MARK",
+    "ETIKETTEN MIT DEMO-VERMERK",
+    "ЕТИКЕТКИ З ПОЗНАЧКОЮ DEMO"
+  ],
+  "У станции нет лицензии продавца LabelPilot, поэтому на этикетках печатается пометка DEMO. Синхронизируйте станцию с лицензированным сервером — пометка исчезнет автоматически.": [
+    "This station has no LabelPilot vendor license, so its labels carry a DEMO mark. Sync the station with a licensed server and the mark disappears automatically.",
+    "Diese Station hat keine LabelPilot-Herstellerlizenz, daher tragen ihre Etiketten einen DEMO-Vermerk. Synchronisieren Sie die Station mit einem lizenzierten Server – der Vermerk verschwindet automatisch.",
+    "Станція не має ліцензії постачальника LabelPilot, тому на етикетках друкується позначка DEMO. Синхронізуйте станцію з ліцензованим сервером — позначка зникне автоматично."
+  ],
+  "ЛЬГОТНЫЙ ПЕРИОД": [
+    "GRACE PERIOD",
+    "KULANZFRIST",
+    "ПІЛЬГОВИЙ ПЕРІОД"
+  ],
+  "ПОДПИСКА ИСТЕКЛА · ЛЬГОТНЫЙ ПЕРИОД": [
+    "SUBSCRIPTION EXPIRED · GRACE PERIOD",
+    "ABONNEMENT ABGELAUFEN · KULANZFRIST",
+    "ПІДПИСКА ЗАКІНЧИЛАСЯ · ПІЛЬГОВИЙ ПЕРІОД"
+  ],
+  "{0} · льготный период до {1}": [
+    "{0} · grace period until {1}",
+    "{0} · Kulanzfrist bis {1}",
+    "{0} · пільговий період до {1}"
+  ],
+  "Сервер передаёт данные станциям до конца льготного периода. Продлите подписку: при подключении к интернету сервер получит новую лицензию автоматически.": [
+    "The server keeps sending data to the stations until the grace period ends. Renew the subscription: once online, the server picks up the new licence automatically.",
+    "Der Server sendet bis zum Ende der Kulanzfrist weiter Daten an die Stationen. Verlängern Sie das Abonnement: Sobald der Server online ist, übernimmt er die neue Lizenz automatisch.",
+    "Сервер передає дані станціям до кінця пільгового періоду. Продовжте підписку: після підключення до інтернету сервер отримає нову ліцензію автоматично."
+  ],
+  "Подписка станции заканчивается {0}.": [
+    "The station's subscription ends on {0}.",
+    "Das Abonnement der Station endet am {0}.",
+    "Підписка станції закінчується {0}."
+  ],
+  "Подписка истекла {0}: данные с сервера принимаются до {1}.": [
+    "The subscription expired on {0}: server data is accepted until {1}.",
+    "Das Abonnement ist am {0} abgelaufen: Serverdaten werden bis {1} angenommen.",
+    "Підписка закінчилася {0}: дані з сервера приймаються до {1}."
+  ],
+  "Подписка истекла {0}: новые данные с сервера не принимаются, печать по имеющимся данным продолжается.": [
+    "The subscription expired on {0}: new server data is not accepted; printing with the data on this station continues.",
+    "Das Abonnement ist am {0} abgelaufen: Neue Serverdaten werden nicht angenommen; das Drucken mit den vorhandenen Daten geht weiter.",
+    "Підписка закінчилася {0}: нові дані з сервера не приймаються, друк за наявними даними триває."
+  ],
+  "Часы этой станции отстают от ранее зафиксированной даты {0}. Проверьте дату и время Windows.": [
+    "This station's clock is behind a date it has already recorded ({0}). Check the Windows date and time.",
+    "Die Uhrzeit dieser Station liegt vor einem bereits erfassten Datum ({0}). Prüfen Sie Datum und Uhrzeit in Windows.",
+    "Годинник цієї станції відстає від раніше зафіксованої дати {0}. Перевірте дату й час Windows."
   ]
 }

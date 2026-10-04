@@ -420,6 +420,13 @@ pub fn desktop_demo_status(persisted: State<'_, PersistedState>) -> Value {
     json!({ "isDemo": transfer::is_demo_active(&persisted) })
 }
 
+/// Label documents printed through the web UI get the same DEMO mark as the
+/// native runtime while this station holds no vendor license token.
+#[tauri::command]
+pub fn desktop_station_label_document(persisted: State<'_, PersistedState>, doc: Value) -> Value {
+    crate::demo_mark::for_station(&persisted, doc)
+}
+
 #[tauri::command]
 pub fn desktop_seed_demo_data(
     app: AppHandle,

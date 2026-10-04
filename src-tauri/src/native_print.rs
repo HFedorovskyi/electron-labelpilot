@@ -1,4 +1,5 @@
 use crate::barcode::generate_barcode;
+use crate::demo_mark;
 use crate::generator::{GenerationPayload, GeneratorState};
 use crate::native_raster::{self, RasterizedLabel};
 use crate::operational::{
@@ -81,6 +82,8 @@ pub struct NativePrintService {
     station_number_cache: Arc<OnceLock<String>>,
     operation_gate: Arc<Mutex<()>>,
     metrics: Arc<PrintMetrics>,
+    /// Read-only view of the station data directory: is a vendor license bound?
+    license_store: Arc<PersistedState>,
 }
 
 impl NativePrintService {
@@ -114,6 +117,7 @@ impl NativePrintService {
             station_number_cache: Arc::new(OnceLock::new()),
             operation_gate: Arc::new(Mutex::new(())),
             metrics: Arc::new(PrintMetrics::default()),
+            license_store: Arc::new(PersistedState::for_data_dir(data_dir)),
         })
     }
 
@@ -654,6 +658,8 @@ impl NativePrintService {
     }
 
     fn prepare(&self, config: Value, doc: Value, data: Value) -> Result<PreparedPrint, String> {
+        // Every native label passes here: no vendor license → DEMO mark.
+        let doc = demo_mark::for_station(&self.license_store, doc);
         let page_sheet = string(config.get("printTarget")) == Some("page-sheet")
             || string(doc.get("canvas").and_then(|canvas| canvas.get("labelType")))
                 == Some("pallet");

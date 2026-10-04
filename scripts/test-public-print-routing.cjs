@@ -128,6 +128,7 @@ try {
         'desktop_printer_send_driver_bitmap',
         'desktop_printer_send_driver_page',
         'desktop_printer_plan_backend',
+        'desktop_station_label_document',
     ]) {
         assert.ok(orchestrator.includes(`'${command}'`), `${command} is missing from public routing`);
     }

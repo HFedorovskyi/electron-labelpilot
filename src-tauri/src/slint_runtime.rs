@@ -6,8 +6,8 @@ use crate::{
         NativePrinterQueueSnapshot, NativePrinterRoleSettings, NativePrinterRoleSettingsInput,
         NativePrinterSettingsSnapshot, NativeProductionDelta, NativeProductionPrintJob,
         NativeScaleSettingsInput, NativeScaleSettingsSnapshot, NativeServerLicenseSnapshot,
-        NativeUiCounters, NativeUiOperator, NativeUiProduct, NativeUiRevision, NativeUiRuntime,
-        NativeWeighingSnapshot,
+        NativeStationSeat, NativeUiCounters, NativeUiOperator, NativeUiProduct, NativeUiRevision,
+        NativeUiRuntime, NativeWeighingSnapshot,
     },
     native_update::{NativeUpdateManager, NativeUpdateSnapshot},
     persisted::PersistedState,
@@ -2316,11 +2316,13 @@ fn apply_catalog_snapshot(
 }
 
 fn apply_license_status(ui: &WeighingPrototype, license: &NativeLicenseStatus) {
+    // An expired subscription keeps working through its grace period.
     let active = license.licensed
-        && !license.expired
+        && (!license.expired || license.grace)
         && (!license.strict || (license.signature_valid && license.machine_ok));
     ui.set_license_active(active);
     ui.set_license_expired(license.expired);
+    ui.set_license_grace(license.expired && license.grace);
     ui.set_license_mode(license.mode.to_uppercase().into());
     ui.set_license_edition(license.edition.clone().into());
     ui.set_license_customer(
@@ -2334,6 +2336,11 @@ fn apply_license_status(ui: &WeighingPrototype, license: &NativeLicenseStatus) {
     ui.set_license_expires(
         if license.expires.is_empty() {
             "Бессрочно".to_owned()
+        } else if license.grace && !license.grace_until.is_empty() {
+            format!(
+                "{} · льготный период до {}",
+                license.expires, license.grace_until
+            )
         } else {
             license.expires.clone()
         }
@@ -2499,6 +2506,8 @@ fn apply_update_snapshot(ui: &WeighingPrototype, snapshot: &NativeUpdateSnapshot
     ));
 }
 fn apply_server_license_snapshot(ui: &WeighingPrototype, snapshot: NativeServerLicenseSnapshot) {
+    // Computed before the snapshot fields are moved into the UI below.
+    let (station_hint, station_tone) = station_license_hint(&snapshot);
     ui.set_license_station_name(
         snapshot
             .station
@@ -2567,6 +2576,21 @@ fn apply_server_license_snapshot(ui: &WeighingPrototype, snapshot: NativeServerL
     if let Some(license) = snapshot.license.as_ref() {
         apply_license_status(ui, license);
     }
+    let (seat, tone, hint) = seat_presentation(snapshot.seat.as_ref());
+    ui.set_license_seat(seat.into());
+    ui.set_license_seat_tone(tone);
+    ui.set_license_seat_hint(hint.into());
+    ui.set_station_demo(snapshot.station_license.is_none());
+    ui.set_station_license_hint(station_hint.into());
+    ui.set_station_license_hint_tone(station_tone);
+    ui.set_station_licensee(
+        snapshot
+            .station_license
+            .as_ref()
+            .map(|license| format!("{} · {}", license.customer, license.edition))
+            .unwrap_or_else(|| "—".to_owned())
+            .into(),
+    );
     ui.set_license_status(
         format!(
             "{} · проверено {}",
@@ -2582,6 +2606,76 @@ fn apply_server_license_snapshot(ui: &WeighingPrototype, snapshot: NativeServerL
         .into(),
     );
 }
+/// The subscription term of this station's own licence, or a clock warning:
+/// (message, tone) with tone 2 = amber, 3 = red; empty when nothing to say.
+fn station_license_hint(snapshot: &NativeServerLicenseSnapshot) -> (String, i32) {
+    if snapshot.station_clock_rollback {
+        return (
+            format!(
+                "Часы этой станции отстают от ранее зафиксированной даты {}. Проверьте дату и время Windows.",
+                snapshot.station_clock_mark
+            ),
+            3,
+        );
+    }
+    let Some(license) = snapshot.station_license.as_ref() else {
+        return (String::new(), 0);
+    };
+    let expires = license.expires.clone().unwrap_or_default();
+    match license.term.as_str() {
+        "expiring" => (format!("Подписка станции заканчивается {expires}."), 2),
+        "grace" => (
+            format!(
+                "Подписка истекла {expires}: данные с сервера принимаются до {}.",
+                license.grace_until.clone().unwrap_or_default()
+            ),
+            2,
+        ),
+        "expired" => (
+            format!(
+                "Подписка истекла {expires}: новые данные с сервера не принимаются, печать по имеющимся данным продолжается."
+            ),
+            3,
+        ),
+        _ => (String::new(), 0),
+    }
+}
+
+/// The station's named seat as one row: (value, tone, hint). Tone: 0 unknown,
+/// 1 seat held, 2 waiting for a seat, 3 no data (released or a copied identity).
+fn seat_presentation(seat: Option<&NativeStationSeat>) -> (String, i32, &'static str) {
+    let Some(seat) = seat else {
+        return ("—".to_owned(), 0, "");
+    };
+    if seat.fingerprint == "conflict" {
+        return (
+            "Другое оборудование".to_owned(),
+            3,
+            "Этот идентификатор станции привязан на сервере к другому компьютеру, поэтому данные сюда не передаются. Если оборудование заменили, подтвердите замену на сервере: Станции → «Заменено оборудование».",
+        );
+    }
+    match seat.state.as_str() {
+        "active" => (
+            match (seat.used, seat.limit) {
+                (Some(used), Some(limit)) => format!("Место выдано · {used} из {limit}"),
+                _ => "Место выдано · без лимита".to_owned(),
+            },
+            1,
+            "",
+        ),
+        "pending" => (
+            "Ожидает места".to_owned(),
+            2,
+            "Все места по лицензии заняты: станция не получает данные с сервера. Освободите место другой станции на сервере или докупите места.",
+        ),
+        _ => (
+            "Место освобождено".to_owned(),
+            3,
+            "Администратор освободил место этой станции: она не получает данные с сервера, пока место не выдадут снова.",
+        ),
+    }
+}
+
 fn operator_rows(
     operators: &[NativeUiOperator],
     last_operator_uuid: Option<&str>,

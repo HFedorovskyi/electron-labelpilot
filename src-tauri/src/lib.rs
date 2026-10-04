@@ -6,6 +6,8 @@ mod barcode;
 mod commands;
 #[cfg(any(feature = "desktop", feature = "slint-ui"))]
 mod crypto;
+#[cfg(any(feature = "desktop", feature = "slint-ui"))]
+mod demo_mark;
 #[cfg(feature = "desktop")]
 mod diagnostic;
 #[cfg(any(feature = "desktop", feature = "slint-ui"))]
@@ -16,6 +18,8 @@ mod gs1;
 mod ingress;
 #[cfg(feature = "desktop")]
 mod lifecycle;
+#[cfg(any(feature = "desktop", feature = "slint-ui"))]
+mod license_clock;
 #[cfg(feature = "native-update")]
 pub mod native_update;
 #[cfg(feature = "desktop")]
@@ -35,6 +39,8 @@ pub mod runtime_selector;
 mod scale;
 #[cfg(any(feature = "desktop", feature = "slint-ui"))]
 mod session;
+#[cfg(any(feature = "desktop", feature = "slint-ui"))]
+mod station_fingerprint;
 #[cfg(feature = "desktop")]
 mod telemetry;
 #[cfg(feature = "desktop")]
@@ -191,6 +197,7 @@ pub fn run() {
             commands::desktop_printer_send_driver_bitmap,
             commands::desktop_printer_send_driver_page,
             commands::desktop_printer_plan_backend,
+            commands::desktop_station_label_document,
             commands::desktop_printer_warmup_raw,
             commands::desktop_printer_transport_summary,
             commands::desktop_printer_disconnect_all,

@@ -36,7 +36,7 @@ assert.match(cargo, /rusqlite = \{ version = "0\.40\.2"/);
 assert.match(cargo, /serialport = \{ version = "4"/);
 
 const commandNames = [...commands.matchAll(/pub (?:async )?fn (desktop_[a-z_]+)/g)].map(match => match[1]).sort();
-assert.equal(commandNames.length, 87, 'Unexpected Tauri command count');
+assert.equal(commandNames.length, 88, 'Unexpected Tauri command count');
 assert.equal(new Set(commandNames).size, commandNames.length, 'Tauri command names must be unique');
 for (const command of commandNames) {
     assert.match(runtime, new RegExp(`commands::${command}`), `${command} is not registered`);

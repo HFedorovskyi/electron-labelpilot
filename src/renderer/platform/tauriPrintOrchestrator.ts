@@ -73,6 +73,8 @@ function normalizeRequest(optionsValue: unknown): TauriPrinterGenerationRequest 
 export async function printTauriLabel(optionsValue: unknown): Promise<boolean> {
     try {
         const request = normalizeRequest(optionsValue);
+        // Same DEMO mark as the native runtime while the station holds no vendor license.
+        request.doc = await invoke<Record<string, unknown>>('desktop_station_label_document', { doc: request.doc });
         const backendPlan = await invoke<TauriUniversalPrinterPlan>('desktop_printer_plan_backend', {
             payload: { config: request.config, doc: request.doc },
         });

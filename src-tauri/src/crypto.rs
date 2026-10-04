@@ -9,9 +9,16 @@ use serde_json::Value;
 use sha2::Sha256;
 use std::collections::HashSet;
 use std::fmt;
-use time::{Date, Month, OffsetDateTime};
+use std::sync::Mutex;
+use time::{Date, Month};
 
 const LPI2_MAGIC: &[u8] = b"LPI2\n";
+/// Days an expired subscription token is still accepted for server data
+/// (the server's licensing/clock.py GRACE_DAYS and license guard match it).
+pub const LICENSE_GRACE_DAYS: i64 = 14;
+/// From this many days before expiry the station asks its server for a renewal.
+#[cfg_attr(not(feature = "native-ui"), allow(dead_code))]
+pub const LICENSE_RENEWAL_NOTICE_DAYS: i64 = 30;
 const MAX_TOKEN_BYTES: usize = 64 * 1024;
 const HKDF_SALT: &[u8] = b"labelpilot-data-key|salt|v1";
 const LICENSE_PUBLIC_KEY: [u8; 32] = [
@@ -75,24 +82,173 @@ impl DecodedPush {
         let Some(incoming) = self.license.as_ref() else {
             return Err("verified LPI2 token has no license claims".to_owned());
         };
-        match persisted.load_license_token() {
-            None => {
-                persisted.save_license_token(token)?;
-                Ok(true)
-            }
-            Some(existing) => {
-                let current = verify_license_token_allow_expired(&existing, &LICENSE_PUBLIC_KEY)
-                    .map_err(|error| format!("persisted license token is invalid: {error}"))?;
-                if current.license_id != incoming.license_id
-                    || current.machine_id != incoming.machine_id
-                {
-                    return Ok(false);
-                }
-                persisted.save_license_token(token)?;
-                Ok(true)
+        persist_token_with_key(persisted, token, incoming, &LICENSE_PUBLIC_KEY)
+    }
+}
+
+/// Stores a verified token. A token of a different license (or server machine)
+/// never replaces the one the station is bound to; an unreadable or tampered
+/// persisted token is replaced, so a damaged file cannot block every later sync.
+fn persist_token_with_key(
+    persisted: &PersistedState,
+    token: &str,
+    incoming: &LicenseTokenClaims,
+    public_key: &[u8; 32],
+) -> Result<bool, String> {
+    if let Some(existing) = persisted.load_license_token() {
+        if existing == token {
+            return Ok(false);
+        }
+        if let Ok(current) = verify_license_token_allow_expired(&existing, public_key) {
+            if current.license_id != incoming.license_id
+                || current.machine_id != incoming.machine_id
+                // ISO dates compare as text: never roll back to an older issue.
+                || incoming.issued < current.issued
+            {
+                return Ok(false);
             }
         }
     }
+    persisted.save_license_token(token)?;
+    Ok(true)
+}
+
+/// The vendor license this station is bound to, from its persisted token.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StationLicense {
+    pub customer: String,
+    pub edition: String,
+    pub license_id: String,
+    pub issued: String,
+    pub expires: Option<String>,
+}
+
+#[cfg_attr(not(feature = "native-ui"), allow(dead_code))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LicenseTerm {
+    Lifetime,
+    Active,
+    /// Expires within LICENSE_RENEWAL_NOTICE_DAYS.
+    Expiring,
+    /// Expired; server data is still accepted until `grace_until`.
+    Grace,
+    /// Expired and the grace period is over: no new server data. Printing
+    /// with the data already on the station continues.
+    Expired,
+}
+
+#[cfg_attr(not(feature = "native-ui"), allow(dead_code))]
+impl LicenseTerm {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Lifetime => "lifetime",
+            Self::Active => "active",
+            Self::Expiring => "expiring",
+            Self::Grace => "grace",
+            Self::Expired => "expired",
+        }
+    }
+
+    pub fn wants_renewal(self) -> bool {
+        matches!(self, Self::Expiring | Self::Grace | Self::Expired)
+    }
+}
+
+#[cfg_attr(not(feature = "native-ui"), allow(dead_code))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LicenseTermInfo {
+    pub term: LicenseTerm,
+    pub grace_until: Option<Date>,
+    /// Days to the expiry date, or in grace to the end of the grace period.
+    pub days_left: Option<i64>,
+}
+
+#[cfg_attr(not(feature = "native-ui"), allow(dead_code))]
+impl StationLicense {
+    pub fn term(&self, today: Date) -> LicenseTermInfo {
+        let Some(expiry) = self
+            .expires
+            .as_deref()
+            .and_then(|value| parse_iso_date(value).ok())
+        else {
+            return LicenseTermInfo {
+                term: LicenseTerm::Lifetime,
+                grace_until: None,
+                days_left: None,
+            };
+        };
+        let grace_until = expiry + time::Duration::days(LICENSE_GRACE_DAYS);
+        let (term, target) = if today > grace_until {
+            (LicenseTerm::Expired, today)
+        } else if today > expiry {
+            (LicenseTerm::Grace, grace_until)
+        } else if (expiry - today).whole_days() <= LICENSE_RENEWAL_NOTICE_DAYS {
+            (LicenseTerm::Expiring, expiry)
+        } else {
+            (LicenseTerm::Active, expiry)
+        };
+        LicenseTermInfo {
+            term,
+            grace_until: Some(grace_until),
+            days_left: Some((target - today).whole_days().max(0)),
+        }
+    }
+}
+
+/// `None` = no vendor-signed license token on this station: a trial or an
+/// unlicensed copy. Labels printed then carry a DEMO mark. An expired token
+/// still counts here; subscription grace is decided separately.
+pub fn station_license(persisted: &PersistedState) -> Option<StationLicense> {
+    station_license_with_key(persisted.load_license_token()?, &LICENSE_PUBLIC_KEY)
+}
+
+fn station_license_with_key(token: String, public_key: &[u8; 32]) -> Option<StationLicense> {
+    type Verified = ([u8; 32], String, Option<StationLicense>);
+    // Asked for every printed label: verify each distinct token only once.
+    static LAST: Mutex<Option<Verified>> = Mutex::new(None);
+    if let Ok(cache) = LAST.lock() {
+        if let Some((key, cached, license)) = cache.as_ref() {
+            if key == public_key && *cached == token {
+                return license.clone();
+            }
+        }
+    }
+    let license = verify_license_token_allow_expired(&token, public_key)
+        .ok()
+        .map(|claims| StationLicense {
+            customer: claims.customer,
+            edition: claims.edition,
+            license_id: claims.license_id,
+            issued: claims.issued,
+            expires: claims.expires,
+        });
+    if let Ok(mut cache) = LAST.lock() {
+        *cache = Some((*public_key, token, license.clone()));
+    }
+    license
+}
+
+/// Adopts the license token the station's own server returns in its ping reply
+/// (the same public, vendor-signed token every LPI2 push carries) — so a station
+/// whose token file was lost leaves DEMO mode without waiting for a data push,
+/// and a renewed subscription reaches the station within a minute.
+/// Same rules as a push: it must verify, be within its grace period at the
+/// trusted date, match the binding and not be an older issue.
+#[cfg_attr(not(feature = "native-ui"), allow(dead_code))]
+pub fn adopt_server_token(persisted: &PersistedState, token: &str) -> Result<bool, String> {
+    adopt_server_token_with_key(persisted, token, &LICENSE_PUBLIC_KEY)
+}
+
+#[cfg_attr(not(feature = "native-ui"), allow(dead_code))]
+fn adopt_server_token_with_key(
+    persisted: &PersistedState,
+    token: &str,
+    public_key: &[u8; 32],
+) -> Result<bool, String> {
+    let today = crate::license_clock::trusted_today(persisted).today;
+    let incoming = verify_license_token_at(token, public_key, today)
+        .map_err(|error| format!("server license token rejected: {error}"))?;
+    persist_token_with_key(persisted, token, &incoming, public_key)
 }
 
 #[allow(dead_code)]
@@ -114,7 +270,9 @@ fn encode_lpi2_with_key(
             "LPI2 token length is outside the accepted range".to_owned(),
         ));
     }
-    let license = verify_license_token(token, public_key)?;
+    // Production records always reach the server (traceability), even after the
+    // subscription has expired: only incoming data is gated by the licence term.
+    let license = verify_license_token_allow_expired(token, public_key)?;
     let key = derive_data_key(&license.license_id, i64::from(license.key_version))?;
     let mut iv = [0_u8; 16];
     getrandom::fill(&mut iv).map_err(|error| {
@@ -141,7 +299,8 @@ pub fn decode_push_body(
     body: &[u8],
 ) -> Result<DecodedPush, PushDecodeError> {
     if body.starts_with(LPI2_MAGIC) {
-        return decode_lpi2_with_key(body, &LICENSE_PUBLIC_KEY);
+        let today = crate::license_clock::trusted_today(persisted).today;
+        return decode_lpi2_with_key(body, &LICENSE_PUBLIC_KEY, today);
     }
     if persisted.load_license_token().is_some() {
         return Err(PushDecodeError::Unauthorized);
@@ -159,6 +318,7 @@ pub fn decode_push_body(
 fn decode_lpi2_with_key(
     blob: &[u8],
     public_key: &[u8; 32],
+    today: Date,
 ) -> Result<DecodedPush, PushDecodeError> {
     if !blob.starts_with(LPI2_MAGIC) {
         return Err(PushDecodeError::Invalid("Missing LPI2 magic".to_owned()));
@@ -182,7 +342,7 @@ fn decode_lpi2_with_key(
         ));
     }
 
-    let license = verify_license_token(token, public_key)?;
+    let license = verify_license_token_at(token, public_key, today)?;
     let key = derive_data_key(&license.license_id, i64::from(license.key_version))?;
 
     let (iv, ciphertext) = encrypted.split_at(16);
@@ -212,24 +372,34 @@ fn derive_data_key(license_id: &str, key_version: i64) -> Result<[u8; 32], PushD
     Ok(key)
 }
 
+#[cfg(test)]
 fn verify_license_token(
     token: &str,
     public_key: &[u8; 32],
 ) -> Result<LicenseTokenClaims, PushDecodeError> {
-    verify_license_token_with_policy(token, public_key, true)
+    verify_license_token_at(token, public_key, time::OffsetDateTime::now_utc().date())
+}
+
+/// Rejects a token past its expiry date plus the grace period at `today`.
+fn verify_license_token_at(
+    token: &str,
+    public_key: &[u8; 32],
+    today: Date,
+) -> Result<LicenseTokenClaims, PushDecodeError> {
+    verify_license_token_with_policy(token, public_key, Some(today))
 }
 
 fn verify_license_token_allow_expired(
     token: &str,
     public_key: &[u8; 32],
 ) -> Result<LicenseTokenClaims, PushDecodeError> {
-    verify_license_token_with_policy(token, public_key, false)
+    verify_license_token_with_policy(token, public_key, None)
 }
 
 fn verify_license_token_with_policy(
     token: &str,
     public_key: &[u8; 32],
-    reject_expired: bool,
+    judged_at: Option<Date>,
 ) -> Result<LicenseTokenClaims, PushDecodeError> {
     if !token.is_ascii()
         || token.trim() != token
@@ -335,7 +505,8 @@ fn verify_license_token_with_policy(
                 "License expiry precedes its issue date".to_owned(),
             ));
         }
-        if reject_expired && OffsetDateTime::now_utc().date() > expiry {
+        if judged_at.is_some_and(|today| today > expiry + time::Duration::days(LICENSE_GRACE_DAYS))
+        {
             return Err(PushDecodeError::Unauthorized);
         }
     }
@@ -413,6 +584,7 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
+    use time::{Month, OffsetDateTime};
 
     struct TestDirectory(PathBuf);
 
@@ -474,6 +646,152 @@ mod tests {
     }
 
     #[test]
+    fn station_license_reads_the_verified_persisted_token() {
+        let directory = TestDirectory::new("station-license");
+        let persisted = PersistedState::for_data_dir(directory.0.clone());
+        let (token, public_key) = signed_test_token(&valid_license_payload());
+        assert_eq!(
+            persisted
+                .load_license_token()
+                .and_then(|token| station_license_with_key(token, &public_key)),
+            None
+        );
+        persisted.save_license_token(&token).unwrap();
+        let license =
+            station_license_with_key(persisted.load_license_token().unwrap(), &public_key)
+                .expect("verified licence");
+        assert_eq!(license.customer, "Fixture Factory");
+        assert_eq!(license.license_id, "fixture-license-2026");
+        // A token that does not verify is no licence (DEMO), even if cached before.
+        let mut tampered = token.clone();
+        tampered.pop();
+        tampered.push(if token.ends_with('A') { 'B' } else { 'A' });
+        assert_eq!(station_license_with_key(tampered, &public_key), None);
+        assert!(station_license_with_key(token, &public_key).is_some());
+    }
+
+    #[test]
+    fn adopts_a_server_token_only_within_the_existing_binding() {
+        let directory = TestDirectory::new("adopt-token");
+        let persisted = PersistedState::for_data_dir(directory.0.clone());
+        let (token, public_key) = signed_test_token(&valid_license_payload());
+        assert!(adopt_server_token_with_key(&persisted, &token, &public_key).unwrap());
+        // The same token again writes nothing (pings repeat every minute).
+        assert!(!adopt_server_token_with_key(&persisted, &token, &public_key).unwrap());
+
+        let mut other = valid_license_payload();
+        other["license_id"] = json!("other-license-2026");
+        let (other_token, _) = signed_test_token(&other);
+        assert!(!adopt_server_token_with_key(&persisted, &other_token, &public_key).unwrap());
+        assert_eq!(
+            persisted.load_license_token().as_deref(),
+            Some(token.as_str())
+        );
+
+        let mut renewed = valid_license_payload();
+        renewed["issued"] = json!("2026-06-01");
+        let (renewed_token, _) = signed_test_token(&renewed);
+        assert!(adopt_server_token_with_key(&persisted, &renewed_token, &public_key).unwrap());
+
+        let mut expired = valid_license_payload();
+        expired["expires"] = json!("2000-01-01");
+        expired["issued"] = json!("1999-01-01");
+        let (expired_token, _) = signed_test_token(&expired);
+        assert!(adopt_server_token_with_key(&persisted, &expired_token, &public_key).is_err());
+        assert!(adopt_server_token_with_key(&persisted, "garbage", &public_key).is_err());
+    }
+
+    #[test]
+    fn expired_tokens_are_accepted_only_during_the_grace_period() {
+        let mut payload = valid_license_payload();
+        payload["expires"] = json!("2026-12-31");
+        let (token, public_key) = signed_test_token(&payload);
+        let on = |month: Month, day: u8, year: i32| {
+            verify_license_token_at(
+                &token,
+                &public_key,
+                Date::from_calendar_date(year, month, day).unwrap(),
+            )
+        };
+        assert!(on(Month::December, 31, 2026).is_ok());
+        assert!(on(Month::January, 14, 2027).is_ok());
+        assert_eq!(
+            on(Month::January, 15, 2027).unwrap_err(),
+            PushDecodeError::Unauthorized
+        );
+        assert!(verify_license_token_allow_expired(&token, &public_key).is_ok());
+    }
+
+    #[test]
+    fn licence_terms_follow_the_expiry_date() {
+        let license = |expires: Option<&str>| StationLicense {
+            customer: "Fixture Factory".to_owned(),
+            edition: "test".to_owned(),
+            license_id: "fixture-license-2026".to_owned(),
+            issued: "2026-01-01".to_owned(),
+            expires: expires.map(str::to_owned),
+        };
+        let date =
+            |month: Month, day: u8, year: i32| Date::from_calendar_date(year, month, day).unwrap();
+        let subscription = license(Some("2026-12-31"));
+        let term = |today: Date| subscription.term(today);
+        assert_eq!(
+            term(date(Month::October, 3, 2026)).term,
+            LicenseTerm::Active
+        );
+        let expiring = term(date(Month::December, 1, 2026));
+        assert_eq!(
+            (expiring.term, expiring.days_left),
+            (LicenseTerm::Expiring, Some(30))
+        );
+        let grace = term(date(Month::January, 4, 2027));
+        assert_eq!(
+            (grace.term, grace.days_left),
+            (LicenseTerm::Grace, Some(10))
+        );
+        assert_eq!(grace.grace_until, Some(date(Month::January, 14, 2027)));
+        assert_eq!(
+            term(date(Month::January, 15, 2027)).term,
+            LicenseTerm::Expired
+        );
+        assert!(LicenseTerm::Grace.wants_renewal() && !LicenseTerm::Active.wants_renewal());
+        let lifetime = license(None).term(date(Month::January, 1, 2099));
+        assert_eq!(
+            (lifetime.term, lifetime.days_left),
+            (LicenseTerm::Lifetime, None)
+        );
+    }
+
+    #[test]
+    fn an_older_issue_never_replaces_the_persisted_token() {
+        let directory = TestDirectory::new("older-issue");
+        let persisted = PersistedState::for_data_dir(directory.0.clone());
+        let mut renewed = valid_license_payload();
+        renewed["issued"] = json!("2026-06-01");
+        let (renewed_token, public_key) = signed_test_token(&renewed);
+        assert!(adopt_server_token_with_key(&persisted, &renewed_token, &public_key).unwrap());
+        let (older_token, _) = signed_test_token(&valid_license_payload());
+        assert!(!adopt_server_token_with_key(&persisted, &older_token, &public_key).unwrap());
+        assert_eq!(
+            persisted.load_license_token().as_deref(),
+            Some(renewed_token.as_str())
+        );
+    }
+
+    #[test]
+    fn a_damaged_persisted_token_is_replaced_by_a_verified_one() {
+        let directory = TestDirectory::new("damaged-token");
+        let persisted = PersistedState::for_data_dir(directory.0.clone());
+        persisted.save_license_token("damaged.token").unwrap();
+        let (token, public_key) = signed_test_token(&valid_license_payload());
+        assert!(adopt_server_token_with_key(&persisted, &token, &public_key).unwrap());
+        assert_eq!(
+            persisted.load_license_token().as_deref(),
+            Some(token.as_str())
+        );
+    }
+
+    #[test]
     fn rejects_signed_payloads_outside_the_license_contract() {
         let mut missing = valid_license_payload();
         missing
@@ -523,7 +841,9 @@ mod tests {
         let blob = encode_lpi2_with_key(token, &value, &public_key).expect("encrypt report");
         assert!(blob.starts_with(LPI2_MAGIC));
         assert_eq!(
-            decode_lpi2_with_key(&blob, &public_key).unwrap().value,
+            decode_lpi2_with_key(&blob, &public_key, OffsetDateTime::now_utc().date())
+                .unwrap()
+                .value,
             value
         );
     }
@@ -536,7 +856,8 @@ mod tests {
         let blob = STANDARD
             .decode(fixture["blob_base64"].as_str().unwrap())
             .expect("decode fixture blob");
-        let decoded = decode_lpi2_with_key(&blob, &public_key).expect("decode fixture");
+        let decoded = decode_lpi2_with_key(&blob, &public_key, OffsetDateTime::now_utc().date())
+            .expect("decode fixture");
         assert_eq!(decoded.value, fixture["plaintext"]);
         assert_eq!(
             decoded
@@ -557,7 +878,9 @@ mod tests {
             .expect("decode fixture blob");
         let last = blob.len() - 1;
         blob[last] ^= 1;
-        assert!(decode_lpi2_with_key(&blob, &public_key).is_err());
+        assert!(
+            decode_lpi2_with_key(&blob, &public_key, OffsetDateTime::now_utc().date()).is_err()
+        );
 
         let directory = TestDirectory::new("plaintext-bound");
         let persisted = PersistedState::for_data_dir(directory.0.clone());

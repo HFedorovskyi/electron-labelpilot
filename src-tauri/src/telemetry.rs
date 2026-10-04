@@ -878,6 +878,7 @@ fn build_delta_report(
     Ok(DeltaReport {
         payload: json!({
             "station_uuid": identity.get("station_uuid").cloned().unwrap_or(Value::Null),
+            "station_fingerprint": crate::station_fingerprint::station_fingerprint(),
             "station_identity": identity,
             "printed_labels": printed_labels,
             "deleted_labels": deleted_labels,

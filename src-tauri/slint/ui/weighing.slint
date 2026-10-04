@@ -1418,12 +1418,24 @@ export component WeighingPrototype inherits Window {
     in-out property <bool> license-online: false;
     in-out property <bool> license-active: false;
     in-out property <bool> license-expired: false;
+    // Expired subscription still inside its 14-day grace period (server keeps working).
+    in-out property <bool> license-grace: false;
     in-out property <string> license-mode: "DEMO";
     in-out property <string> license-edition: "Demo";
     in-out property <string> license-customer: "—";
     in-out property <string> license-expires: "—";
     in-out property <string> license-id: "—";
     in-out property <string> license-stations: "—";
+    // Named seat of this station (from the server ping): tone 0 unknown, 1 ok, 2 waiting, 3 blocked.
+    in-out property <string> license-seat: "—";
+    in-out property <int> license-seat-tone: 0;
+    in-out property <string> license-seat-hint: "";
+    // No vendor-signed license token on this station: labels carry a DEMO mark.
+    in-out property <bool> station-demo: false;
+    in-out property <string> station-licensee: "—";
+    // Subscription term of this station's licence or a clock warning; tone 2 amber, 3 red.
+    in-out property <string> station-license-hint: "";
+    in-out property <int> station-license-hint-tone: 0;
     in-out property <string> license-features: UiText.translate(UiText.language, "Функции не получены");
     in-out property <string> license-signature: UiText.translate(UiText.language, "Не проверена");
     in-out property <string> license-machine: "—";
@@ -4651,7 +4663,7 @@ export component WeighingPrototype inherits Window {
                     horizontal-stretch: 1;
                     border-radius: 20px;
                     border-width: 1px;
-                    border-color: root.license-active && !root.license-expired ? Palette.e300 : root.license-expired ? Palette.r300 : Palette.a300;
+                    border-color: root.license-active && !root.license-expired ? Palette.e300 : root.license-expired && !root.license-grace ? Palette.r300 : Palette.a300;
                     background: Palette.surface;
                     clip: true;
                     ScrollView {
@@ -4670,11 +4682,15 @@ export component WeighingPrototype inherits Window {
                                     Text { text: root.license-customer; color: Palette.n500; font-size: 12px; overflow: elide; }
                                 }
                                 Rectangle { horizontal-stretch: 1; }
-                                Rectangle { width: 116px; height: 34px; border-radius: 17px; background: root.license-active && !root.license-expired ? Palette.e100 : root.license-expired ? Palette.r100 : Palette.a50; Text { text: root.license-expired ? UiText.translate(UiText.language, "ИСТЕКЛА") : root.license-mode; color: root.license-active && !root.license-expired ? Palette.e700 : root.license-expired ? Palette.r700 : Palette.a700; font-size: 11px; font-weight: 800; horizontal-alignment: center; vertical-alignment: center; overflow: elide; } }
+                                Rectangle { width: 156px; height: 34px; border-radius: 17px; background: root.license-active && !root.license-expired ? Palette.e100 : root.license-expired && !root.license-grace ? Palette.r100 : Palette.a50; Text { text: root.license-grace ? UiText.translate(UiText.language, "ЛЬГОТНЫЙ ПЕРИОД") : root.license-expired ? UiText.translate(UiText.language, "ИСТЕКЛА") : root.license-mode; color: root.license-active && !root.license-expired ? Palette.e700 : root.license-expired && !root.license-grace ? Palette.r700 : Palette.a700; font-size: 11px; font-weight: 800; horizontal-alignment: center; vertical-alignment: center; overflow: elide; } }
                             }
                             ThinStatRow { compact: root.short; label: UiText.translate(UiText.language, "Статус API"); value: root.license-online ? UiText.translate(UiText.language, "Получен") : UiText.translate(UiText.language, "Офлайн"); value-color: root.license-online ? Palette.e700 : Palette.a700; }
                             ThinStatRow { compact: root.short; label: UiText.translate(UiText.language, "Действует до"); value: UiText.translate(UiText.language, root.license-expires); }
                             ThinStatRow { compact: root.short; label: UiText.translate(UiText.language, "Станции"); value: UiText.translate(UiText.language, root.license-stations); }
+                            ThinStatRow { compact: root.short; label: UiText.translate(UiText.language, "Место этой станции"); value: UiText.translate(UiText.language, root.license-seat); value-color: root.license-seat-tone == 1 ? Palette.e700 : root.license-seat-tone == 2 ? Palette.a700 : root.license-seat-tone == 3 ? Palette.r700 : Palette.n700; }
+                            if root.license-seat-hint != "": Text { text: UiText.translate(UiText.language, root.license-seat-hint); color: root.license-seat-tone == 3 ? Palette.r700 : Palette.a700; font-size: 11px; wrap: word-wrap; }
+                            ThinStatRow { compact: root.short; label: UiText.translate(UiText.language, "Лицензия станции"); value: root.station-demo ? UiText.translate(UiText.language, "Нет лицензии продавца") : root.station-licensee; value-color: root.station-demo ? Palette.a700 : Palette.n900; }
+                            if root.station-license-hint != "": Text { text: UiText.translate(UiText.language, root.station-license-hint); color: root.station-license-hint-tone == 3 ? Palette.r700 : Palette.a700; font-size: 11px; wrap: word-wrap; }
                             ThinStatRow { compact: root.short; label: "License ID"; value: root.license-id; }
                             ThinStatRow { compact: root.short; label: UiText.translate(UiText.language, "Подпись"); value: UiText.translate(UiText.language, root.license-signature); value-color: root.license-active ? Palette.e700 : Palette.n700; }
                             ThinStatRow { compact: root.short; label: "Machine ID"; value: root.license-machine; }
@@ -4696,8 +4712,21 @@ export component WeighingPrototype inherits Window {
                                 VerticalLayout {
                                     padding: 13px;
                                     spacing: 4px;
-                                    Text { text: root.license-active && !root.license-expired ? UiText.translate(UiText.language, "ЛИЦЕНЗИЯ АКТИВНА") : root.license-expired ? UiText.translate(UiText.language, "СРОК ЛИЦЕНЗИИ ИСТЁК") : UiText.translate(UiText.language, "ДЕМОНСТРАЦИОННЫЙ РЕЖИМ"); color: root.license-active && !root.license-expired ? Palette.e700 : Palette.a700; font-size: 12px; font-weight: 800; }
-                                    Text { text: root.license-online ? UiText.translate(UiText.language, "Статус получен с настроенного сервера.") : UiText.translate(UiText.language, "Показан последний доступный локальный статус интерфейса."); color: Palette.n600; font-size: 11px; wrap: word-wrap; }
+                                    Text { text: root.license-active && !root.license-expired ? UiText.translate(UiText.language, "ЛИЦЕНЗИЯ АКТИВНА") : root.license-grace ? UiText.translate(UiText.language, "ПОДПИСКА ИСТЕКЛА · ЛЬГОТНЫЙ ПЕРИОД") : root.license-expired ? UiText.translate(UiText.language, "СРОК ЛИЦЕНЗИИ ИСТЁК") : UiText.translate(UiText.language, "ДЕМОНСТРАЦИОННЫЙ РЕЖИМ"); color: root.license-active && !root.license-expired ? Palette.e700 : Palette.a700; font-size: 12px; font-weight: 800; }
+                                    Text { text: root.license-grace ? UiText.translate(UiText.language, "Сервер передаёт данные станциям до конца льготного периода. Продлите подписку: при подключении к интернету сервер получит новую лицензию автоматически.") : root.license-online ? UiText.translate(UiText.language, "Статус получен с настроенного сервера.") : UiText.translate(UiText.language, "Показан последний доступный локальный статус интерфейса."); color: Palette.n600; font-size: 11px; wrap: word-wrap; }
+                                }
+                            }
+                            if root.station-demo: Rectangle {
+                                min-height: 72px;
+                                border-radius: 16px;
+                                border-width: 1px;
+                                border-color: Palette.a300;
+                                background: Palette.a50;
+                                VerticalLayout {
+                                    padding: 13px;
+                                    spacing: 4px;
+                                    Text { text: UiText.translate(UiText.language, "ЭТИКЕТКИ С ПОМЕТКОЙ DEMO"); color: Palette.a700; font-size: 12px; font-weight: 800; }
+                                    Text { text: UiText.translate(UiText.language, "У станции нет лицензии продавца LabelPilot, поэтому на этикетках печатается пометка DEMO. Синхронизируйте станцию с лицензированным сервером — пометка исчезнет автоматически."); color: Palette.n600; font-size: 11px; wrap: word-wrap; }
                                 }
                             }
                         }

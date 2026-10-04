@@ -85,6 +85,13 @@ pub struct NativeLicenseStatus {
     pub signature_valid: bool,
     pub machine_ok: bool,
     pub stations_used: i64,
+    /// Expired, but the server keeps working until `grace_until`.
+    pub grace: bool,
+    pub grace_until: String,
+    /// Days to the expiry date (in grace: to the end of the grace period).
+    pub days_left: Option<i64>,
+    /// The server clock was turned back; expiry is judged at its clock mark.
+    pub clock_rollback: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -100,7 +107,59 @@ pub struct NativeServerLicenseSnapshot {
     pub compatibility_reason: String,
     pub license_online: bool,
     pub license: Option<NativeLicenseStatus>,
+    /// This station's named seat as the server reports it in the ping reply.
+    pub seat: Option<NativeStationSeat>,
+    /// The vendor license bound to this station (its persisted token); `None`
+    /// means labels from this station carry a DEMO mark. Known offline too.
+    pub station_license: Option<NativeStationLicense>,
+    /// The Windows clock is behind a date this station has already seen.
+    pub station_clock_rollback: bool,
+    pub station_clock_mark: String,
     pub checked_at_ms: u64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeStationSeat {
+    /// active | pending | released
+    pub state: String,
+    /// match | conflict | legacy (no fingerprint known)
+    pub fingerprint: String,
+    pub used: Option<i64>,
+    /// `None` = no seat limit (server without a license)
+    pub limit: Option<i64>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeStationLicense {
+    pub customer: String,
+    pub edition: String,
+    pub license_id: String,
+    pub expires: Option<String>,
+    /// lifetime | active | expiring | grace | expired (crypto::LicenseTerm)
+    pub term: String,
+    pub grace_until: Option<String>,
+    pub days_left: Option<i64>,
+}
+
+impl NativeStationLicense {
+    fn judged(license: crate::crypto::StationLicense, today: time::Date) -> Self {
+        let term = license.term(today);
+        Self {
+            customer: license.customer,
+            edition: license.edition,
+            license_id: license.license_id,
+            expires: license.expires,
+            term: term.term.as_str().to_owned(),
+            grace_until: term.grace_until.map(crate::license_clock::format_date),
+            days_left: term.days_left,
+        }
+    }
+
+    pub fn wants_renewal(&self) -> bool {
+        matches!(self.term.as_str(), "expiring" | "grace" | "expired")
+    }
 }
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1216,6 +1275,7 @@ impl NativeUiRuntime {
             .unwrap_or_default();
         let server_address = canonical_server_address(&configured).unwrap_or(configured);
         let base_url = native_server_base_url(&server_address);
+        let trusted = crate::license_clock::trusted_today(persisted);
         let mut snapshot = NativeServerLicenseSnapshot {
             station,
             server_address,
@@ -1227,16 +1287,33 @@ impl NativeUiRuntime {
             compatibility_reason: String::new(),
             license_online: false,
             license: None,
+            seat: None,
+            station_license: crate::crypto::station_license(persisted)
+                .map(|license| NativeStationLicense::judged(license, trusted.today)),
+            station_clock_rollback: trusted.rollback,
+            station_clock_mark: crate::license_clock::format_date(trusted.mark),
             checked_at_ms: unix_ms(),
         };
         let (Some(client), Some(base_url)) = (self.network_client.as_ref(), base_url) else {
             return Ok(snapshot);
         };
 
-        if let Some(station_uuid) = snapshot.station.uuid.as_deref() {
+        if let Some(station_uuid) = snapshot.station.uuid.clone() {
+            // The fingerprint binds this identity to this computer on the server;
+            // `license=none` asks the server for its signed token (DEMO recovery),
+            // `license=refresh` for the renewal of an expiring subscription.
+            let mut query = vec![("station_uuid", station_uuid.as_str())];
+            if let Some(fingerprint) = crate::station_fingerprint::station_fingerprint() {
+                query.push(("fingerprint", fingerprint));
+            }
+            match snapshot.station_license.as_ref() {
+                None => query.push(("license", "none")),
+                Some(license) if license.wants_renewal() => query.push(("license", "refresh")),
+                Some(_) => {}
+            }
             let ping = client
                 .get(format!("{base_url}/stations/ping/"))
-                .query(&[("station_uuid", station_uuid)])
+                .query(&query)
                 .send()
                 .and_then(reqwest::blocking::Response::error_for_status)
                 .and_then(reqwest::blocking::Response::json::<Value>);
@@ -1257,6 +1334,24 @@ impl NativeUiRuntime {
                             env!("CARGO_PKG_VERSION"),
                             snapshot.min_client_version
                         );
+                    }
+                }
+                snapshot.seat = native_station_seat(ping.get("seat"));
+                if let Some(token) = ping.get("license_token").and_then(Value::as_str) {
+                    match crate::crypto::adopt_server_token(persisted, token) {
+                        Ok(true) => {
+                            self.events.log(
+                                "license",
+                                "INFO",
+                                "license token received from the server",
+                            );
+                            snapshot.station_license = crate::crypto::station_license(persisted)
+                                .map(|license| {
+                                    NativeStationLicense::judged(license, trusted.today)
+                                });
+                        }
+                        Ok(false) => {}
+                        Err(error) => self.events.log("license", "WARN", &error),
                     }
                 }
             }
@@ -2507,6 +2602,24 @@ fn semver_is_less(left: &str, right: &str) -> Option<bool> {
     Some(parse(left)? < parse(right)?)
 }
 
+fn native_station_seat(value: Option<&Value>) -> Option<NativeStationSeat> {
+    let seat = value?.as_object()?;
+    let state = seat.get("state").and_then(Value::as_str)?;
+    if !matches!(state, "active" | "pending" | "released") {
+        return None;
+    }
+    let fingerprint = match seat.get("fingerprint").and_then(Value::as_str) {
+        Some(status @ ("match" | "conflict" | "legacy")) => status,
+        _ => "legacy",
+    };
+    Some(NativeStationSeat {
+        state: state.to_owned(),
+        fingerprint: fingerprint.to_owned(),
+        used: value_i64(seat.get("used")).filter(|used| *used >= 0),
+        limit: value_i64(seat.get("limit")).filter(|limit| *limit >= 0),
+    })
+}
+
 fn native_license_status(value: &Value) -> NativeLicenseStatus {
     let features = value
         .get("features")
@@ -2551,6 +2664,13 @@ fn native_license_status(value: &Value) -> NativeLicenseStatus {
             .and_then(Value::as_bool)
             .unwrap_or(false),
         stations_used: value_i64(value.get("stations_used")).unwrap_or_default(),
+        grace: value.get("grace").and_then(Value::as_bool).unwrap_or(false),
+        grace_until: value_string(value.get("grace_until")).unwrap_or_default(),
+        days_left: value_i64(value.get("days_left")).filter(|days| *days >= 0),
+        clock_rollback: value
+            .get("clock_rollback")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
     }
 }
 
@@ -3088,9 +3208,9 @@ mod tests {
                 let count = stream.read(&mut buffer).unwrap();
                 let request = String::from_utf8_lossy(&buffer[..count]).into_owned();
                 let body = if request.starts_with("GET /api/v1/stations/ping/") {
-                    r#"{"status":"online","server_version":"2.4.0","min_client_version":"1.9.0"}"#
+                    r#"{"status":"online","server_version":"2.4.0","min_client_version":"1.9.0","seat":{"state":"active","fingerprint":"match","used":3,"limit":20},"license_token":"not-a-vendor-token"}"#
                 } else {
-                    r#"{"licensed":true,"mode":"licensed","edition":"Industrial","customer":"Factory","expires":"2028-01-01","expired":false,"max_stations":20,"stations_used":3,"license_id":"LIC-42","features":["printing","telemetry"],"machine_id":"MACHINE-12","strict":true,"signature_valid":true,"machine_ok":true}"#
+                    r#"{"licensed":true,"mode":"licensed","edition":"Industrial","customer":"Factory","expires":"2028-01-01","expired":false,"grace":false,"grace_until":"2028-01-15","days_left":455,"clock_rollback":false,"max_stations":20,"stations_used":3,"license_id":"LIC-42","features":["printing","telemetry"],"machine_id":"MACHINE-12","strict":true,"signature_valid":true,"machine_ok":true}"#
                 };
                 let response = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
@@ -3116,11 +3236,36 @@ mod tests {
         assert_eq!(license.max_stations, Some(20));
         assert_eq!(license.stations_used, 3);
         assert_eq!(
+            (
+                license.grace,
+                license.grace_until.as_str(),
+                license.days_left
+            ),
+            (false, "2028-01-15", Some(455))
+        );
+        assert!(!snapshot.station_clock_rollback);
+        assert_eq!(
+            snapshot.seat,
+            Some(NativeStationSeat {
+                state: "active".to_owned(),
+                fingerprint: "match".to_owned(),
+                used: Some(3),
+                limit: Some(20),
+            })
+        );
+        // No vendor token here, and a token that does not verify is never adopted.
+        assert_eq!(snapshot.station_license, None);
+        assert_eq!(runtime.persisted().unwrap().load_license_token(), None);
+        assert_eq!(
             runtime.persisted().unwrap().load_printer_config()["serverIp"],
             address.to_string()
         );
         let requests = server.join().unwrap();
         assert!(requests[0].starts_with("GET /api/v1/stations/ping/?station_uuid=station-license"));
+        assert!(requests[0].lines().next().unwrap().contains("license=none"));
+        if let Some(fingerprint) = crate::station_fingerprint::station_fingerprint() {
+            assert!(requests[0].contains(&format!("fingerprint={fingerprint}")));
+        }
         assert!(requests[1].starts_with("GET /api/v1/license/"));
     }
     #[test]
