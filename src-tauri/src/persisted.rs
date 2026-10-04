@@ -16,6 +16,7 @@ const IDENTITY_FILE: &str = "identity.json";
 const DATABASE_FILE: &str = "client_data.db";
 const SEQUENCE_FILE: &str = "sequence-store.json";
 const LICENSE_TOKEN_FILE: &str = "license.token";
+const SEAT_LIST_FILE: &str = "seat-list.token";
 const WEIGHT_LIMIT_TOLERANCE_KG: f64 = 1e-9;
 const SIMULATED_WEIGHT_BLOCKED: &str = "Весы работают в режиме симулятора: на лицензированной станции производственная печать запрещена. Подключите реальные весы в настройках.";
 const MAX_SEQUENCE_LENGTH: i64 = 4096;
@@ -76,6 +77,18 @@ impl PersistedState {
 
     pub fn save_license_token(&self, token: &str) -> Result<(), String> {
         atomic_write_bytes(&self.data_dir.join(LICENSE_TOKEN_FILE), token.as_bytes())
+    }
+
+    /// The newest vendor-signed seat list seen for this station's licence.
+    pub fn load_seat_list_token(&self) -> Option<String> {
+        fs::read_to_string(self.data_dir.join(SEAT_LIST_FILE))
+            .ok()
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty())
+    }
+
+    pub fn save_seat_list_token(&self, token: &str) -> Result<(), String> {
+        atomic_write_bytes(&self.data_dir.join(SEAT_LIST_FILE), token.as_bytes())
     }
 
     pub fn save_identity(&self, identity: &Value) -> Result<(), String> {

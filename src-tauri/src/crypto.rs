@@ -34,6 +34,8 @@ type Aes256CbcEncryptor = cbc::Encryptor<Aes256>;
 pub enum PushDecodeError {
     Unauthorized,
     Invalid(String),
+    /// Authentic data this station must not take (not in the vendor seat list).
+    Forbidden(String),
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -56,13 +58,17 @@ impl PushDecodeError {
     pub fn is_unauthorized(&self) -> bool {
         matches!(self, Self::Unauthorized)
     }
+
+    pub fn is_forbidden(&self) -> bool {
+        matches!(self, Self::Forbidden(_))
+    }
 }
 
 impl fmt::Display for PushDecodeError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Unauthorized => formatter.write_str("Unauthorized"),
-            Self::Invalid(message) => formatter.write_str(message),
+            Self::Invalid(message) | Self::Forbidden(message) => formatter.write_str(message),
         }
     }
 }
@@ -300,7 +306,15 @@ pub fn decode_push_body(
 ) -> Result<DecodedPush, PushDecodeError> {
     if body.starts_with(LPI2_MAGIC) {
         let today = crate::license_clock::trusted_today(persisted).today;
-        return decode_lpi2_with_key(body, &LICENSE_PUBLIC_KEY, today);
+        let decoded = decode_lpi2_with_key(body, &LICENSE_PUBLIC_KEY, today)?;
+        admit_by_seat_list(
+            persisted,
+            &decoded,
+            today,
+            crate::station_fingerprint::station_fingerprint(),
+            &LICENSE_PUBLIC_KEY,
+        )?;
+        return Ok(decoded);
     }
     if persisted.load_license_token().is_some() {
         return Err(PushDecodeError::Unauthorized);
@@ -362,6 +376,100 @@ fn decode_lpi2_with_key(
     })
 }
 
+/// A licence with the "seat-list" feature (the push's, or the one this station is
+/// bound to, so an older or another licence without the feature cannot lift it)
+/// lets data in only with a vendor-signed list that names this station's hardware.
+fn admit_by_seat_list(
+    persisted: &PersistedState,
+    decoded: &DecodedPush,
+    today: Date,
+    fingerprint: Option<&str>,
+    public_key: &[u8; 32],
+) -> Result<(), PushDecodeError> {
+    let Some(license) = decoded.license.as_ref() else {
+        return Ok(());
+    };
+    if !seat_list_required(persisted, license, public_key) {
+        return Ok(());
+    }
+    let embedded = decoded.value.get("seat_list").and_then(Value::as_str);
+    crate::seat_list::admit(
+        persisted,
+        crate::seat_list::Holder {
+            license_id: &license.license_id,
+            machine_id: &license.machine_id,
+        },
+        embedded,
+        today,
+        fingerprint,
+        public_key,
+    )
+}
+
+fn seat_list_required(
+    persisted: &PersistedState,
+    incoming: &LicenseTokenClaims,
+    public_key: &[u8; 32],
+) -> bool {
+    let requires = |claims: &LicenseTokenClaims| {
+        claims
+            .features
+            .iter()
+            .any(|feature| feature == crate::seat_list::SEAT_LIST_FEATURE)
+    };
+    requires(incoming)
+        || persisted
+            .load_license_token()
+            .and_then(|token| verify_license_token_allow_expired(&token, public_key).ok())
+            .is_some_and(|bound| requires(&bound))
+}
+
+/// The seat list of this station's own licence, for the operator screen; `None`
+/// when that licence uses no seat list.
+#[cfg_attr(not(feature = "native-ui"), allow(dead_code))]
+pub fn station_seat_list(
+    persisted: &PersistedState,
+    today: Date,
+) -> Option<crate::seat_list::StationSeatList> {
+    let bound = verify_license_token_allow_expired(
+        &persisted.load_license_token()?,
+        &LICENSE_PUBLIC_KEY,
+    )
+    .ok()?;
+    if !seat_list_required(persisted, &bound, &LICENSE_PUBLIC_KEY) {
+        return None;
+    }
+    Some(crate::seat_list::station_status(
+        persisted,
+        crate::seat_list::Holder {
+            license_id: &bound.license_id,
+            machine_id: &bound.machine_id,
+        },
+        today,
+        crate::station_fingerprint::station_fingerprint(),
+        &LICENSE_PUBLIC_KEY,
+    ))
+}
+
+/// Keeps the seat list the station's server hands out in its ping reply when it
+/// belongs to this station's licence and is newer than the one already kept.
+#[cfg_attr(not(feature = "native-ui"), allow(dead_code))]
+pub fn adopt_server_seat_list(persisted: &PersistedState, token: &str) -> Result<bool, String> {
+    let bound = persisted
+        .load_license_token()
+        .and_then(|value| verify_license_token_allow_expired(&value, &LICENSE_PUBLIC_KEY).ok())
+        .ok_or_else(|| "no licence is bound to this station".to_owned())?;
+    crate::seat_list::keep_newer(
+        persisted,
+        crate::seat_list::Holder {
+            license_id: &bound.license_id,
+            machine_id: &bound.machine_id,
+        },
+        token,
+        &LICENSE_PUBLIC_KEY,
+    )
+}
+
 fn derive_data_key(license_id: &str, key_version: i64) -> Result<[u8; 32], PushDecodeError> {
     let seed = format!("{license_id}|kv{key_version}");
     let info = format!("lpi-data-key|{license_id}|kv{key_version}");
@@ -401,56 +509,6 @@ fn verify_license_token_with_policy(
     public_key: &[u8; 32],
     judged_at: Option<Date>,
 ) -> Result<LicenseTokenClaims, PushDecodeError> {
-    if !token.is_ascii()
-        || token.trim() != token
-        || token.is_empty()
-        || token.len() > MAX_TOKEN_BYTES
-    {
-        return Err(PushDecodeError::Invalid(
-            "License token size or encoding is invalid".to_owned(),
-        ));
-    }
-    let mut parts = token.split('.');
-    let payload_part = parts
-        .next()
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| PushDecodeError::Invalid("Malformed license token".to_owned()))?;
-    let signature_part = parts
-        .next()
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| PushDecodeError::Invalid("Malformed license token".to_owned()))?;
-    if parts.next().is_some() {
-        return Err(PushDecodeError::Invalid(
-            "Malformed license token".to_owned(),
-        ));
-    }
-    let payload = URL_SAFE_NO_PAD
-        .decode(payload_part)
-        .map_err(|_| PushDecodeError::Invalid("Malformed license payload encoding".to_owned()))?;
-    let signature_bytes = URL_SAFE_NO_PAD
-        .decode(signature_part)
-        .map_err(|_| PushDecodeError::Invalid("Malformed license signature encoding".to_owned()))?;
-    if payload.len() > MAX_TOKEN_BYTES
-        || URL_SAFE_NO_PAD.encode(&payload) != payload_part
-        || URL_SAFE_NO_PAD.encode(&signature_bytes) != signature_part
-    {
-        return Err(PushDecodeError::Invalid(
-            "License token is not canonical base64url".to_owned(),
-        ));
-    }
-    let signature = Signature::from_slice(&signature_bytes)
-        .map_err(|_| PushDecodeError::Invalid("Malformed Ed25519 signature length".to_owned()))?;
-    let verifying_key = VerifyingKey::from_bytes(public_key)
-        .map_err(|_| PushDecodeError::Invalid("Invalid Ed25519 public key".to_owned()))?;
-    verifying_key
-        .verify_strict(&payload, &signature)
-        .map_err(|_| PushDecodeError::Invalid("Invalid license signature".to_owned()))?;
-
-    let value: Value = serde_json::from_slice(&payload)
-        .map_err(|_| PushDecodeError::Invalid("License payload is not valid JSON".to_owned()))?;
-    let object = value
-        .as_object()
-        .ok_or_else(|| PushDecodeError::Invalid("License payload must be an object".to_owned()))?;
     const FIELDS: [&str; 9] = [
         "customer",
         "edition",
@@ -462,19 +520,7 @@ fn verify_license_token_with_policy(
         "machine_id",
         "max_stations",
     ];
-    if object.len() != FIELDS.len() || !FIELDS.iter().all(|field| object.contains_key(*field)) {
-        return Err(PushDecodeError::Invalid(
-            "License fields do not match the supported contract".to_owned(),
-        ));
-    }
-    let canonical = serde_json::to_vec(&value).map_err(|_| {
-        PushDecodeError::Invalid("License payload cannot be canonicalized".to_owned())
-    })?;
-    if canonical != payload {
-        return Err(PushDecodeError::Invalid(
-            "License payload is not canonical JSON".to_owned(),
-        ));
-    }
+    let value = verify_canonical_token(token, public_key, MAX_TOKEN_BYTES, &FIELDS)?;
     let license: LicenseTokenClaims = serde_json::from_value(value)
         .map_err(|_| PushDecodeError::Invalid("License payload types are invalid".to_owned()))?;
     if !bounded_text(&license.customer, 160)
@@ -513,6 +559,76 @@ fn verify_license_token_with_policy(
     Ok(license)
 }
 
+/// `b64url(payload).b64url(signature)`: a strict Ed25519 signature by the vendor
+/// key over canonical JSON (sorted keys, no whitespace) with exactly `fields`.
+pub(crate) fn verify_canonical_token(
+    token: &str,
+    public_key: &[u8; 32],
+    max_bytes: usize,
+    fields: &[&str],
+) -> Result<Value, PushDecodeError> {
+    if !token.is_ascii() || token.trim() != token || token.is_empty() || token.len() > max_bytes {
+        return Err(PushDecodeError::Invalid(
+            "License token size or encoding is invalid".to_owned(),
+        ));
+    }
+    let mut parts = token.split('.');
+    let payload_part = parts
+        .next()
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| PushDecodeError::Invalid("Malformed license token".to_owned()))?;
+    let signature_part = parts
+        .next()
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| PushDecodeError::Invalid("Malformed license token".to_owned()))?;
+    if parts.next().is_some() {
+        return Err(PushDecodeError::Invalid(
+            "Malformed license token".to_owned(),
+        ));
+    }
+    let payload = URL_SAFE_NO_PAD
+        .decode(payload_part)
+        .map_err(|_| PushDecodeError::Invalid("Malformed license payload encoding".to_owned()))?;
+    let signature_bytes = URL_SAFE_NO_PAD
+        .decode(signature_part)
+        .map_err(|_| PushDecodeError::Invalid("Malformed license signature encoding".to_owned()))?;
+    if payload.len() > max_bytes
+        || URL_SAFE_NO_PAD.encode(&payload) != payload_part
+        || URL_SAFE_NO_PAD.encode(&signature_bytes) != signature_part
+    {
+        return Err(PushDecodeError::Invalid(
+            "License token is not canonical base64url".to_owned(),
+        ));
+    }
+    let signature = Signature::from_slice(&signature_bytes)
+        .map_err(|_| PushDecodeError::Invalid("Malformed Ed25519 signature length".to_owned()))?;
+    let verifying_key = VerifyingKey::from_bytes(public_key)
+        .map_err(|_| PushDecodeError::Invalid("Invalid Ed25519 public key".to_owned()))?;
+    verifying_key
+        .verify_strict(&payload, &signature)
+        .map_err(|_| PushDecodeError::Invalid("Invalid license signature".to_owned()))?;
+
+    let value: Value = serde_json::from_slice(&payload)
+        .map_err(|_| PushDecodeError::Invalid("License payload is not valid JSON".to_owned()))?;
+    let object = value
+        .as_object()
+        .ok_or_else(|| PushDecodeError::Invalid("License payload must be an object".to_owned()))?;
+    if object.len() != fields.len() || !fields.iter().all(|field| object.contains_key(*field)) {
+        return Err(PushDecodeError::Invalid(
+            "License fields do not match the supported contract".to_owned(),
+        ));
+    }
+    let canonical = serde_json::to_vec(&value).map_err(|_| {
+        PushDecodeError::Invalid("License payload cannot be canonicalized".to_owned())
+    })?;
+    if canonical != payload {
+        return Err(PushDecodeError::Invalid(
+            "License payload is not canonical JSON".to_owned(),
+        ));
+    }
+    Ok(value)
+}
+
 fn bounded_text(value: &str, maximum: usize) -> bool {
     !value.is_empty()
         && value.trim() == value
@@ -520,7 +636,7 @@ fn bounded_text(value: &str, maximum: usize) -> bool {
         && !value.chars().any(char::is_control)
 }
 
-fn valid_license_id(value: &str) -> bool {
+pub(crate) fn valid_license_id(value: &str) -> bool {
     let bytes = value.as_bytes();
     (3..=80).contains(&bytes.len())
         && bytes[0].is_ascii_alphanumeric()
@@ -529,7 +645,7 @@ fn valid_license_id(value: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
 }
 
-fn valid_machine_id(value: &str) -> bool {
+pub(crate) fn valid_machine_id(value: &str) -> bool {
     value.len() == 32
         && value
             .bytes()
@@ -544,7 +660,7 @@ fn valid_feature(value: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b':' | b'-'))
 }
 
-fn parse_iso_date(value: &str) -> Result<Date, PushDecodeError> {
+pub(crate) fn parse_iso_date(value: &str) -> Result<Date, PushDecodeError> {
     let bytes = value.as_bytes();
     if bytes.len() != 10
         || bytes[4] != b'-'
@@ -643,6 +759,90 @@ mod tests {
             ),
             key.verifying_key().to_bytes(),
         )
+    }
+
+    // The sales service's seat-list fixture is signed with the same test seed and
+    // names fixture-license-2026 on this machine id: stations aaaa… and cccc….
+    fn seat_list_fixture_token() -> String {
+        let fixture: Value =
+            serde_json::from_str(include_str!("../../tests/fixtures/seat-list-contract.json"))
+                .expect("parse seat-list fixture");
+        fixture["token"].as_str().expect("fixture token").to_owned()
+    }
+
+    fn test_push(license: &Value, value: Value, today: Date) -> (DecodedPush, [u8; 32]) {
+        let (token, public_key) = signed_test_token(license);
+        let blob = encode_lpi2_with_key(&token, &value, &public_key).expect("encrypt push");
+        (
+            decode_lpi2_with_key(&blob, &public_key, today).expect("decode push"),
+            public_key,
+        )
+    }
+
+    #[test]
+    fn a_seat_list_licence_takes_data_only_for_listed_hardware() {
+        let directory = TestDirectory::new("seat-list-admit");
+        let persisted = PersistedState::for_data_dir(directory.0.clone());
+        let today = Date::from_calendar_date(2026, Month::October, 6).unwrap();
+        let (listed, unlisted) = ("a".repeat(32), "b".repeat(32));
+        let mut flagged = valid_license_payload();
+        flagged["features"] = json!(["seat-list"]);
+
+        // A licence without the feature needs no list.
+        let (plain, key) = test_push(&valid_license_payload(), json!({"type": "PRINT_JOB"}), today);
+        assert!(admit_by_seat_list(&persisted, &plain, today, Some(&unlisted), &key).is_ok());
+
+        let (bare, key) = test_push(&flagged, json!({"type": "PRINT_JOB"}), today);
+        let refused = admit_by_seat_list(&persisted, &bare, today, Some(&listed), &key).unwrap_err();
+        assert!(refused.is_forbidden(), "{refused}");
+
+        let with_list = json!({"type": "PRINT_JOB", "seat_list": seat_list_fixture_token()});
+        let (pushed, key) = test_push(&flagged, with_list, today);
+        assert!(admit_by_seat_list(&persisted, &pushed, today, Some(&listed), &key).is_ok());
+        assert!(admit_by_seat_list(&persisted, &pushed, today, Some(&unlisted), &key)
+            .unwrap_err()
+            .is_forbidden());
+        assert!(admit_by_seat_list(&persisted, &pushed, today, None, &key)
+            .unwrap_err()
+            .is_forbidden());
+        // The list was kept: a later push without one is still admitted.
+        assert!(admit_by_seat_list(&persisted, &bare, today, Some(&listed), &key).is_ok());
+        let expired = Date::from_calendar_date(2027, Month::January, 4).unwrap();
+        assert!(admit_by_seat_list(&persisted, &bare, expired, Some(&listed), &key)
+            .unwrap_err()
+            .is_forbidden());
+    }
+
+    #[test]
+    fn another_token_cannot_lift_a_bound_seat_list_licence() {
+        let directory = TestDirectory::new("seat-list-sticky");
+        let persisted = PersistedState::for_data_dir(directory.0.clone());
+        let today = Date::from_calendar_date(2026, Month::October, 6).unwrap();
+        let listed = "a".repeat(32);
+        let mut flagged = valid_license_payload();
+        flagged["features"] = json!(["seat-list"]);
+        flagged["issued"] = json!("2026-06-01");
+        let (bound, _) = signed_test_token(&flagged);
+        persisted.save_license_token(&bound).unwrap();
+
+        // An older issue of the same licence without the feature.
+        let (older, key) = test_push(&valid_license_payload(), json!({"type": "PRINT_JOB"}), today);
+        assert!(admit_by_seat_list(&persisted, &older, today, Some(&listed), &key)
+            .unwrap_err()
+            .is_forbidden());
+        // Another licence without the feature and without a list of its own.
+        let mut other = valid_license_payload();
+        other["license_id"] = json!("other-licence-2026");
+        let (foreign, key) = test_push(&other, json!({"type": "PRINT_JOB"}), today);
+        assert!(admit_by_seat_list(&persisted, &foreign, today, Some(&listed), &key)
+            .unwrap_err()
+            .is_forbidden());
+        // The bound licence's own list is not a list of the other licence.
+        let carrying = json!({"type": "PRINT_JOB", "seat_list": seat_list_fixture_token()});
+        let (foreign, key) = test_push(&other, carrying, today);
+        assert!(admit_by_seat_list(&persisted, &foreign, today, Some(&listed), &key)
+            .unwrap_err()
+            .is_forbidden());
     }
 
     #[test]

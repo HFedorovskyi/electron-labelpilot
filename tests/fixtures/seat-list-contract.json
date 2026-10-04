@@ -1,0 +1,18 @@
+{
+  "public_key_hex": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+  "token": "eyJleHBpcmVzIjoiMjAyNy0wMS0wMyIsImlzc3VlZCI6IjIwMjYtMTAtMDVUMDg6MzA6MDBaIiwia2luZCI6ImxhYmVscGlsb3Qtc2VhdHMtdjEiLCJsaWNlbnNlX2lkIjoiZml4dHVyZS1saWNlbnNlLTIwMjYiLCJtYWNoaW5lX2lkIjoiMDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWYiLCJtYXhfc3RhdGlvbnMiOjMsInN0YXRpb25zIjpbImFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhIiwiY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2MiXX0.hE7BuCqXbjuzyUHDl9kJ0K41SkczHlMS-gsDZQpNm4cY7sWKwBh01frA2aB6JGxYsgTRLSEdi5dcHebRt1yYBw",
+  "payload": {
+    "expires": "2027-01-03",
+    "issued": "2026-10-05T08:30:00Z",
+    "kind": "labelpilot-seats-v1",
+    "license_id": "fixture-license-2026",
+    "machine_id": "0123456789abcdef0123456789abcdef",
+    "max_stations": 3,
+    "stations": [
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "cccccccccccccccccccccccccccccccc"
+    ]
+  },
+  "listed_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "unlisted_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+}

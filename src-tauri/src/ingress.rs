@@ -483,6 +483,10 @@ fn handle_sync(runtime: &IngressRuntime, body: &[u8]) -> HttpResponse {
         Err(error) if error.is_unauthorized() => {
             return HttpResponse::json(401, json!({"error": "Unauthorized"}));
         }
+        Err(error) if error.is_forbidden() => {
+            log(runtime, "WARN", &format!("server data refused: {error}"));
+            return HttpResponse::json(403, json!({"error": error.to_string()}));
+        }
         Err(error) => {
             log(
                 runtime,
@@ -542,6 +546,10 @@ fn handle_print_job(runtime: &IngressRuntime, body: &[u8]) -> HttpResponse {
         Ok(decoded) => decoded,
         Err(error) if error.is_unauthorized() => {
             return HttpResponse::json(401, json!({"error": "Unauthorized"}));
+        }
+        Err(error) if error.is_forbidden() => {
+            log(runtime, "WARN", &format!("server data refused: {error}"));
+            return HttpResponse::json(403, json!({"error": error.to_string()}));
         }
         Err(error) => {
             log(

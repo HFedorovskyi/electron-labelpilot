@@ -2618,6 +2618,34 @@ fn station_license_hint(snapshot: &NativeServerLicenseSnapshot) -> (String, i32)
             3,
         );
     }
+    if let Some(list) = snapshot.station_seat_list.as_ref() {
+        let refused = "новые данные с сервера не принимаются, печать по имеющимся данным продолжается.";
+        let expires = list.expires.clone().unwrap_or_default();
+        if list.missing {
+            return (
+                format!("Лицензия требует список мест поставщика, а сервер его ещё не передал: {refused}"),
+                3,
+            );
+        }
+        if list.expired {
+            return (
+                format!("Список мест поставщика истёк {expires}: {refused} Обновите список на сервере."),
+                3,
+            );
+        }
+        if !list.listed {
+            return (
+                format!("Этой станции нет в списке мест поставщика: {refused} Администратору: проверьте место станции на сервере."),
+                3,
+            );
+        }
+        if list.days_left.is_some_and(|days| days <= 14) {
+            return (
+                format!("Список мест поставщика действует до {expires}. Сервер с интернетом продлит его сам; без интернета обновите его через личный кабинет."),
+                2,
+            );
+        }
+    }
     let Some(license) = snapshot.station_license.as_ref() else {
         return (String::new(), 0);
     };

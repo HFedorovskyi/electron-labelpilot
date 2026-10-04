@@ -112,6 +112,9 @@ pub struct NativeServerLicenseSnapshot {
     /// The vendor license bound to this station (its persisted token); `None`
     /// means labels from this station carry a DEMO mark. Known offline too.
     pub station_license: Option<NativeStationLicense>,
+    /// The vendor seat list of this station's licence (`None` = the licence
+    /// uses no seat list). Judged on the station, like every data push.
+    pub station_seat_list: Option<NativeStationSeatList>,
     /// The Windows clock is behind a date this station has already seen.
     pub station_clock_rollback: bool,
     pub station_clock_mark: String,
@@ -128,6 +131,30 @@ pub struct NativeStationSeat {
     pub used: Option<i64>,
     /// `None` = no seat limit (server without a license)
     pub limit: Option<i64>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeStationSeatList {
+    /// A valid list names this station's hardware: server data is accepted.
+    pub listed: bool,
+    /// The server has not handed out a list yet.
+    pub missing: bool,
+    pub expired: bool,
+    pub expires: Option<String>,
+    pub days_left: Option<i64>,
+}
+
+impl From<crate::seat_list::StationSeatList> for NativeStationSeatList {
+    fn from(list: crate::seat_list::StationSeatList) -> Self {
+        Self {
+            listed: list.listed,
+            missing: list.missing,
+            expired: list.expired,
+            expires: list.expires,
+            days_left: list.days_left,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
@@ -1290,6 +1317,8 @@ impl NativeUiRuntime {
             seat: None,
             station_license: crate::crypto::station_license(persisted)
                 .map(|license| NativeStationLicense::judged(license, trusted.today)),
+            station_seat_list: crate::crypto::station_seat_list(persisted, trusted.today)
+                .map(NativeStationSeatList::from),
             station_clock_rollback: trusted.rollback,
             station_clock_mark: crate::license_clock::format_date(trusted.mark),
             checked_at_ms: unix_ms(),
@@ -1354,6 +1383,20 @@ impl NativeUiRuntime {
                         Err(error) => self.events.log("license", "WARN", &error),
                     }
                 }
+                if let Some(token) = ping.get("seat_list").and_then(Value::as_str) {
+                    match crate::crypto::adopt_server_seat_list(persisted, token) {
+                        Ok(true) => self.events.log(
+                            "license",
+                            "INFO",
+                            "seat list received from the server",
+                        ),
+                        Ok(false) => {}
+                        Err(error) => self.events.log("license", "WARN", &error),
+                    }
+                }
+                snapshot.station_seat_list =
+                    crate::crypto::station_seat_list(persisted, trusted.today)
+                        .map(NativeStationSeatList::from);
             }
         }
 

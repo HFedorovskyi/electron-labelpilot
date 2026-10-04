@@ -38,6 +38,8 @@ pub mod runtime_selector;
 #[cfg(any(feature = "desktop", feature = "slint-ui"))]
 mod scale;
 #[cfg(any(feature = "desktop", feature = "slint-ui"))]
+mod seat_list;
+#[cfg(any(feature = "desktop", feature = "slint-ui"))]
 mod session;
 #[cfg(any(feature = "desktop", feature = "slint-ui"))]
 mod station_fingerprint;
