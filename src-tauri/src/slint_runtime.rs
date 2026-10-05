@@ -219,6 +219,10 @@ enum UiMessage {
     CatalogLoaded(Result<NativeCatalogSnapshot, String>),
     ServerLicenseLoaded(Result<NativeServerLicenseSnapshot, String>),
     ServerAddressSaved(Result<NativeServerLicenseSnapshot, String>),
+    DemoChanged {
+        start: bool,
+        outcome: Result<NativeServerLicenseSnapshot, String>,
+    },
     UpdateProgress {
         downloaded: u64,
         total: u64,
@@ -2581,6 +2585,7 @@ fn apply_server_license_snapshot(ui: &WeighingPrototype, snapshot: NativeServerL
     ui.set_license_seat_tone(tone);
     ui.set_license_seat_hint(hint.into());
     ui.set_station_demo(snapshot.station_license.is_none());
+    ui.set_demo_active(snapshot.demo_active);
     ui.set_station_license_hint(station_hint.into());
     ui.set_station_license_hint_tone(station_tone);
     ui.set_station_licensee(
@@ -4635,6 +4640,33 @@ pub fn run() -> Result<(), String> {
         }
     });
 
+    for start in [true, false] {
+        let weak = ui.as_weak();
+        let runtime = runtime.clone();
+        let message_tx = message_tx.clone();
+        let handler = move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let Some(runtime) = runtime.clone() else {
+                ui.set_license_status("Нативный runtime не подключен".into());
+                return;
+            };
+            ui.set_license_busy(true);
+            ui.set_license_status(if start { "Загрузка демо-данных…" } else { "Выход из демо-режима…" }.into());
+            let message_tx = message_tx.clone();
+            spawn_ui_task(move || {
+                let _ = message_tx.send(UiMessage::DemoChanged {
+                    start,
+                    outcome: runtime.set_demo(start),
+                });
+            });
+        };
+        if start {
+            ui.on_start_demo(handler);
+        } else {
+            ui.on_exit_demo(handler);
+        }
+    }
+
     ui.on_check_update({
         let weak = ui.as_weak();
         let updater = native_updater.clone();
@@ -4922,6 +4954,10 @@ pub fn run() -> Result<(), String> {
         ui.invoke_reload_license();
         assert!(ui.get_license_status().contains("runtime"));
         ui.invoke_save_server_address("127.0.0.1:8000".into());
+        assert!(ui.get_license_status().contains("runtime"));
+        ui.invoke_start_demo();
+        assert!(ui.get_license_status().contains("runtime"));
+        ui.invoke_exit_demo();
         assert!(ui.get_license_status().contains("runtime"));
         ui.set_active_page(0);
 
@@ -6103,6 +6139,20 @@ pub fn run() -> Result<(), String> {
                                 &event_runtime,
                                 &event_message_tx,
                             );
+                        }
+                    }
+                    Ok(UiMessage::DemoChanged { start, outcome }) => {
+                        let Some(ui) = weak.upgrade() else { return };
+                        ui.set_license_busy(false);
+                        match outcome {
+                            Ok(snapshot) => {
+                                apply_server_license_snapshot(&ui, snapshot);
+                                show_toast(&ui, if start { "Демо-данные загружены" } else { "Демо-режим завершён" });
+                            }
+                            Err(error) => {
+                                ui.set_license_status("Демо-режим: ошибка".into());
+                                show_alert(&ui, &format!("Демо-режим: {error}"));
+                            }
                         }
                     }
                     Ok(UiMessage::ServerAddressSaved(outcome)) => {

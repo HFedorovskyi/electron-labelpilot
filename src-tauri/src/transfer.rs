@@ -29,7 +29,7 @@ pub fn import_identity_file(
     let decoded = decode_push_body(persisted, &body).map_err(|error| error.to_string())?;
     let outcome = process_sync(persisted, client_version, &decoded.value)?;
     decoded.persist_verified_token(persisted)?;
-    clear_demo_flag(persisted);
+    crate::demo_data::forget_demo(persisted);
     let identity = persisted
         .load_identity()
         .ok_or_else(|| "Failed to load identity after import".to_owned())?;
@@ -51,7 +51,7 @@ pub fn import_offline_sync(
     let decoded = decode_push_body(persisted, &body).map_err(|error| error.to_string())?;
     let outcome = process_sync(persisted, client_version, &decoded.value)?;
     decoded.persist_verified_token(persisted)?;
-    clear_demo_flag(persisted);
+    crate::demo_data::forget_demo(persisted);
     Ok(json!({
         "success": true,
         "message": outcome.message,
@@ -415,14 +415,6 @@ fn validate_extension(path: &Path, expected: &[&str]) -> Result<(), String> {
     ))
 }
 
-fn clear_demo_flag(persisted: &PersistedState) {
-    let _ = fs::remove_file(persisted.data_dir().join("demo.flag"));
-}
-
-pub fn is_demo_active(persisted: &PersistedState) -> bool {
-    persisted.data_dir().join("demo.flag").is_file()
-}
-
 pub fn selected_path(payload: Option<&Value>) -> Option<PathBuf> {
     match payload {
         Some(Value::String(path)) if !path.trim().is_empty() => Some(PathBuf::from(path)),
@@ -455,133 +447,6 @@ fn now_rfc3339() -> String {
     OffsetDateTime::now_utc()
         .format(&Rfc3339)
         .unwrap_or_else(|_| OffsetDateTime::now_utc().unix_timestamp().to_string())
-}
-
-pub fn seed_demo_data(persisted: &PersistedState, client_version: &str) -> Result<Value, String> {
-    let backup_path = persisted.data_dir().join("identity_pre_demo.json");
-    if let Some(identity) = persisted.load_identity() {
-        let is_demo = identity
-            .get("station_uuid")
-            .and_then(Value::as_str)
-            .is_some_and(|uuid| uuid.starts_with("demo-"));
-        if !is_demo && !backup_path.is_file() {
-            let bytes = serde_json::to_vec_pretty(&identity)
-                .map_err(|error| format!("failed to serialize identity backup: {error}"))?;
-            write_bytes_atomic(&backup_path, &bytes)?;
-        }
-    }
-    let _ = fs::remove_file(persisted.data_dir().join("identity.json"));
-
-    let label_structure = json!({
-        "version": 1,
-        "canvas": { "width": 58, "height": 40, "labelType": "pack" },
-        "elements": [
-            { "type": "text", "x": 3, "y": 3, "width": 52, "height": 7, "text": "{{name}}", "fontSize": 4 },
-            { "type": "text", "x": 3, "y": 12, "width": 30, "height": 5, "text": "Вес: {{weight}} кг", "fontSize": 3 },
-            { "type": "barcode", "x": 4, "y": 20, "width": 50, "height": 15, "format": "code128", "value": "{{barcode}}" }
-        ]
-    });
-    let fixture = json!({
-        "station": {
-            "uuid": "demo-0000-0000-0000-000000000001",
-            "number": 0,
-            "name": "Демо-станция",
-            "server_url": "http://127.0.0.1:8000"
-        },
-        "meta": {
-            "type": "demo",
-            "generated_at": now_rfc3339(),
-            "min_client_version": client_version
-        },
-        "payload": {
-            "operators": [{
-                "uuid": "demo-operator",
-                "full_name": "Демо оператор",
-                "short_code": "00",
-                "pin_hash": null,
-                "is_active": true
-            }],
-            "containers": [
-                { "id": 1, "name": "Лоток", "weight": 0.015 },
-                { "id": 2, "name": "Короб", "weight": 0.240 }
-            ],
-            "barcodes": [{
-                "id": 1,
-                "name": "Демо Code 128",
-                "structure": { "type": "code128", "value": "{{article}}{{weight}}" }
-            }],
-            "labels": [{
-                "id": 1,
-                "name": "Демо этикетка 58×40",
-                "structure": label_structure,
-                "created_at": now_rfc3339(),
-                "updated_at": now_rfc3339()
-            }],
-            "nomenclature": [
-                { "id": 1, "name": "Сыр Российский 45%", "article": "460001", "exp_date": 30, "portion_container_id": 1, "box_container_id": 2, "templates_pack_label": 1, "close_box_counter": 8, "extra_data": {"price": 899}, "is_fixed_weight": false, "min_weight_grams": 50, "max_weight_grams": 5000 },
-                { "id": 2, "name": "Колбаса Докторская", "article": "460002", "exp_date": 20, "portion_container_id": 1, "box_container_id": 2, "templates_pack_label": 1, "close_box_counter": 6, "extra_data": {"price": 549}, "is_fixed_weight": false, "min_weight_grams": 50, "max_weight_grams": 5000 },
-                { "id": 3, "name": "Молоко 3,2%", "article": "460003", "exp_date": 7, "portion_container_id": 1, "box_container_id": 2, "templates_pack_label": 1, "close_box_counter": 12, "extra_data": {"price": 89}, "is_fixed_weight": true, "fixed_weight_grams": 1000 }
-            ]
-        }
-    });
-    let outcome = process_sync(persisted, client_version, &fixture)?;
-    write_bytes_atomic(&persisted.data_dir().join("demo.flag"), b"1")?;
-    Ok(json!({
-        "success": true,
-        "message": "Демо-данные загружены",
-        "importedRows": outcome.imported_rows,
-    }))
-}
-
-pub fn exit_demo_data(persisted: &PersistedState, client_version: &str) -> Result<Value, String> {
-    let backup_path = persisted.data_dir().join("identity_pre_demo.json");
-    let backup = if backup_path.is_file() {
-        Some(
-            serde_json::from_slice::<Value>(&read_bounded(&backup_path, 1024 * 1024)?)
-                .map_err(|error| format!("failed to parse pre-demo identity: {error}"))?,
-        )
-    } else {
-        None
-    };
-    let _ = fs::remove_file(persisted.data_dir().join("identity.json"));
-    let _ = fs::remove_file(persisted.data_dir().join("demo.flag"));
-
-    let restored = if let Some(identity) = backup {
-        let station_uuid = identity
-            .get("station_uuid")
-            .and_then(Value::as_str)
-            .ok_or_else(|| "pre-demo identity has no station_uuid".to_owned())?;
-        let station_number = identity
-            .get("station_number")
-            .and_then(value_as_string)
-            .unwrap_or_else(|| "00".to_owned());
-        let fixture = json!({
-            "station": {
-                "uuid": station_uuid,
-                "number": station_number,
-                "name": identity.get("station_name").and_then(Value::as_str).unwrap_or(""),
-                "server_url": identity.get("server_url").and_then(Value::as_str).unwrap_or("")
-            },
-            "meta": {
-                "type": "demo_exit",
-                "generated_at": now_rfc3339(),
-                "min_client_version": client_version
-            },
-            "payload": {
-                "operators": [], "containers": [], "barcodes": [], "labels": [], "nomenclature": []
-            }
-        });
-        process_sync(persisted, client_version, &fixture)?;
-        true
-    } else {
-        false
-    };
-    let _ = fs::remove_file(&backup_path);
-    Ok(json!({
-        "success": true,
-        "restored": restored,
-        "message": if restored { "Реальная идентификация восстановлена" } else { "Демо-режим завершён" },
-    }))
 }
 
 pub fn clear_identity_files(persisted: &PersistedState) -> Result<(), String> {

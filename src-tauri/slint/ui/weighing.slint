@@ -1705,6 +1705,10 @@ export component WeighingPrototype inherits Window {
     callback select-catalog-product(int);
     callback reload-license;
     callback save-server-address(string);
+    callback start-demo;
+    callback exit-demo;
+    in-out property <bool> demo-active: false;
+    property <bool> demo-confirm: false;
     callback check-update;
     callback download-update;
     callback install-update;
@@ -4727,6 +4731,38 @@ export component WeighingPrototype inherits Window {
                                     spacing: 4px;
                                     Text { text: UiText.translate(UiText.language, "ЭТИКЕТКИ С ПОМЕТКОЙ DEMO"); color: Palette.a700; font-size: 12px; font-weight: 800; }
                                     Text { text: UiText.translate(UiText.language, "У станции нет лицензии продавца LabelPilot, поэтому на этикетках печатается пометка DEMO. Синхронизируйте станцию с лицензированным сервером — пометка исчезнет автоматически."); color: Palette.n600; font-size: 11px; wrap: word-wrap; }
+                                }
+                            }
+                            // Try the station without a server (only without a vendor licence:
+                            // the demo replaces this station's catalogue).
+                            if root.station-demo || root.demo-active: Rectangle {
+                                min-height: 120px;
+                                border-radius: 16px;
+                                border-width: 1px;
+                                border-color: root.demo-active ? Palette.a300 : Palette.n200;
+                                background: root.demo-active ? Palette.a50 : Palette.n50;
+                                VerticalLayout {
+                                    padding: 13px;
+                                    spacing: 8px;
+                                    Text { text: root.demo-active ? UiText.translate(UiText.language, "ДЕМО-РЕЖИМ ВКЛЮЧЁН") : UiText.translate(UiText.language, "ПОПРОБОВАТЬ БЕЗ СЕРВЕРА"); color: root.demo-active ? Palette.a700 : Palette.n700; font-size: 12px; font-weight: 800; }
+                                    Text {
+                                        text: root.demo-active
+                                            ? UiText.translate(UiText.language, "Загружены демо-товары, шаблон этикетки 58×40, тара и оператор. Вес можно задать симулятором весов (Настройки → Весы). Выход из демо удалит демо-данные и вернёт прежнюю станцию.")
+                                            : root.demo-confirm
+                                                ? UiText.translate(UiText.language, "Товары, шаблоны и операторы этой станции будут заменены демо-данными. Продолжить?")
+                                                : UiText.translate(UiText.language, "Загрузите демо-данные: три товара, шаблон этикетки 58×40, тару и оператора. Вес можно задать симулятором весов (Настройки → Весы), этикетки печатаются с пометкой DEMO.");
+                                        color: Palette.n600;
+                                        font-size: 11px;
+                                        wrap: word-wrap;
+                                    }
+                                    HorizontalLayout {
+                                        height: 44px;
+                                        spacing: 9px;
+                                        if root.demo-active: CompactActionButton { horizontal-stretch: 1; text: UiText.translate(UiText.language, "ВЫЙТИ ИЗ ДЕМО"); enabled: !root.license-busy; clicked => { root.exit-demo(); } }
+                                        if !root.demo-active && !root.demo-confirm: CompactActionButton { horizontal-stretch: 1; text: UiText.translate(UiText.language, "ЗАГРУЗИТЬ ДЕМО-ДАННЫЕ"); primary: true; enabled: !root.license-busy; clicked => { root.demo-confirm = true; } }
+                                        if !root.demo-active && root.demo-confirm: CompactActionButton { horizontal-stretch: 1; text: UiText.translate(UiText.language, "ОТМЕНА"); clicked => { root.demo-confirm = false; } }
+                                        if !root.demo-active && root.demo-confirm: CompactActionButton { horizontal-stretch: 1; text: UiText.translate(UiText.language, "ДА, ЗАГРУЗИТЬ"); primary: true; enabled: !root.license-busy; clicked => { root.demo-confirm = false; root.start-demo(); } }
+                                    }
                                 }
                             }
                         }

@@ -417,7 +417,7 @@ pub fn desktop_usb_import(payload: Value) -> Value {
 
 #[tauri::command]
 pub fn desktop_demo_status(persisted: State<'_, PersistedState>) -> Value {
-    json!({ "isDemo": transfer::is_demo_active(&persisted) })
+    json!({ "isDemo": crate::demo_data::is_demo_active(&persisted) })
 }
 
 /// Label documents printed through the web UI get the same DEMO mark as the
@@ -434,7 +434,7 @@ pub fn desktop_seed_demo_data(
     persisted: State<'_, PersistedState>,
 ) -> Value {
     let result = operational.reset_database().and_then(|_| {
-        transfer::seed_demo_data(&persisted, &app.package_info().version.to_string())
+        crate::demo_data::seed_demo_data(&persisted, &app.package_info().version.to_string())
     });
     if result.is_ok() {
         let _ = app.emit("data-updated", ());
@@ -449,7 +449,7 @@ pub fn desktop_exit_demo(
     persisted: State<'_, PersistedState>,
 ) -> Value {
     let result = operational.reset_database().and_then(|_| {
-        transfer::exit_demo_data(&persisted, &app.package_info().version.to_string())
+        crate::demo_data::exit_demo_data(&persisted, &app.package_info().version.to_string())
     });
     if result.is_ok() {
         let _ = app.emit("data-updated", ());

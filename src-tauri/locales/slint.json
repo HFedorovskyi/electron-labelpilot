@@ -5628,5 +5628,65 @@
     "This station's clock is behind a date it has already recorded ({0}). Check the Windows date and time.",
     "Die Uhrzeit dieser Station liegt vor einem bereits erfassten Datum ({0}). Prüfen Sie Datum und Uhrzeit in Windows.",
     "Годинник цієї станції відстає від раніше зафіксованої дати {0}. Перевірте дату й час Windows."
+  ],
+  "ДЕМО-РЕЖИМ ВКЛЮЧЁН": [
+    "DEMO MODE IS ON",
+    "DEMOMODUS AKTIV",
+    "ДЕМО-РЕЖИМ УВІМКНЕНО"
+  ],
+  "ПОПРОБОВАТЬ БЕЗ СЕРВЕРА": [
+    "TRY IT WITHOUT A SERVER",
+    "OHNE SERVER AUSPROBIEREN",
+    "СПРОБУВАТИ БЕЗ СЕРВЕРА"
+  ],
+  "Загружены демо-товары, шаблон этикетки 58×40, тара и оператор. Вес можно задать симулятором весов (Настройки → Весы). Выход из демо удалит демо-данные и вернёт прежнюю станцию.": [
+    "Demo products, a 58×40 label template, containers and an operator are loaded. Set the weight with the scale simulator (Settings → Scales). Leaving the demo removes the demo data and restores the previous station.",
+    "Demo-Artikel, eine Etikettenvorlage 58×40, Behälter und ein Bediener sind geladen. Das Gewicht stellen Sie mit dem Waagensimulator ein (Einstellungen → Waagen). Beim Verlassen der Demo werden die Demodaten entfernt und die vorherige Station wiederhergestellt.",
+    "Завантажено демо-товари, шаблон етикетки 58×40, тару та оператора. Вагу можна задати симулятором ваг (Налаштування → Ваги). Вихід із демо видалить демо-дані й поверне попередню станцію."
+  ],
+  "Товары, шаблоны и операторы этой станции будут заменены демо-данными. Продолжить?": [
+    "This station's products, templates and operators will be replaced with demo data. Continue?",
+    "Artikel, Vorlagen und Bediener dieser Station werden durch Demodaten ersetzt. Fortfahren?",
+    "Товари, шаблони й оператори цієї станції буде замінено демо-даними. Продовжити?"
+  ],
+  "Загрузите демо-данные: три товара, шаблон этикетки 58×40, тару и оператора. Вес можно задать симулятором весов (Настройки → Весы), этикетки печатаются с пометкой DEMO.": [
+    "Load demo data: three products, a 58×40 label template, containers and an operator. Set the weight with the scale simulator (Settings → Scales); labels print with a DEMO mark.",
+    "Laden Sie Demodaten: drei Artikel, eine Etikettenvorlage 58×40, Behälter und einen Bediener. Das Gewicht stellen Sie mit dem Waagensimulator ein (Einstellungen → Waagen); Etiketten werden mit DEMO-Vermerk gedruckt.",
+    "Завантажте демо-дані: три товари, шаблон етикетки 58×40, тару й оператора. Вагу можна задати симулятором ваг (Налаштування → Ваги), етикетки друкуються з позначкою DEMO."
+  ],
+  "ЗАГРУЗИТЬ ДЕМО-ДАННЫЕ": [
+    "LOAD DEMO DATA",
+    "DEMODATEN LADEN",
+    "ЗАВАНТАЖИТИ ДЕМО-ДАНІ"
+  ],
+  "ДА, ЗАГРУЗИТЬ": [
+    "YES, LOAD",
+    "JA, LADEN",
+    "ТАК, ЗАВАНТАЖИТИ"
+  ],
+  "Загрузка демо-данных…": [
+    "Loading demo data…",
+    "Demodaten werden geladen…",
+    "Завантаження демо-даних…"
+  ],
+  "Выход из демо-режима…": [
+    "Leaving demo mode…",
+    "Demomodus wird beendet…",
+    "Вихід із демо-режиму…"
+  ],
+  "Демо-режим: ошибка": [
+    "Demo mode: error",
+    "Demomodus: Fehler",
+    "Демо-режим: помилка"
+  ],
+  "Демо-данные загружены": [
+    "Demo data loaded",
+    "Demodaten geladen",
+    "Демо-дані завантажено"
+  ],
+  "Демо-режим завершён": [
+    "Demo mode ended",
+    "Demomodus beendet",
+    "Демо-режим завершено"
   ]
 }

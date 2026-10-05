@@ -515,6 +515,8 @@ fn handle_sync(runtime: &IngressRuntime, body: &[u8]) -> HttpResponse {
         );
         return HttpResponse::json(500, json!({"error": error}));
     }
+    // Real server data replaced a demo catalogue: there is nothing left to restore.
+    crate::demo_data::forget_demo(persisted);
 
     (runtime.request_check)();
     runtime

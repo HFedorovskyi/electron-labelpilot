@@ -115,6 +115,8 @@ pub struct NativeServerLicenseSnapshot {
     /// The vendor seat list of this station's licence (`None` = the licence
     /// uses no seat list). Judged on the station, like every data push.
     pub station_seat_list: Option<NativeStationSeatList>,
+    /// The demo catalogue is loaded (demo_data.rs).
+    pub demo_active: bool,
     /// The Windows clock is behind a date this station has already seen.
     pub station_clock_rollback: bool,
     pub station_clock_mark: String,
@@ -1319,6 +1321,7 @@ impl NativeUiRuntime {
                 .map(|license| NativeStationLicense::judged(license, trusted.today)),
             station_seat_list: crate::crypto::station_seat_list(persisted, trusted.today)
                 .map(NativeStationSeatList::from),
+            demo_active: crate::demo_data::is_demo_active(persisted),
             station_clock_rollback: trusted.rollback,
             station_clock_mark: crate::license_clock::format_date(trusted.mark),
             checked_at_ms: unix_ms(),
@@ -1413,6 +1416,29 @@ impl NativeUiRuntime {
         }
         snapshot.checked_at_ms = unix_ms();
         Ok(snapshot)
+    }
+
+    /// Loads the demo catalogue (`start`) or leaves it. The demo replaces this
+    /// station's catalogue, so it is offered only to a station without a vendor
+    /// licence: a production line never loses its data to it.
+    pub fn set_demo(&self, start: bool) -> Result<NativeServerLicenseSnapshot, String> {
+        let persisted = self.persisted()?;
+        let version = env!("CARGO_PKG_VERSION");
+        if start {
+            if crate::crypto::station_license(persisted).is_some() {
+                return Err("Демо-данные недоступны: станция работает по лицензии сервера.".to_owned());
+            }
+            crate::demo_data::seed_demo_data(persisted, version)?;
+        } else {
+            crate::demo_data::exit_demo_data(persisted, version)?;
+        }
+        self.events.emit("data-updated", json!({ "source": "demo" }));
+        self.events.log(
+            "demo",
+            "INFO",
+            if start { "demo catalogue loaded" } else { "demo catalogue left" },
+        );
+        self.server_license_snapshot()
     }
 
     pub fn save_server_address(
@@ -3223,6 +3249,25 @@ mod tests {
         assert_eq!(selected_beyond_first_page.selected_product_id, Some(54));
         assert_eq!(selected_beyond_first_page.products[0].id, 54);
         assert_eq!(selected_beyond_first_page.products.len(), 51);
+    }
+
+    #[test]
+    fn the_demo_catalogue_loads_and_leaves_through_the_runtime() {
+        let directory = TestDirectory::new("demo-catalogue");
+        let persisted = PersistedState::for_data_dir(directory.0.clone());
+        let runtime = NativeUiRuntime::with_persisted(persisted, |_| {}).unwrap();
+        assert!(!runtime.server_license_snapshot().unwrap().demo_active);
+
+        let snapshot = runtime.set_demo(true).unwrap();
+        assert!(snapshot.demo_active);
+        assert!(snapshot.station_license.is_none());
+        assert_eq!(snapshot.station.name.as_deref(), Some("Демо-станция"));
+        // "Молоко 3,2%" is the demo's fixed-weight product.
+        assert_eq!(runtime.fixed_weight_products(None).unwrap().len(), 1);
+
+        let snapshot = runtime.set_demo(false).unwrap();
+        assert!(!snapshot.demo_active);
+        assert!(runtime.fixed_weight_products(None).unwrap().is_empty());
     }
 
     #[test]

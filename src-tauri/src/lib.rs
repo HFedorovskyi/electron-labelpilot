@@ -7,6 +7,8 @@ mod commands;
 #[cfg(any(feature = "desktop", feature = "slint-ui"))]
 mod crypto;
 #[cfg(any(feature = "desktop", feature = "slint-ui"))]
+mod demo_data;
+#[cfg(any(feature = "desktop", feature = "slint-ui"))]
 mod demo_mark;
 #[cfg(feature = "desktop")]
 mod diagnostic;
