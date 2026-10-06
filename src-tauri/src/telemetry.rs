@@ -7,50 +7,35 @@ use crate::persisted::PersistedState;
 use crate::printer::PrinterTransportState;
 use crate::processor::open_database;
 use crate::scale::ScaleState;
-use reqwest::blocking::multipart::{Form, Part};
-use rusqlite::{params, Connection, Row};
-use serde::{Deserialize, Serialize};
+use crate::station_report::{
+    build_delta_report, load_cursor, now_rfc3339, outbox_files, outbox_usage, prune_reported_logs,
+    read_bounded, save_cursor, spool_blob, upload_report, UploadResult, CURSOR_FILE, MAX_FLUSH_FILES,
+    MAX_OUTBOX_BYTES, MAX_OUTBOX_FILES, MAX_REPORT_BYTES, OUTBOX_DIRECTORY,
+};
+#[cfg(test)]
+use crate::station_report::ReportCursor;
+use rusqlite::{params, Connection};
+use serde::Serialize;
 use serde_json::{json, Value};
 use std::env;
-use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::fs;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager};
-use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 use uuid::Uuid;
 
-const OUTBOX_DIRECTORY: &str = "outbox";
-const CURSOR_FILE: &str = "report_state.json";
-const MAX_OUTBOX_FILES: usize = 256;
-const MAX_OUTBOX_BYTES: u64 = 256 * 1024 * 1024;
-const MAX_REPORT_BYTES: u64 = 64 * 1024 * 1024;
-const MAX_REPORT_PACKS: usize = 2_000;
-const MAX_REPORT_DELETIONS: usize = 2_000;
-const MAX_REPORT_LOGS: usize = 500;
-const MAX_FLUSH_FILES: usize = 32;
 const MAX_EVENT_MESSAGE_BYTES: usize = 16 * 1024;
 const EVENT_QUEUE_CAPACITY: usize = 1_024;
 const EVENT_BATCH_SIZE: usize = 64;
 const EVENT_BATCH_DELAY: Duration = Duration::from_millis(20);
 const EVENT_FLUSH_TIMEOUT: Duration = Duration::from_secs(10);
-const RETAIN_REPORTED_LOG_ROWS: i64 = 10_000;
 const DEFAULT_INTERVAL: Duration = Duration::from_secs(5 * 60);
 const STARTUP_DELAY: Duration = Duration::from_secs(8);
 const RECONNECT_POLL: Duration = Duration::from_secs(2);
-
-#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ReportCursor {
-    last_pack_id: i64,
-    last_error_id: i64,
-    last_deleted_at: String,
-    last_deleted_id: i64,
-}
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -125,22 +110,6 @@ enum EventWriterMessage {
     Event(TelemetryEvent),
     Flush(SyncSender<Result<(), String>>),
     Shutdown(SyncSender<Result<(), String>>),
-}
-
-#[derive(Debug)]
-struct DeltaReport {
-    payload: Value,
-    cursor: ReportCursor,
-    label_count: usize,
-    deleted_count: usize,
-    log_count: usize,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum UploadResult {
-    Sent,
-    Retryable,
-    Rejected(u16),
 }
 
 impl TelemetryState {
@@ -451,7 +420,7 @@ impl TelemetryState {
             self.flush_outbox(app)?;
         }
         let report = build_delta_report(&persisted, &load_cursor(&self.cursor_path())?)?;
-        if report.label_count == 0 && report.deleted_count == 0 && report.log_count == 0 {
+        if report.is_empty() {
             return Ok(());
         }
         if persisted.load_license_token().is_none() || persisted.load_identity().is_none() {
@@ -525,7 +494,7 @@ impl TelemetryState {
         let persisted = app.state::<PersistedState>();
         let cursor_path = self.cursor_path();
         let report = build_delta_report(&persisted, &load_cursor(&cursor_path)?)?;
-        if report.label_count == 0 && report.deleted_count == 0 && report.log_count == 0 {
+        if report.is_empty() {
             return Ok(());
         }
         if persisted.load_license_token().is_none() || persisted.load_identity().is_none() {
@@ -820,182 +789,6 @@ fn wait_for_signal(inner: &TelemetryInner, duration: Duration) -> bool {
     forced
 }
 
-fn build_delta_report(
-    persisted: &PersistedState,
-    cursor: &ReportCursor,
-) -> Result<DeltaReport, String> {
-    let connection = open_database(persisted)?;
-    let packs = query_pack_rows(
-        &connection,
-        "SELECT id, number, created_at, nomenclature_id, weight_netto, weight_brutto, barcode_value, status, production_date, expiration_date, batch, operator_name, deleted_at FROM pack WHERE id > ?1 ORDER BY id LIMIT ?2",
-        params![cursor.last_pack_id, MAX_REPORT_PACKS as i64],
-    )?;
-    let deletions = query_pack_rows(
-        &connection,
-        "SELECT id, number, created_at, nomenclature_id, weight_netto, weight_brutto, barcode_value, status, production_date, expiration_date, batch, operator_name, deleted_at FROM pack WHERE deleted_at IS NOT NULL AND (deleted_at > ?1 OR (deleted_at = ?1 AND id > ?2)) ORDER BY deleted_at, id LIMIT ?3",
-        params![cursor.last_deleted_at, cursor.last_deleted_id, MAX_REPORT_DELETIONS as i64],
-    )?;
-    let logs = query_log_rows(&connection, cursor.last_error_id)?;
-    let identity = persisted.load_identity().unwrap_or(Value::Null);
-    let station_uuid = identity
-        .get("station_uuid")
-        .and_then(Value::as_str)
-        .unwrap_or("nostation");
-    let printed_labels = packs
-        .iter()
-        .filter(|pack| pack.status != "Deleted")
-        .map(|pack| pack.as_report_value(station_uuid))
-        .collect::<Vec<_>>();
-    let deleted_labels = deletions
-        .iter()
-        .map(|pack| pack.as_report_value(station_uuid))
-        .collect::<Vec<_>>();
-    let mut next = cursor.clone();
-    if let Some(pack) = packs.last() {
-        next.last_pack_id = pack.id;
-    }
-    if let Some(log) = logs.last() {
-        next.last_error_id = log.id;
-    }
-    if let Some(pack) = deletions.last() {
-        next.last_deleted_at = pack.deleted_at.clone().unwrap_or_default();
-        next.last_deleted_id = pack.id;
-    }
-    let log_values = logs
-        .iter()
-        .map(|entry| {
-            json!({
-                "event_uid": entry.event_uid,
-                "level": entry.level,
-                "message": entry.message,
-                "timestamp": entry.created_at,
-            })
-        })
-        .collect::<Vec<_>>();
-    let label_count = printed_labels.len();
-    let deleted_count = deleted_labels.len();
-    let log_count = log_values.len();
-    Ok(DeltaReport {
-        payload: json!({
-            "station_uuid": identity.get("station_uuid").cloned().unwrap_or(Value::Null),
-            "station_fingerprint": crate::station_fingerprint::station_fingerprint(),
-            "station_identity": identity,
-            "printed_labels": printed_labels,
-            "deleted_labels": deleted_labels,
-            "logs": log_values,
-            "report_id": Uuid::new_v4().to_string(),
-            "generated_at": now_rfc3339(),
-        }),
-        cursor: next,
-        label_count,
-        deleted_count,
-        log_count,
-    })
-}
-
-#[derive(Debug)]
-struct PackRow {
-    id: i64,
-    number: String,
-    created_at: Option<String>,
-    nomenclature_id: i64,
-    weight_netto: Option<f64>,
-    weight_brutto: Option<f64>,
-    barcode_value: Option<String>,
-    status: String,
-    production_date: Option<String>,
-    expiration_date: Option<String>,
-    batch: Option<String>,
-    operator_name: Option<String>,
-    deleted_at: Option<String>,
-}
-
-impl PackRow {
-    fn from_row(row: &Row<'_>) -> rusqlite::Result<Self> {
-        Ok(Self {
-            id: row.get(0)?,
-            number: row.get(1)?,
-            created_at: row.get(2)?,
-            nomenclature_id: row.get(3)?,
-            weight_netto: row.get(4)?,
-            weight_brutto: row.get(5)?,
-            barcode_value: row.get(6)?,
-            status: row.get(7)?,
-            production_date: row.get(8)?,
-            expiration_date: row.get(9)?,
-            batch: row.get(10)?,
-            operator_name: row.get(11)?,
-            deleted_at: row.get(12)?,
-        })
-    }
-
-    fn as_report_value(&self, station_uuid: &str) -> Value {
-        json!({
-            "unique_id": format!("{station_uuid}-pack-{}", self.id),
-            "pack_id": self.id,
-            "product_id": self.nomenclature_id,
-            "user_name": self.operator_name.as_deref().unwrap_or(""),
-            "pack_name": self.number,
-            "printed_at": self.created_at,
-            "weight_netto_grams": self.weight_netto.map(kilograms_to_grams),
-            "weight_brutto_grams": self.weight_brutto.map(kilograms_to_grams),
-            "batch": self.batch,
-            "production_date": self.production_date,
-            "expiration_date": self.expiration_date,
-            "barcode": self.barcode_value,
-            "deleted_at": self.deleted_at,
-        })
-    }
-}
-
-#[derive(Debug)]
-struct LogRow {
-    id: i64,
-    event_uid: String,
-    level: String,
-    message: String,
-    created_at: String,
-}
-
-fn query_pack_rows<P>(
-    connection: &Connection,
-    sql: &str,
-    parameters: P,
-) -> Result<Vec<PackRow>, String>
-where
-    P: rusqlite::Params,
-{
-    let mut statement = connection
-        .prepare(sql)
-        .map_err(|error| format!("failed to prepare telemetry pack query: {error}"))?;
-    let rows = statement
-        .query_map(parameters, PackRow::from_row)
-        .map_err(|error| format!("failed to query telemetry packs: {error}"))?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|error| format!("failed to read telemetry packs: {error}"))
-}
-
-fn query_log_rows(connection: &Connection, last_error_id: i64) -> Result<Vec<LogRow>, String> {
-    let mut statement = connection
-        .prepare(
-            "SELECT id, event_uid, level, message, created_at FROM print_errors WHERE id > ?1 ORDER BY id LIMIT ?2",
-        )
-        .map_err(|error| format!("failed to prepare telemetry log query: {error}"))?;
-    let rows = statement
-        .query_map(params![last_error_id, MAX_REPORT_LOGS as i64], |row| {
-            Ok(LogRow {
-                id: row.get(0)?,
-                event_uid: row.get(1)?,
-                level: row.get(2)?,
-                message: row.get(3)?,
-                created_at: row.get(4)?,
-            })
-        })
-        .map_err(|error| format!("failed to query telemetry logs: {error}"))?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|error| format!("failed to read telemetry logs: {error}"))
-}
-
 fn upload_blob(app: &AppHandle, blob: &[u8], config: &Value) -> Result<UploadResult, String> {
     let server_ip = config
         .get("serverIp")
@@ -1009,153 +802,7 @@ fn upload_blob(app: &AppHandle, blob: &[u8], config: &Value) -> Result<UploadRes
         .and_then(Value::as_str)
         .filter(|value| !value.is_empty())
         .unwrap_or("ru");
-    let part = Part::bytes(blob.to_vec())
-        .file_name("report.lpr")
-        .mime_str("application/octet-stream")
-        .map_err(|error| format!("failed to build telemetry upload: {error}"))?;
-    let response = app
-        .state::<NetworkState>()
-        .client()
-        .post(format!("{base}/stations/upload_report/"))
-        .header("X-Lang", language)
-        .multipart(Form::new().part("file", part))
-        .send();
-    match response {
-        Ok(response) if response.status().is_success() => Ok(UploadResult::Sent),
-        Ok(response) if response.status().is_server_error() => Ok(UploadResult::Retryable),
-        Ok(response) => Ok(UploadResult::Rejected(response.status().as_u16())),
-        Err(_) => Ok(UploadResult::Retryable),
-    }
-}
-
-fn spool_blob(outbox: &Path, blob: &[u8]) -> Result<PathBuf, String> {
-    if blob.len() as u64 > MAX_REPORT_BYTES {
-        return Err(format!(
-            "report exceeds the {MAX_REPORT_BYTES}-byte spool limit"
-        ));
-    }
-    fs::create_dir_all(outbox).map_err(|error| {
-        format!(
-            "failed to create telemetry outbox {}: {error}",
-            outbox.display()
-        )
-    })?;
-    let (files, bytes) = outbox_usage(outbox)?;
-    if files >= MAX_OUTBOX_FILES || bytes.saturating_add(blob.len() as u64) > MAX_OUTBOX_BYTES {
-        return Err(format!(
-            "telemetry outbox limit reached: {files} files, {bytes} bytes"
-        ));
-    }
-    let name = format!(
-        "report_{}_{}.lpr",
-        OffsetDateTime::now_utc().unix_timestamp_nanos(),
-        Uuid::new_v4()
-    );
-    let path = outbox.join(name);
-    atomic_write(&path, blob)?;
-    Ok(path)
-}
-
-fn outbox_files(outbox: &Path) -> Result<Vec<PathBuf>, String> {
-    if !outbox.exists() {
-        return Ok(Vec::new());
-    }
-    let mut files = fs::read_dir(outbox)
-        .map_err(|error| {
-            format!(
-                "failed to list telemetry outbox {}: {error}",
-                outbox.display()
-            )
-        })?
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|path| path.extension().and_then(|value| value.to_str()) == Some("lpr"))
-        .collect::<Vec<_>>();
-    files.sort();
-    Ok(files)
-}
-
-fn outbox_usage(outbox: &Path) -> Result<(usize, u64), String> {
-    let files = outbox_files(outbox)?;
-    let bytes = files.iter().try_fold(0_u64, |sum, path| {
-        fs::metadata(path)
-            .map(|metadata| sum.saturating_add(metadata.len()))
-            .map_err(|error| {
-                format!(
-                    "failed to inspect queued report {}: {error}",
-                    path.display()
-                )
-            })
-    })?;
-    Ok((files.len(), bytes))
-}
-
-fn load_cursor(path: &Path) -> Result<ReportCursor, String> {
-    if !path.exists() {
-        return Ok(ReportCursor::default());
-    }
-    let bytes = read_bounded(path, 64 * 1024)?;
-    serde_json::from_slice(&bytes)
-        .map_err(|error| format!("failed to parse report cursor {}: {error}", path.display()))
-}
-
-fn save_cursor(path: &Path, cursor: &ReportCursor) -> Result<(), String> {
-    let bytes = serde_json::to_vec(cursor)
-        .map_err(|error| format!("failed to serialize report cursor: {error}"))?;
-    atomic_write(path, &bytes)
-}
-
-fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
-    }
-    let temporary = path.with_extension(format!("{}.tmp", Uuid::new_v4()));
-    let mut file = OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(&temporary)
-        .map_err(|error| format!("failed to create {}: {error}", temporary.display()))?;
-    if let Err(error) = file.write_all(bytes).and_then(|_| file.sync_all()) {
-        let _ = fs::remove_file(&temporary);
-        return Err(format!("failed to write {}: {error}", temporary.display()));
-    }
-    if path.exists() {
-        fs::remove_file(path)
-            .map_err(|error| format!("failed to replace {}: {error}", path.display()))?;
-    }
-    fs::rename(&temporary, path)
-        .map_err(|error| format!("failed to publish {}: {error}", path.display()))
-}
-
-fn read_bounded(path: &Path, limit: u64) -> Result<Vec<u8>, String> {
-    let metadata = fs::metadata(path)
-        .map_err(|error| format!("failed to inspect {}: {error}", path.display()))?;
-    if metadata.len() > limit {
-        return Err(format!("{} exceeds the {limit}-byte limit", path.display()));
-    }
-    let mut bytes = Vec::with_capacity(metadata.len() as usize);
-    File::open(path)
-        .and_then(|file| file.take(limit + 1).read_to_end(&mut bytes))
-        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
-    if bytes.len() as u64 > limit {
-        return Err(format!("{} exceeds the {limit}-byte limit", path.display()));
-    }
-    Ok(bytes)
-}
-
-fn prune_reported_logs(persisted: &PersistedState, reported_id: i64) -> Result<(), String> {
-    if reported_id <= RETAIN_REPORTED_LOG_ROWS {
-        return Ok(());
-    }
-    let connection = open_database(persisted)?;
-    connection
-        .execute(
-            "DELETE FROM print_errors WHERE id <= ?1 AND id < (SELECT COALESCE(MAX(id), 0) - ?2 FROM print_errors)",
-            params![reported_id, RETAIN_REPORTED_LOG_ROWS],
-        )
-        .map(|_| ())
-        .map_err(|error| format!("failed to prune reported telemetry logs: {error}"))
+    Ok(upload_report(&app.state::<NetworkState>().client(), &base, blob, language))
 }
 
 fn configured_interval() -> Duration {
@@ -1209,16 +856,6 @@ fn bounded(value: &str, limit: usize) -> String {
         .filter(|character| !matches!(character, '\r' | '\n' | '\0'))
         .take(limit)
         .collect()
-}
-
-fn kilograms_to_grams(value: f64) -> i64 {
-    (value * 1_000.0).round() as i64
-}
-
-fn now_rfc3339() -> String {
-    OffsetDateTime::now_utc()
-        .format(&Rfc3339)
-        .unwrap_or_else(|_| OffsetDateTime::now_utc().unix_timestamp().to_string())
 }
 
 #[cfg(test)]

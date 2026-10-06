@@ -516,6 +516,7 @@ pub(crate) fn open_database(persisted: &PersistedState) -> Result<Connection, St
         "REAL DEFAULT 0",
     )?;
     ensure_column(&connection, "print_jobs", "marking_date", "TEXT")?;
+    ensure_column(&connection, "print_errors", "component", "TEXT NOT NULL DEFAULT ''")?;
     ensure_column(&connection, "pack", "operator_uuid", "TEXT")?;
     ensure_column(&connection, "pack", "operator_name", "TEXT")?;
     ensure_column(&connection, "pack", "deleted_at", "TEXT")?;

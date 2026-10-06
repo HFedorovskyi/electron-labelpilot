@@ -636,6 +636,24 @@ impl NativeUiRuntime {
         Ok(self.persisted()?.load_printer_config())
     }
 
+    /// Starts delivering labels, job progress and station errors to the server.
+    #[cfg(feature = "slint-ui")]
+    pub fn start_station_reporter(&self) -> Result<(), String> {
+        let persisted = self
+            .persisted
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| "production persisted state is not configured".to_owned())?;
+        let operational = self
+            .operational
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| "operational state is not configured".to_owned())?;
+        crate::station_reporter::start(persisted, operational, |persisted| {
+            native_server_base_url(&configured_server_address(persisted))
+        })
+    }
+
     pub fn start_station_ingress(&self) -> Result<(), String> {
         let persisted = self
             .persisted
@@ -1298,11 +1316,7 @@ impl NativeUiRuntime {
     pub fn server_license_snapshot(&self) -> Result<NativeServerLicenseSnapshot, String> {
         let persisted = self.persisted()?;
         let station = self.station_snapshot()?;
-        let identity = persisted.load_identity().unwrap_or(Value::Null);
-        let configured = value_string(persisted.load_printer_config().get("serverIp"))
-            .or_else(|| value_string(identity.get("server_url")))
-            .unwrap_or_default();
-        let server_address = canonical_server_address(&configured).unwrap_or(configured);
+        let server_address = configured_server_address(persisted);
         let base_url = native_server_base_url(&server_address);
         let trusted = crate::license_clock::trusted_today(persisted);
         let mut snapshot = NativeServerLicenseSnapshot {
@@ -2631,6 +2645,16 @@ fn canonical_server_address(value: &str) -> Option<String> {
         return None;
     }
     Some(value.to_owned())
+}
+
+/// The server address the station uses: the one set on the station, else the one from
+/// its identity (the server that registered it).
+fn configured_server_address(persisted: &PersistedState) -> String {
+    let identity = persisted.load_identity().unwrap_or(Value::Null);
+    let configured = value_string(persisted.load_printer_config().get("serverIp"))
+        .or_else(|| value_string(identity.get("server_url")))
+        .unwrap_or_default();
+    canonical_server_address(&configured).unwrap_or(configured)
 }
 
 fn native_server_base_url(value: &str) -> Option<String> {
