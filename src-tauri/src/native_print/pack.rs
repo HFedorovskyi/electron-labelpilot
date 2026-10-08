@@ -206,6 +206,7 @@ impl NativePrintService {
         })?;
         let barcode = resolve_barcode(&snapshot.barcode_fields, &data, &snapshot.product);
         data.insert("barcode".to_owned(), Value::String(barcode));
+        insert_extra_barcodes(&snapshot.doc, &mut data);
         let mut timings = PrintStageTimings {
             data_us: elapsed_us(started),
             ..PrintStageTimings::default()
@@ -301,6 +302,7 @@ impl NativePrintService {
                             Value::String(result.box_number.clone()),
                         );
                         data.insert("barcode".to_owned(), Value::String(actual_barcode));
+                        insert_extra_barcodes(&snapshot.doc, &mut data);
                         let render_started = Instant::now();
                         let rendered = self.prepare(
                             snapshot.config.clone(),
