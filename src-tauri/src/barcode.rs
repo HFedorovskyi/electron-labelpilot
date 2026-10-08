@@ -42,7 +42,16 @@ pub fn generate_barcode(fields: &[Value], data: &Map<String, Value>) -> String {
                 ));
             }
             "production_date" | "exp_date" => {
-                if let Some(date) = data.get(field_type).and_then(date_parts) {
+                // Label data keeps the shelf life in days under "exp_date" and the date
+                // itself under "exp_date_full"; older callers pass the date as "exp_date".
+                let date = if field_type == "exp_date" {
+                    data.get("exp_date_full")
+                        .and_then(date_parts)
+                        .or_else(|| data.get("exp_date").and_then(date_parts))
+                } else {
+                    data.get(field_type).and_then(date_parts)
+                };
+                if let Some(date) = date {
                     let format = field
                         .get("dateFormat")
                         .and_then(Value::as_str)
@@ -76,6 +85,10 @@ pub fn generate_barcode(fields: &[Value], data: &Map<String, Value>) -> String {
                     .or_else(|| positive_usize(field.get("minLength")))
                     .or_else(|| positive_usize(field.get("minLeght")))
                     .unwrap_or(0);
+                barcode.push_str(&pad_start(&value_string(data.get(field_type)), length, '0'));
+            }
+            "pack_count" | "box_count" => {
+                let length = positive_usize(field.get("length")).unwrap_or(0);
                 barcode.push_str(&pad_start(&value_string(data.get(field_type)), length, '0'));
             }
             "pallet_number" => {
@@ -155,18 +168,31 @@ fn pad_start(value: &str, length: usize, fill: char) -> String {
     result
 }
 
+/// Year, month and day of "2026-10-08…" (ISO) or "08.10.2026" / "08.10.26" (how label
+/// data carries dates).
 fn date_parts(value: &Value) -> Option<(String, String, String)> {
-    let text = value.as_str()?;
-    let date = text.get(..10)?;
-    let bytes = date.as_bytes();
-    if bytes.get(4) != Some(&b'-') || bytes.get(7) != Some(&b'-') {
+    let text = value.as_str()?.trim();
+    let digits = |part: &str| !part.is_empty() && part.chars().all(|c| c.is_ascii_digit());
+    if let Some(date) = text.get(..10) {
+        let bytes = date.as_bytes();
+        if bytes.get(4) == Some(&b'-') && bytes.get(7) == Some(&b'-') {
+            let (year, month, day) = (&date[0..4], &date[5..7], &date[8..10]);
+            if digits(year) && digits(month) && digits(day) {
+                return Some((year.to_owned(), month.to_owned(), day.to_owned()));
+            }
+        }
+    }
+    let mut parts = text.split('.');
+    let (day, month, year) = (parts.next()?, parts.next()?, parts.next()?);
+    if parts.next().is_some() || day.len() != 2 || month.len() != 2 || !digits(day) || !digits(month) || !digits(year) {
         return None;
     }
-    Some((
-        date[0..4].to_owned(),
-        date[5..7].to_owned(),
-        date[8..10].to_owned(),
-    ))
+    let year = match year.len() {
+        4 => year.to_owned(),
+        2 => format!("20{year}"),
+        _ => return None,
+    };
+    Some((year, month.to_owned(), day.to_owned()))
 }
 
 fn format_date((year, month, day): (String, String, String), format: &str) -> String {
@@ -220,6 +246,29 @@ mod tests {
         assert_eq!(
             generate_barcode(fields.as_array().unwrap(), data.as_object().unwrap()),
             "(01)04601234567893(3103)00123526081400042007"
+        );
+    }
+
+    #[test]
+    fn dates_come_from_the_station_label_data() {
+        // build_label_data: dates as DD.MM.YYYY, "exp_date" is the shelf life in days.
+        let fields = json!([
+            {"field_type":"ai","value":"11"},
+            {"field_type":"production_date","dateFormat":"yyMMdd"},
+            {"field_type":"ai","value":"17"},
+            {"field_type":"exp_date","dateFormat":"yyMMdd"},
+            {"field_type":"exp_date","dateFormat":"ddMMyyyy"},
+            {"field_type":"pack_count","length":3}
+        ]);
+        let data = json!({
+            "production_date":"08.10.2026",
+            "exp_date":"30",
+            "exp_date_full":"07.11.2026",
+            "pack_count":"8"
+        });
+        assert_eq!(
+            generate_barcode(fields.as_array().unwrap(), data.as_object().unwrap()),
+            "(11)261008(17)26110707112026008"
         );
     }
 
