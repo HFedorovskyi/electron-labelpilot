@@ -145,6 +145,10 @@ fn interpolation_and_legacy_barcode_names_match_typescript() {
         "A7 / {{missing}}"
     );
     assert_eq!(
+        types::interpolate_text("Партия: {{ batch }} / Состав: {{ Состав }}", &data),
+        "Партия: A7 / Состав: "
+    );
+    assert_eq!(
         types::normalize_barcode(Some(&Value::String("EAN13_KZ".into()))),
         "ean13"
     );

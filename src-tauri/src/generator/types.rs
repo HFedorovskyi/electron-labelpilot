@@ -388,7 +388,7 @@ impl ParsedInput {
                     if !self.profile.native_text {
                         reasons.push(format!("{}:native-text", element.id));
                     } else {
-                        let value = interpolate(element.text.as_deref().unwrap_or(""), &self.data);
+                        let value = interpolate_text(element.text.as_deref().unwrap_or(""), &self.data);
                         if !self.profile.native_utf8_text && !is_printable_ascii(&value) {
                             reasons.push(format!("{}:unicode-text", element.id));
                         }
@@ -437,7 +437,7 @@ impl ParsedInput {
             match element.kind.as_str() {
                 "table" => reasons.push(format!("{}:table", element.id)),
                 "text" => {
-                    let value = interpolate(element.text.as_deref().unwrap_or(""), &self.data);
+                    let value = interpolate_text(element.text.as_deref().unwrap_or(""), &self.data);
                     if tspl_text_requires_bitmap(element, &value) {
                         reasons.push(format!("{}:complex-text", element.id));
                     }
@@ -722,7 +722,19 @@ fn physical_endpoint_key(config: &GenerationConfig) -> String {
     }
 }
 
+/// Barcode values: a field with no value keeps its `{{ key }}` placeholder, so the
+/// caller can refuse the barcode instead of encoding an incomplete code.
 pub(super) fn interpolate(template: &str, data: &Map<String, Value>) -> String {
+    fill(template, data, true)
+}
+
+/// Label text: a field the product has no value for prints as nothing, never as
+/// a literal `{{ key }}`.
+pub(super) fn interpolate_text(template: &str, data: &Map<String, Value>) -> String {
+    fill(template, data, false)
+}
+
+fn fill(template: &str, data: &Map<String, Value>, keep_missing: bool) -> String {
     static PLACEHOLDER: OnceLock<Regex> = OnceLock::new();
     let regex = PLACEHOLDER.get_or_init(|| Regex::new(r"\{\{\s*([^{}]+?)\s*\}\}").unwrap());
     let lower: HashMap<String, &Value> = data
@@ -739,6 +751,9 @@ pub(super) fn interpolate(template: &str, data: &Map<String, Value>) -> String {
                 .get(key)
                 .or_else(|| lower.get(&key.to_ascii_lowercase()).copied());
             value.map(js_value_string).unwrap_or_else(|| {
+                if !keep_missing {
+                    return String::new();
+                }
                 captures
                     .get(0)
                     .map(|value| value.as_str().to_owned())

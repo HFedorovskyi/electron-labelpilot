@@ -103,7 +103,7 @@ fn assert_browser_variant(variant_name: &str) {
             "{} {} line breaks",
             variant_name, expected["id"]
         );
-        let text = interpolate(
+        let text = interpolate_text(
             element["text"].as_str().unwrap(),
             payload.data.as_object().unwrap(),
         );
