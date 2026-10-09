@@ -1,7 +1,7 @@
 [package]
 name = "labelpilot-tauri"
 default-run = "labelpilot-tauri"
-version = "2.0.8"
+version = "2.0.9"
 description = "Parallel Rust desktop runtime for LabelPilot"
 edition = "2021"
 publish = false

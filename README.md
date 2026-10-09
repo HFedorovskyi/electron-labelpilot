@@ -52,7 +52,7 @@ The main renderer bundle is gated below 160 KiB, operating screens are lazy chun
 
 ## Release
 
-Current source version: `2.0.8`. Publishing a new installer is a separate release step.
+Current source version: `2.0.9`. Publishing a new installer is a separate release step.
 
 Version `2.0.3` is packaged as a current-user NSIS EXE containing both Tauri and Slint runtime binaries with signed updater metadata. Production telemetry persists structured events, retries encrypted delta reports, and writes a final shutdown spool.
 

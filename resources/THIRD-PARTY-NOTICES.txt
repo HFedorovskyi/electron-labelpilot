@@ -1,4 +1,4 @@
-LabelPilot client 2.0.8 - third-party software notices
+LabelPilot client 2.0.9 - third-party software notices
 
 LabelPilot (c) Hryhorii Fedorovskyi, Hilden, Germany. LabelPilot itself is proprietary
 software; the components below are used under their own licences, reproduced here.
