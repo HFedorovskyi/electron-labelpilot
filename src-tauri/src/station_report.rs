@@ -1,5 +1,6 @@
-//! Station -> server production report: what was printed and deleted, every station
-//! error and the print-job progress since the last delivery, encrypted for the server.
+//! Station -> server production report: what was printed and deleted, the boxes and
+//! pallets that changed, every station error and the print-job progress since the last
+//! delivery, encrypted for the server.
 //! Delivered online right away, or queued in the outbox until the server is reachable
 //! (and exportable to USB as .lpr). Tauri-free: shared by the Slint reporter and the
 //! Tauri telemetry worker. The server dedupes labels and logs, so a replay is harmless.
@@ -33,6 +34,7 @@ const MAX_REPORT_PACKS: usize = 2_000;
 const MAX_REPORT_DELETIONS: usize = 2_000;
 const MAX_REPORT_LOGS: usize = 500;
 const MAX_REPORT_JOBS: usize = 200;
+const MAX_REPORT_CONTAINERS: usize = 500;
 const RETAIN_REPORTED_LOG_ROWS: i64 = 10_000;
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -45,6 +47,12 @@ pub struct ReportCursor {
     /// Digest of the job progress last delivered: jobs are re-sent only when it changes.
     #[serde(default)]
     pub last_jobs_digest: String,
+    /// Boxes and pallets: the latest change delivered, and a digest of the rows changed at
+    /// that moment (SQLite keeps whole seconds), so they are re-checked but not re-sent.
+    #[serde(default)]
+    pub last_container_at: String,
+    #[serde(default)]
+    pub last_containers_digest: String,
 }
 
 #[derive(Debug)]
@@ -55,11 +63,16 @@ pub struct DeltaReport {
     pub deleted_count: usize,
     pub log_count: usize,
     pub job_count: usize,
+    pub container_count: usize,
 }
 
 impl DeltaReport {
     pub fn is_empty(&self) -> bool {
-        self.label_count == 0 && self.deleted_count == 0 && self.log_count == 0 && self.job_count == 0
+        self.label_count == 0
+            && self.deleted_count == 0
+            && self.log_count == 0
+            && self.job_count == 0
+            && self.container_count == 0
     }
 }
 
@@ -77,18 +90,23 @@ pub fn build_delta_report(
     let connection = open_database(persisted)?;
     let packs = query_pack_rows(
         &connection,
-        "SELECT id, number, created_at, nomenclature_id, weight_netto, weight_brutto, barcode_value, status, production_date, expiration_date, batch, operator_name, deleted_at FROM pack WHERE id > ?1 ORDER BY id LIMIT ?2",
+        "SELECT id, number, created_at, nomenclature_id, weight_netto, weight_brutto, barcode_value, status, production_date, expiration_date, batch, operator_name, deleted_at, box_id, (SELECT number FROM boxes WHERE boxes.id = pack.box_id) FROM pack WHERE id > ?1 ORDER BY id LIMIT ?2",
         params![cursor.last_pack_id, MAX_REPORT_PACKS as i64],
     )?;
     let deletions = query_pack_rows(
         &connection,
-        "SELECT id, number, created_at, nomenclature_id, weight_netto, weight_brutto, barcode_value, status, production_date, expiration_date, batch, operator_name, deleted_at FROM pack WHERE deleted_at IS NOT NULL AND (deleted_at > ?1 OR (deleted_at = ?1 AND id > ?2)) ORDER BY deleted_at, id LIMIT ?3",
+        "SELECT id, number, created_at, nomenclature_id, weight_netto, weight_brutto, barcode_value, status, production_date, expiration_date, batch, operator_name, deleted_at, box_id, (SELECT number FROM boxes WHERE boxes.id = pack.box_id) FROM pack WHERE deleted_at IS NOT NULL AND (deleted_at > ?1 OR (deleted_at = ?1 AND id > ?2)) ORDER BY deleted_at, id LIMIT ?3",
         params![cursor.last_deleted_at, cursor.last_deleted_id, MAX_REPORT_DELETIONS as i64],
     )?;
     let logs = query_log_rows(&connection, cursor.last_error_id)?;
     let jobs = query_job_rows(&connection)?;
     let jobs_digest = digest_jobs(&jobs);
     let jobs_changed = !jobs.is_empty() && jobs_digest != cursor.last_jobs_digest;
+    // A new or deleted pack changes its box (and pallet) without touching their rows.
+    let touched_boxes = packs.iter().chain(&deletions).map(|pack| pack.box_id).collect::<Vec<_>>();
+    let containers = query_containers(&connection, &cursor.last_container_at, &touched_boxes)?;
+    let containers_changed = containers.digest_all != cursor.last_containers_digest
+        && !(containers.boxes.is_empty() && containers.pallets.is_empty());
 
     let identity = persisted.load_identity().unwrap_or(Value::Null);
     let station_uuid = identity
@@ -116,6 +134,8 @@ pub fn build_delta_report(
         next.last_deleted_id = pack.id;
     }
     next.last_jobs_digest = jobs_digest;
+    next.last_container_at = containers.changed_at.clone();
+    next.last_containers_digest = containers.digest_at_cursor.clone();
     let log_values = logs
         .iter()
         .map(|entry| {
@@ -133,10 +153,19 @@ pub fn build_delta_report(
     } else {
         Vec::new()
     };
+    let (box_values, pallet_values) = if containers_changed {
+        (
+            containers.boxes.iter().map(|row| row.as_report_value(station_uuid, "box")).collect::<Vec<_>>(),
+            containers.pallets.iter().map(|row| row.as_report_value(station_uuid, "pallet")).collect::<Vec<_>>(),
+        )
+    } else {
+        (Vec::new(), Vec::new())
+    };
     let label_count = printed_labels.len();
     let deleted_count = deleted_labels.len();
     let log_count = log_values.len();
     let job_count = job_values.len();
+    let container_count = box_values.len() + pallet_values.len();
     Ok(DeltaReport {
         payload: json!({
             "station_uuid": identity.get("station_uuid").cloned().unwrap_or(Value::Null),
@@ -147,6 +176,8 @@ pub fn build_delta_report(
             "deleted_labels": deleted_labels,
             "logs": log_values,
             "print_jobs": job_values,
+            "boxes": box_values,
+            "pallets": pallet_values,
             "report_id": Uuid::new_v4().to_string(),
             "generated_at": now_rfc3339(),
         }),
@@ -155,6 +186,7 @@ pub fn build_delta_report(
         deleted_count,
         log_count,
         job_count,
+        container_count,
     })
 }
 
@@ -173,6 +205,8 @@ struct PackRow {
     batch: Option<String>,
     operator_name: Option<String>,
     deleted_at: Option<String>,
+    box_id: i64,
+    box_number: Option<String>,
 }
 
 impl PackRow {
@@ -191,6 +225,8 @@ impl PackRow {
             batch: row.get(10)?,
             operator_name: row.get(11)?,
             deleted_at: row.get(12)?,
+            box_id: row.get(13)?,
+            box_number: row.get(14)?,
         })
     }
 
@@ -210,6 +246,7 @@ impl PackRow {
             "production_date": self.production_date,
             "expiration_date": self.expiration_date,
             "barcode": self.barcode_value,
+            "box_number": self.box_number,
             "deleted_at": self.deleted_at,
         })
     }
@@ -301,16 +338,204 @@ fn query_job_rows(connection: &Connection) -> Result<Vec<JobRow>, String> {
 }
 
 fn digest_jobs(jobs: &[JobRow]) -> String {
-    let mut hasher = Sha256::new();
-    for job in jobs {
-        hasher.update(format!("{}|{}|{};", job.job_id, job.printed_qty, job.status).as_bytes());
-    }
-    hasher
-        .finalize()
+    short_digest(
+        &jobs
+            .iter()
+            .map(|job| format!("{}|{}|{};", job.job_id, job.printed_qty, job.status))
+            .collect::<String>(),
+    )
+}
+
+fn short_digest(text: &str) -> String {
+    Sha256::digest(text.as_bytes())
         .iter()
         .take(12)
         .map(|byte| format!("{byte:02x}"))
         .collect()
+}
+
+/// One box or pallet as the server keeps it (stations from 2.0.9). An open box counts its
+/// packs live; a closed one carries the weights it was closed with; a deleted one, what it
+/// held.
+#[derive(Debug)]
+struct ContainerRow {
+    id: i64,
+    number: String,
+    created_at: String,
+    changed_at: String,
+    status: String,
+    product_id: Option<i64>,
+    product_name: Option<String>,
+    capacity: Option<i64>,
+    parent_id: Option<i64>,
+    parent_number: Option<String>,
+    packs: i64,
+    boxes: i64,
+    net: f64,
+    gross: f64,
+}
+
+impl ContainerRow {
+    fn from_row(row: &Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            id: row.get(0)?,
+            number: row.get(1)?,
+            created_at: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+            changed_at: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+            status: row.get(4)?,
+            product_id: row.get(5)?,
+            product_name: row.get(6)?,
+            capacity: row.get(7)?,
+            parent_id: row.get(8)?,
+            parent_number: row.get(9)?,
+            packs: row.get(10)?,
+            boxes: row.get(11)?,
+            net: row.get(12)?,
+            gross: row.get(13)?,
+        })
+    }
+
+    fn as_report_value(&self, station_uuid: &str, level: &str) -> Value {
+        // The creation time keeps the id unique after the station's database is reset.
+        let stamp = self.created_at.chars().filter(char::is_ascii_digit).collect::<String>();
+        json!({
+            "unique_id": format!("{station_uuid}-{level}-{}-{stamp}", self.id),
+            "number": self.number,
+            "product_id": self.product_id,
+            "product_name": self.product_name,
+            "pallet_number": self.parent_number,
+            "packs": self.packs,
+            "boxes": self.boxes,
+            "capacity": self.capacity.filter(|value| *value > 0),
+            "weight_netto_grams": kilograms_to_grams(self.net),
+            "weight_brutto_grams": kilograms_to_grams(self.gross),
+            "opened_at": sqlite_utc(&self.created_at),
+            "closed_at": (self.status == "Closed").then(|| sqlite_utc(&self.changed_at)),
+            "deleted_at": (self.status == "Deleted").then(|| sqlite_utc(&self.changed_at)),
+        })
+    }
+
+    fn digest_line(&self) -> String {
+        format!(
+            "{}|{}|{}|{}|{}|{}|{};",
+            self.id, self.status, self.packs, self.boxes, self.net, self.gross, self.changed_at
+        )
+    }
+}
+
+struct Containers {
+    boxes: Vec<ContainerRow>,
+    pallets: Vec<ContainerRow>,
+    /// The next cursor: the latest change among the rows read (the old cursor when none).
+    changed_at: String,
+    /// Everything read this time; and only the rows the next read sees again unchanged.
+    digest_all: String,
+    digest_at_cursor: String,
+}
+
+// Columns shared by both reads: id, number, created_at, changed_at, status, product id and
+// name, capacity, parent id and number, packs, boxes, net kg, gross kg. A station that has
+// never reported containers starts with the last 30 days.
+const BOX_QUERY: &str = r#"
+    SELECT b.id, b.number, b.created_at, COALESCE(b.updated_at, b.created_at), b.status,
+           b.nomenclature_id, n.name, n.close_box_counter, b.pallete_id, p.number,
+           (SELECT COUNT(*) FROM pack k WHERE k.box_id = b.id AND (k.status != 'Deleted' OR b.status = 'Deleted')),
+           0,
+           CASE WHEN b.status = 'Closed' AND b.weight_netto IS NOT NULL THEN b.weight_netto
+                ELSE (SELECT COALESCE(SUM(k.weight_netto), 0) FROM pack k
+                      WHERE k.box_id = b.id AND (k.status != 'Deleted' OR b.status = 'Deleted')) END,
+           CASE WHEN b.status = 'Closed' AND b.weight_brutto IS NOT NULL THEN b.weight_brutto
+                ELSE (SELECT COALESCE(SUM(k.weight_brutto), 0) FROM pack k
+                      WHERE k.box_id = b.id AND (k.status != 'Deleted' OR b.status = 'Deleted')) END
+    FROM boxes b
+    LEFT JOIN pallet p ON p.id = b.pallete_id
+    LEFT JOIN nomenclature n ON n.id = b.nomenclature_id
+    WHERE COALESCE(b.updated_at, b.created_at) >= COALESCE(NULLIF(?1, ''), datetime('now', '-30 days'))
+       OR b.id IN (SELECT value FROM json_each(?2))
+    ORDER BY COALESCE(b.updated_at, b.created_at), b.id
+    LIMIT ?3
+"#;
+
+const PALLET_QUERY: &str = r#"
+    WITH chosen AS (
+        SELECT pl.id, pl.number, pl.created_at, COALESCE(pl.updated_at, pl.created_at) AS changed_at, pl.status,
+               (SELECT CASE WHEN COUNT(DISTINCT b.nomenclature_id) = 1 THEN MIN(b.nomenclature_id) END
+                  FROM boxes b WHERE b.pallete_id = pl.id AND b.status != 'Deleted') AS product_id
+        FROM pallet pl
+        WHERE COALESCE(pl.updated_at, pl.created_at) >= COALESCE(NULLIF(?1, ''), datetime('now', '-30 days'))
+           OR pl.id IN (SELECT value FROM json_each(?2))
+        ORDER BY changed_at, pl.id
+        LIMIT ?3
+    )
+    SELECT c.id, c.number, c.created_at, c.changed_at, c.status, c.product_id, n.name, NULL, NULL, NULL,
+           (SELECT COUNT(*) FROM pack k JOIN boxes b ON b.id = k.box_id
+             WHERE b.pallete_id = c.id AND b.status != 'Deleted' AND k.status != 'Deleted'),
+           (SELECT COUNT(*) FROM boxes b WHERE b.pallete_id = c.id AND b.status != 'Deleted'
+               AND EXISTS (SELECT 1 FROM pack k WHERE k.box_id = b.id AND k.status != 'Deleted')),
+           (SELECT COALESCE(SUM(k.weight_netto), 0) FROM pack k JOIN boxes b ON b.id = k.box_id
+             WHERE b.pallete_id = c.id AND b.status != 'Deleted' AND k.status != 'Deleted'),
+           (SELECT COALESCE(SUM(k.weight_brutto), 0) FROM pack k JOIN boxes b ON b.id = k.box_id
+             WHERE b.pallete_id = c.id AND b.status != 'Deleted' AND k.status != 'Deleted')
+    FROM chosen c
+    LEFT JOIN nomenclature n ON n.id = c.product_id
+    ORDER BY c.changed_at, c.id
+"#;
+
+fn query_container_rows(
+    connection: &Connection,
+    sql: &str,
+    since: &str,
+    ids: &[i64],
+) -> Result<Vec<ContainerRow>, String> {
+    let ids = serde_json::to_string(ids).unwrap_or_else(|_| "[]".to_owned());
+    let mut statement = connection
+        .prepare(sql)
+        .map_err(|error| format!("failed to prepare report container query: {error}"))?;
+    let rows = statement
+        .query_map(params![since, ids, MAX_REPORT_CONTAINERS as i64], ContainerRow::from_row)
+        .map_err(|error| format!("failed to query report containers: {error}"))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("failed to read report containers: {error}"))
+}
+
+/// The boxes and pallets changed since `since`, plus the boxes of the packs in this report
+/// and the pallets of those boxes. Empty open ones are left out: the station discards them.
+fn query_containers(connection: &Connection, since: &str, touched_boxes: &[i64]) -> Result<Containers, String> {
+    let mut boxes = query_container_rows(connection, BOX_QUERY, since, touched_boxes)?;
+    let pallet_ids = boxes.iter().filter_map(|row| row.parent_id).collect::<Vec<_>>();
+    let mut pallets = query_container_rows(connection, PALLET_QUERY, since, &pallet_ids)?;
+    let changed_at = boxes
+        .iter()
+        .chain(&pallets)
+        .map(|row| row.changed_at.as_str())
+        .chain([since])
+        .max()
+        .unwrap_or(since)
+        .to_owned();
+    boxes.retain(|row| row.packs > 0);
+    pallets.retain(|row| row.packs > 0);
+    let digest_all = short_digest(&boxes.iter().chain(&pallets).map(ContainerRow::digest_line).collect::<String>());
+    // What the next read returns when nothing changes: the rows changed at the cursor and
+    // the pallets of those boxes.
+    let again = boxes.iter().filter(|row| row.changed_at >= changed_at).collect::<Vec<_>>();
+    let parents = again.iter().filter_map(|row| row.parent_id).collect::<Vec<_>>();
+    let digest_at_cursor = short_digest(
+        &again
+            .iter()
+            .copied()
+            .chain(pallets.iter().filter(|row| row.changed_at >= changed_at || parents.contains(&row.id)))
+            .map(ContainerRow::digest_line)
+            .collect::<String>(),
+    );
+    Ok(Containers { boxes, pallets, changed_at, digest_all, digest_at_cursor })
+}
+
+/// SQLite's CURRENT_TIMESTAMP ("2026-10-09 18:00:00", UTC) as RFC 3339.
+fn sqlite_utc(value: &str) -> String {
+    if value.is_empty() || value.contains('T') {
+        return value.to_owned();
+    }
+    format!("{}Z", value.replacen(' ', "T", 1))
 }
 
 pub fn upload_report(client: &Client, base_url: &str, blob: &[u8], language: &str) -> UploadResult {
@@ -341,6 +566,7 @@ pub struct Delivery {
     pub deleted: usize,
     pub logs: usize,
     pub jobs: usize,
+    pub containers: usize,
     pub sent: bool,
     pub queued_sent: usize,
 }
@@ -382,6 +608,7 @@ pub fn deliver(
     delivery.deleted = report.deleted_count;
     delivery.logs = report.log_count;
     delivery.jobs = report.job_count;
+    delivery.containers = report.container_count;
 
     let blob = encrypt_report(persisted, &report.payload)?;
     if blob.len() as u64 > MAX_REPORT_BYTES {
@@ -599,7 +826,7 @@ fn record(component: &str, level: &str, message: &str) {
 }
 
 /// A lasting fault of a subsystem (printer out of paper, update failing): journaled once
-/// when it starts or changes, not on every status poll; `None` ends it.
+/// when it starts or changes, not on every status poll; `None` ends it, journaled as INFO.
 pub fn report_fault(component: &str, fault: Option<&str>) {
     let faults = OPEN_FAULTS.get_or_init(|| Mutex::new(HashMap::new()));
     let Ok(mut open) = faults.lock() else { return };
@@ -611,8 +838,20 @@ pub fn report_fault(component: &str, fault: Option<&str>) {
         }
         Some(_) => {}
         None => {
-            open.remove(component);
+            if open.remove(component).is_some() {
+                drop(open);
+                record(component, "INFO", &fault_cleared_message(component));
+            }
         }
+    }
+}
+
+fn fault_cleared_message(component: &str) -> String {
+    match component {
+        "printer" => "Принтер: снова готов к печати".to_owned(),
+        "scale" => "Весы: снова в работе".to_owned(),
+        "update" => "Обновление: ошибка устранена".to_owned(),
+        other => format!("{other}: снова в работе"),
     }
 }
 
@@ -694,6 +933,93 @@ mod tests {
             .unwrap();
         let changed = build_delta_report(&persisted, &again.cursor).unwrap();
         assert_eq!(changed.payload["print_jobs"][0]["status"], "completed");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    fn seed_box(connection: &Connection, packs: usize) {
+        connection
+            .execute_batch(
+                "INSERT INTO nomenclature(id, name, article, exp_date, close_box_counter) VALUES (1, 'Ham', 'A1', 10, 6);
+                 INSERT INTO pallet(id, number, status) VALUES (1, 'P1', 'Open');
+                 INSERT INTO boxes(id, pallete_id, number, status, nomenclature_id) VALUES (1, 1, 'B-0288', 'Open', 1);",
+            )
+            .unwrap();
+        for index in 0..packs {
+            connection
+                .execute(
+                    "INSERT INTO pack(number, box_id, nomenclature_id, weight_netto, weight_brutto, status) VALUES (?1, 1, 1, 0.4, 0.42, 'Printed')",
+                    params![format!("U{index}")],
+                )
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn boxes_and_pallets_are_reported_when_they_change() {
+        let (root, persisted) = fixture();
+        let connection = open_database(&persisted).unwrap();
+        seed_box(&connection, 2);
+
+        let first = build_delta_report(&persisted, &ReportCursor::default()).unwrap();
+        assert_eq!(first.payload["printed_labels"][0]["box_number"], "B-0288");
+        let open = &first.payload["boxes"][0];
+        assert_eq!(open["number"], "B-0288");
+        assert_eq!((open["packs"].as_i64(), open["capacity"].as_i64()), (Some(2), Some(6)));
+        assert_eq!((open["weight_netto_grams"].as_i64(), open["pallet_number"].as_str()), (Some(800), Some("P1")));
+        assert!(open["closed_at"].is_null());
+        assert!(open["opened_at"].as_str().unwrap().ends_with('Z'));
+        let pallet = &first.payload["pallets"][0];
+        assert_eq!((pallet["boxes"].as_i64(), pallet["packs"].as_i64(), pallet["product_name"].as_str()), (Some(1), Some(2), Some("Ham")));
+
+        let quiet = build_delta_report(&persisted, &first.cursor).unwrap();
+        assert!(quiet.is_empty(), "nothing changed, nothing re-sent: {}", quiet.payload);
+
+        // A new pack changes its box without touching the box row.
+        connection
+            .execute(
+                "INSERT INTO pack(number, box_id, nomenclature_id, weight_netto, weight_brutto, status) VALUES ('U9', 1, 1, 0.4, 0.42, 'Printed')",
+                [],
+            )
+            .unwrap();
+        let grown = build_delta_report(&persisted, &quiet.cursor).unwrap();
+        assert_eq!(grown.payload["boxes"][0]["packs"].as_i64(), Some(3));
+
+        connection
+            .execute(
+                "UPDATE boxes SET status = 'Closed', weight_netto = 1.2, weight_brutto = 1.6, updated_at = datetime('now', '+1 second') WHERE id = 1",
+                [],
+            )
+            .unwrap();
+        let closed = build_delta_report(&persisted, &grown.cursor).unwrap();
+        let closed_box = &closed.payload["boxes"][0];
+        assert_eq!(closed_box["weight_brutto_grams"].as_i64(), Some(1600));
+        assert!(closed_box["closed_at"].as_str().unwrap().ends_with('Z'));
+        assert_eq!(closed_box["unique_id"], first.payload["boxes"][0]["unique_id"]);
+        assert!(build_delta_report(&persisted, &closed.cursor).unwrap().is_empty());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn an_empty_open_box_is_not_reported_but_a_deleted_one_is() {
+        let (root, persisted) = fixture();
+        let connection = open_database(&persisted).unwrap();
+        seed_box(&connection, 0);
+        let empty = build_delta_report(&persisted, &ReportCursor::default()).unwrap();
+        assert!(empty.is_empty(), "{}", empty.payload);
+
+        connection
+            .execute(
+                "INSERT INTO pack(number, box_id, nomenclature_id, weight_netto, weight_brutto, status, deleted_at) VALUES ('U1', 1, 1, 0.4, 0.42, 'Deleted', '2026-10-09 10:00:00.000')",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute("UPDATE boxes SET status = 'Deleted', updated_at = datetime('now', '+1 second') WHERE id = 1", [])
+            .unwrap();
+        let deleted = build_delta_report(&persisted, &empty.cursor).unwrap();
+        let gone = &deleted.payload["boxes"][0];
+        assert_eq!((gone["packs"].as_i64(), gone["weight_netto_grams"].as_i64()), (Some(1), Some(400)));
+        assert!(gone["deleted_at"].as_str().is_some());
         let _ = fs::remove_dir_all(root);
     }
 
