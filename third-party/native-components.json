@@ -1,0 +1,23 @@
+{
+  "_comment": "Code linked into the client that comes without a crate or npm licence file: the libraries inside the prebuilt Skia (skia-bindings, Slint build), SQLite (libsqlite3-sys, bundled) and the WebView2 loader (webview2-com-sys, Tauri build). Texts live in third-party/licenses.",
+  "components": [
+    { "name": "Skia", "via": "skia-bindings 0.99.0 (Slint renderer)", "license": "BSD-3-Clause", "url": "https://skia.org", "text": "skia.txt" },
+    { "name": "HarfBuzz", "via": "Skia text shaping", "license": "MIT-Modern-Variant", "url": "https://github.com/harfbuzz/harfbuzz", "text": "harfbuzz.txt" },
+    { "name": "ICU (with its data)", "via": "Skia text layout", "license": "Unicode-3.0 and others", "url": "https://icu.unicode.org", "text": "icu.txt" },
+    { "name": "libpng", "via": "Skia image codecs", "license": "Libpng", "url": "http://www.libpng.org/pub/png/libpng.html", "text": "libpng.txt" },
+    { "name": "libjpeg-turbo", "via": "Skia image codecs", "license": "IJG AND BSD-3-Clause AND Zlib", "url": "https://libjpeg-turbo.org", "text": "libjpeg-turbo.txt" },
+    { "name": "Expat", "via": "Skia (SVG/XML)", "license": "MIT", "url": "https://libexpat.github.io", "text": "expat.txt" },
+    { "name": "zlib", "via": "Skia (PDF, PNG)", "license": "Zlib", "url": "https://zlib.net", "text": "zlib.txt" },
+    { "name": "Wuffs", "via": "Skia image decoders", "license": "Apache-2.0", "url": "https://github.com/google/wuffs", "copyright": "Copyright 2017 The Wuffs Authors.", "spdx": "Apache-2.0" },
+    { "name": "SQLite", "via": "libsqlite3-sys (bundled)", "license": "blessing (public domain)", "url": "https://www.sqlite.org", "text": "sqlite.txt" },
+    { "name": "Microsoft WebView2 SDK loader 1.0.3650.58", "via": "webview2-com-sys (Tauri build)", "license": "BSD-3-Clause-style (Microsoft)", "url": "https://www.nuget.org/packages/Microsoft.Web.WebView2", "text": "webview2-sdk.txt" }
+  ],
+  "fonts": [
+    { "file": "resources/fonts/Inter-Regular.ttf", "name": "Inter", "license": "OFL-1.1" },
+    { "file": "resources/fonts/Inter-Bold.ttf", "name": "Inter Bold", "license": "OFL-1.1" },
+    { "file": "resources/fonts/Montserrat-Variable.ttf", "name": "Montserrat", "license": "OFL-1.1" },
+    { "file": "resources/fonts/Roboto-Variable.ttf", "name": "Roboto", "license": "OFL-1.1" },
+    { "file": "resources/fonts/Ubuntu-Regular.ttf", "name": "Ubuntu", "license": "Ubuntu Font Licence 1.0", "text": "ubuntu-font-licence-1.0.txt" },
+    { "file": "resources/fonts/Ubuntu-Bold.ttf", "name": "Ubuntu Bold", "license": "Ubuntu Font Licence 1.0", "text": "ubuntu-font-licence-1.0.txt" }
+  ]
+}
