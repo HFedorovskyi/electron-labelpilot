@@ -368,6 +368,7 @@ impl NativePrintService {
                 let fields = assets.barcode_fields;
                 let barcode = resolve_barcode(&fields, &data, product);
                 data.insert("barcode".to_owned(), Value::String(barcode));
+                insert_extra_barcodes(&doc, &mut data);
                 data.insert("is_box".to_owned(), Value::Bool(true));
                 data.insert(
                     "count".to_owned(),
@@ -612,8 +613,10 @@ impl NativePrintService {
             .get("structure")
             .and_then(Value::as_str)
             .ok_or_else(|| format!("шаблон этикетки #{id} не содержит structure"))?;
-        serde_json::from_str(structure)
-            .map_err(|error| format!("шаблон этикетки #{id} повреждён: {error}"))
+        let mut doc: Value = serde_json::from_str(structure)
+            .map_err(|error| format!("шаблон этикетки #{id} повреждён: {error}"))?;
+        attach_extra_barcodes(operational, &mut doc)?;
+        Ok(doc)
     }
 
     fn cached_station_number(
@@ -976,6 +979,72 @@ fn barcode_fields_for_doc(
     let Some(template_id) = template_id.filter(|id| *id > 0) else {
         return Ok(Vec::new());
     };
+    barcode_template_fields(operational, template_id)
+}
+
+/// A label may carry barcodes from different templates (say EAN-13 and GS1 QR). The
+/// first barcode fills `{{ barcode }}` as before; every later one from another template
+/// gets that template's parts and a value key of its own, so it does not print the first
+/// barcode's data. A barcode whose value was typed by hand is left alone.
+fn attach_extra_barcodes(operational: &OperationalState, doc: &mut Value) -> Result<(), String> {
+    let Some(elements) = doc.get_mut("elements").and_then(Value::as_array_mut) else {
+        return Ok(());
+    };
+    let mut primary: Option<Option<i64>> = None;
+    for element in elements.iter_mut() {
+        if string(element.get("type")) != Some("barcode") {
+            continue;
+        }
+        let template_id = integer(element.get("templateId")).filter(|id| *id > 0);
+        let Some(first) = primary else {
+            primary = Some(template_id);
+            continue;
+        };
+        let Some(template_id) = template_id.filter(|id| Some(*id) != first) else {
+            continue;
+        };
+        let value = string(element.get("value")).unwrap_or_default().trim();
+        let placeholder = value.is_empty()
+            || value
+                .strip_prefix("{{")
+                .and_then(|rest| rest.strip_suffix("}}"))
+                .is_some_and(|key| key.trim() == "barcode");
+        if !placeholder {
+            continue;
+        }
+        let fields = barcode_template_fields(operational, template_id)?;
+        let key = format!("barcode_{template_id}");
+        if let Some(object) = element.as_object_mut() {
+            object.insert("value".to_owned(), Value::String(format!("{{{{ {key} }}}}")));
+            object.insert("barcodeKey".to_owned(), Value::String(key));
+            object.insert("barcodeFields".to_owned(), Value::Array(fields));
+        }
+    }
+    Ok(())
+}
+
+/// Fills the value of every extra barcode attached by `attach_extra_barcodes`.
+fn insert_extra_barcodes(doc: &Value, data: &mut Map<String, Value>) {
+    let Some(elements) = doc.get("elements").and_then(Value::as_array) else {
+        return;
+    };
+    let values: Vec<(String, String)> = elements
+        .iter()
+        .filter_map(|element| {
+            let key = string(element.get("barcodeKey"))?;
+            let fields = element.get("barcodeFields")?.as_array()?;
+            Some((key.to_owned(), generate_barcode(fields, data)))
+        })
+        .collect();
+    for (key, value) in values {
+        data.insert(key, Value::String(value));
+    }
+}
+
+fn barcode_template_fields(
+    operational: &OperationalState,
+    template_id: i64,
+) -> Result<Vec<Value>, String> {
     let row = operational
         .barcode_template(template_id)?
         .ok_or_else(|| format!("шаблон штрихкода #{template_id} не найден"))?;
@@ -1245,6 +1314,54 @@ fn value_string(value: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn each_barcode_on_a_label_gets_its_own_template_data() {
+        struct TestDir(PathBuf);
+        impl Drop for TestDir {
+            fn drop(&mut self) {
+                let _ = fs::remove_dir_all(&self.0);
+            }
+        }
+        let directory = TestDir(std::env::temp_dir().join(format!(
+            "labelpilot-extra-barcodes-{}-{}",
+            std::process::id(),
+            Uuid::new_v4()
+        )));
+        fs::create_dir_all(&directory.0).unwrap();
+        let persisted = PersistedState::for_data_dir(directory.0.clone());
+        let connection = crate::processor::open_database(&persisted).unwrap();
+        connection
+            .execute(
+                "INSERT INTO barcodes(id,name,structure) VALUES(1,'EAN',?1),(2,'Box',?2)",
+                [
+                    json!({"fields":[{"field_type":"constanta","value":"21"},{"field_type":"article","length":5}]}).to_string(),
+                    json!({"fields":[{"field_type":"constanta","value":"BOX-"},{"field_type":"batch_number","length":4}]}).to_string(),
+                ],
+            )
+            .unwrap();
+        drop(connection);
+        let operational = OperationalState::new(&persisted).unwrap();
+        let mut doc = json!({"elements":[
+            {"id":"a","type":"barcode","templateId":1,"value":"{{ barcode }}"},
+            {"id":"b","type":"barcode","templateId":2,"value":"{{barcode}}"},
+            {"id":"c","type":"barcode","templateId":2,"value":"(10){{ batch_number }}"},
+            {"id":"d","type":"barcode","templateId":1,"value":"{{ barcode }}"}
+        ]});
+        attach_extra_barcodes(&operational, &mut doc).unwrap();
+        let elements = doc["elements"].as_array().unwrap();
+        assert_eq!(elements[0]["value"], "{{ barcode }}");
+        assert_eq!(elements[1]["value"], "{{ barcode_2 }}");
+        assert_eq!(elements[2]["value"], "(10){{ batch_number }}", "a hand-typed value stays");
+        assert_eq!(elements[3]["value"], "{{ barcode }}", "the first template's own copies share its data");
+
+        let mut data = Map::new();
+        data.insert("article".to_owned(), json!("10231"));
+        data.insert("batch_number".to_owned(), json!("0610"));
+        insert_extra_barcodes(&doc, &mut data);
+        assert_eq!(data["barcode_2"], "BOX-0610");
+    }
+
     #[test]
     fn formatting_matches_template_total_length() {
         let doc = json!({"elements":[{"type":"text","text":"№ {{ pack_number }}","minLength":8}]});
