@@ -233,7 +233,7 @@ fn text_layout(element: &Map<String, Value>, data: &Map<String, Value>) -> TextL
         string(element.get("fontFamily")).unwrap_or("Inter"),
         weight >= 600.0,
     );
-    let text = interpolate(string(element.get("text")).unwrap_or_default(), data);
+    let text = interpolate_text(string(element.get("text")).unwrap_or_default(), data);
     let lines = wrap_text(font, css_px_scale(font, font_size), &text, width);
     let line_height = font_size * 1.2;
     let block_height = lines.len() as f32 * line_height;
@@ -825,12 +825,12 @@ fn table_row_value(row: &Value, key: &str) -> Option<String> {
     row.as_object().and_then(|map| map.get(key)).map(value_text)
 }
 
-/// Mirrors `processDynamicText` from the canonical table renderer: missing row
-/// keys keep the literal `{{ key }}` placeholder, all-digit pack/box numbers
-/// are zero-padded to 12 characters.
+/// Mirrors `processDynamicText` from the canonical table renderer: a row with no
+/// value for the key leaves the cell empty, all-digit pack/box numbers are
+/// zero-padded to 12 characters.
 fn resolve_table_cell(key: &str, row: Option<&Map<String, Value>>) -> String {
     let Some(map) = row else {
-        return format!("{{{{ {key} }}}}");
+        return String::new();
     };
     let value = map.get(key).or_else(|| {
         let lowered = key.to_lowercase();
@@ -839,7 +839,7 @@ fn resolve_table_cell(key: &str, row: Option<&Map<String, Value>>) -> String {
             .map(|(_, value)| value)
     });
     let Some(value) = value else {
-        return format!("{{{{ {key} }}}}");
+        return String::new();
     };
     let mut text = value_text(value);
     if !text.is_empty()
@@ -2260,7 +2260,19 @@ fn put_u32(bytes: &mut [u8], at: usize, value: u32) {
     bytes[at..at + 4].copy_from_slice(&value.to_le_bytes());
 }
 
+/// Barcode values: a field with no value keeps its `{{ key }}` placeholder, so the
+/// barcode is refused instead of encoding an incomplete code.
 fn interpolate(template: &str, data: &Map<String, Value>) -> String {
+    fill(template, data, true)
+}
+
+/// Label text: a field the product has no value for prints as nothing, never as
+/// a literal `{{ key }}`.
+fn interpolate_text(template: &str, data: &Map<String, Value>) -> String {
+    fill(template, data, false)
+}
+
+fn fill(template: &str, data: &Map<String, Value>, keep_missing: bool) -> String {
     let lower = data
         .iter()
         .map(|(key, value)| (key.to_lowercase(), value))
@@ -2280,7 +2292,7 @@ fn interpolate(template: &str, data: &Map<String, Value>) -> String {
             .or_else(|| lower.get(&key.to_lowercase()).copied())
         {
             output.push_str(&value_text(value));
-        } else {
+        } else if keep_missing {
             output.push_str(&rest[start..start + 2 + end + 2]);
         }
         rest = &after[end + 2..];
@@ -3075,14 +3087,22 @@ mod tests {
     }
 
     #[test]
-    fn resolve_table_cell_pads_numbers_and_keeps_missing_literal() {
+    fn label_text_leaves_missing_fields_empty_but_barcodes_keep_them() {
+        let data = json!({"batch": "0610-1"});
+        let map = data.as_object().unwrap();
+        assert_eq!(interpolate_text("Партия: {{ batch }}. Состав: {{ Состав }}", map), "Партия: 0610-1. Состав: ");
+        assert_eq!(interpolate("(10){{ batch }}(17){{ exp }}", map), "(10)0610-1(17){{ exp }}");
+    }
+
+    #[test]
+    fn resolve_table_cell_pads_numbers_and_leaves_missing_empty() {
         let row = json!({"pack_number": "70", "box_number": 12345, "name": "Молоко"});
         let map = row.as_object().unwrap();
         assert_eq!(resolve_table_cell("pack_number", Some(map)), "000000000070");
         assert_eq!(resolve_table_cell("box_number", Some(map)), "000000012345");
         assert_eq!(resolve_table_cell("name", Some(map)), "Молоко");
-        assert_eq!(resolve_table_cell("unknown", Some(map)), "{{ unknown }}");
-        assert_eq!(resolve_table_cell("name", None), "{{ name }}");
+        assert_eq!(resolve_table_cell("unknown", Some(map)), "");
+        assert_eq!(resolve_table_cell("name", None), "");
     }
 
     #[test]

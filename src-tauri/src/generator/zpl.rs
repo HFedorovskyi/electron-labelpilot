@@ -1,5 +1,5 @@
 use super::types::{
-    interpolate, js_round, normalize_barcode, Geometry, LabelElement, ParsedInput, Profile,
+    interpolate, interpolate_text, js_round, normalize_barcode, Geometry, LabelElement, ParsedInput, Profile,
 };
 use serde_json::{Map, Value};
 
@@ -49,7 +49,7 @@ fn append_element(
 
     match element.kind.as_str() {
         "text" => {
-            let value = interpolate(element.text.as_deref().unwrap_or(""), data);
+            let value = interpolate_text(element.text.as_deref().unwrap_or(""), data);
             let size = js_round(element.font_size.unwrap_or(12.0) * geometry.scale_y);
             if element.w != 0.0 {
                 let width = js_round(element.w * geometry.scale_x);

@@ -1,5 +1,5 @@
 use super::types::{
-    interpolate, js_round, native_barcode_value_safe, needs_gs1_parse, normalize_barcode,
+    interpolate, interpolate_text, js_round, native_barcode_value_safe, needs_gs1_parse, normalize_barcode,
     tspl_text_requires_bitmap, Geometry, LabelElement, ParsedInput, Profile,
 };
 use serde_json::{Map, Value};
@@ -81,7 +81,7 @@ fn append_element(
 
     match element.kind.as_str() {
         "text" => {
-            let value = interpolate(element.text.as_deref().unwrap_or(""), data);
+            let value = interpolate_text(element.text.as_deref().unwrap_or(""), data);
             if value.is_empty() {
                 return Ok(());
             }
