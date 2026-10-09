@@ -5688,5 +5688,10 @@
     "Demo mode ended",
     "Demomodus beendet",
     "Демо-режим завершено"
+  ],
+  "Файл со списком сторонних компонентов не найден": [
+    "The list of third-party software was not found",
+    "Die Liste der Software von Drittanbietern wurde nicht gefunden",
+    "Файл зі списком сторонніх компонентів не знайдено"
   ]
 }

@@ -5,7 +5,7 @@ export global UiText {
 }
 
 import { Palette } from "palette.slint";
-import { LineEdit, ScrollView, Palette as WidgetPalette } from "std-widgets.slint";
+import { LineEdit, ScrollView, Palette as WidgetPalette, AboutSlint } from "std-widgets.slint";
 import { SettingsAction, SettingsTab, SettingsCard, SettingsField, SettingsSelect, SettingsToggle, SettingsNotice } from "settings-controls.slint";
 import "../assets/fonts/Inter-Regular.ttf";
 import "../assets/fonts/Inter-Bold.ttf";
@@ -1454,7 +1454,9 @@ export component WeighingPrototype inherits Window {
     in-out property <string> update-offline-path: "";
     in-out property <bool> update-offline-visible: false;
     in-out property <string> update-error: "";
-    property <string> update-page-title-label: root.ui-language == "en" ? "Updates" : root.ui-language == "de" ? "Aktualisierung" : root.ui-language == "uk" ? "Оновлення" : "Обновление";
+    property <string> update-page-title-label: root.ui-language == "en" ? "About" : root.ui-language == "de" ? "Über LabelPilot" : root.ui-language == "uk" ? "Про програму" : "О программе";
+    property <string> about-notices-label: root.ui-language == "en" ? "Third-party software" : root.ui-language == "de" ? "Software von Drittanbietern" : root.ui-language == "uk" ? "Сторонні компоненти" : "Сторонние компоненты";
+    callback open-third-party-notices();
     property <string> update-current-label: root.ui-language == "en" ? "CURRENT VERSION" : root.ui-language == "de" ? "AKTUELLE VERSION" : root.ui-language == "uk" ? "ПОТОЧНА ВЕРСІЯ" : "ТЕКУЩАЯ ВЕРСИЯ";
     property <string> update-actual-label: root.ui-language == "en" ? "UP TO DATE" : root.ui-language == "de" ? "AKTUELL" : root.ui-language == "uk" ? "АКТУАЛЬНО" : "АКТУАЛЬНО";
     property <string> update-available-label: root.ui-language == "en" ? "AVAILABLE" : root.ui-language == "de" ? "VERFÜGBAR" : root.ui-language == "uk" ? "ДОСТУПНО" : "ДОСТУПНО";
@@ -1858,7 +1860,7 @@ export component WeighingPrototype inherits Window {
                             clicked => { root.active-page = 8; root.reload-license(); }
                         }
                         SidebarItem {
-                            text: root.ui-language == "en" ? "Update" : root.ui-language == "de" ? "Aktualisierung" : root.ui-language == "uk" ? "Оновлення" : "Обновление";
+                            text: root.update-page-title-label;
                             icon: @image-url("../assets/icons/refresh-cw.png");
                             active: root.active-page == 9;
                             collapsed: root.effective-collapsed;
@@ -4801,257 +4803,284 @@ export component WeighingPrototype inherits Window {
                 }
             }
 
-            HorizontalLayout {
-                vertical-stretch: 1;
-                Rectangle { horizontal-stretch: 1; }
-                update-card := Rectangle {
-                    width: min(820px, root.page-width - root.content-padding * 2);
-                    border-radius: 22px;
-                    border-width: 1px;
-                    border-color: root.update-error != "" ? Palette.r300 : root.update-available ? Palette.e300 : Palette.n200;
-                    background: Palette.surface;
+            about-view := ScrollView {
+                min-height: 0px; vertical-stretch: 1;
+                viewport-width: self.visible-width;
+                viewport-height: max(self.visible-height, about-view-content.min-height);
+                horizontal-scrollbar-policy: ScrollBarPolicy.always-off; mouse-drag-pan-enabled: true;
+                about-view-content := VerticalLayout {
+                    spacing: root.narrow ? 12px : 18px;
+                    HorizontalLayout {
+                        vertical-stretch: 1;
+                        Rectangle { horizontal-stretch: 1; }
+                        update-card := Rectangle {
+                            width: min(820px, root.page-width - root.content-padding * 2);
+                            border-radius: 22px;
+                            border-width: 1px;
+                            border-color: root.update-error != "" ? Palette.r300 : root.update-available ? Palette.e300 : Palette.n200;
+                            background: Palette.surface;
 
-                    VerticalLayout {
-                        padding: root.short ? 18px : root.narrow ? 22px : 28px;
-                        spacing: root.short ? 10px : 14px;
+                            VerticalLayout {
+                                padding: root.short ? 18px : root.narrow ? 22px : 28px;
+                                spacing: root.short ? 10px : 14px;
 
-                        Text {
-                            text: root.update-current-label;
-                            color: Palette.n500;
-                            font-size: 11px;
-                            font-weight: 750;
-                            letter-spacing: 0.9px;
-                            horizontal-alignment: center;
-                        }
-                        Text {
-                            text: "LabelPilot";
-                            color: Palette.n900;
-                            font-size: root.short ? 24px : 28px;
-                            font-weight: 800;
-                            horizontal-alignment: center;
-                        }
-                        Text {
-                            text: root.update-current-version;
-                            color: Palette.n900;
-                            font-size: root.short ? 34px : 42px;
-                            font-weight: 800;
-                            horizontal-alignment: center;
-                        }
-
-                        update-status-row := HorizontalLayout {
-                            height: root.short ? 34px : 38px;
-                            Rectangle { horizontal-stretch: 1; }
-                            update-status-badge := Rectangle {
-                                width: root.narrow ? 144px : 166px;
-                                height: parent.height;
-                                border-radius: parent.height / 2;
-                                background: root.update-ready || root.update-available ? Palette.a50 : Palette.e100;
                                 Text {
-                                    text: root.update-ready ? root.update-ready-label : root.update-available ? root.update-available-label : root.update-actual-label;
-                                    color: root.update-ready || root.update-available ? Palette.a700 : Palette.e700;
+                                    text: root.update-current-label;
+                                    color: Palette.n500;
                                     font-size: 11px;
+                                    font-weight: 750;
+                                    letter-spacing: 0.9px;
+                                    horizontal-alignment: center;
+                                }
+                                Text {
+                                    text: "LabelPilot";
+                                    color: Palette.n900;
+                                    font-size: root.short ? 24px : 28px;
                                     font-weight: 800;
                                     horizontal-alignment: center;
-                                    vertical-alignment: center;
-                                    overflow: elide;
                                 }
-                            }
-                            Rectangle { horizontal-stretch: 1; }
-                        }
-
-                        Text {
-                            text: root.update-busy
-                                ? UiText.translate(UiText.language, root.update-status)
-                                : root.update-available
-                                    ? root.update-available-label + ": " + root.update-available-version
-                                    : root.update-current-message-label;
-                            color: root.update-available ? Palette.e700 : Palette.n600;
-                            font-size: root.narrow ? 13px : 14px;
-                            font-weight: root.update-available ? 700 : 500;
-                            horizontal-alignment: center;
-                            overflow: elide;
-                        }
-
-                        if root.update-error != "": Rectangle {
-                            min-height: 64px;
-                            border-radius: 14px;
-                            border-width: 1px;
-                            border-color: Palette.r300;
-                            background: Palette.r50;
-                            Text {
-                                x: 14px;
-                                y: 10px;
-                                width: parent.width - 28px;
-                                height: parent.height - 20px;
-                                text: UiText.translate(UiText.language, root.update-error);
-                                color: Palette.r700;
-                                font-size: 12px;
-                                wrap: word-wrap;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
-                            }
-                        }
-
-                        if root.update-available: Rectangle {
-                            min-height: root.short ? 82px : 108px;
-                            border-radius: 15px;
-                            border-width: 1px;
-                            border-color: Palette.n200;
-                            background: Palette.n50;
-                            VerticalLayout {
-                                padding: 14px;
-                                spacing: 6px;
                                 Text {
-                                    text: root.update-changes-label;
-                                    color: Palette.n500;
-                                    font-size: 10px;
+                                    text: root.update-current-version;
+                                    color: Palette.n900;
+                                    font-size: root.short ? 34px : 42px;
                                     font-weight: 800;
-                                    letter-spacing: 0.8px;
                                     horizontal-alignment: center;
                                 }
-                                Text {
-                                    text: root.update-notes;
-                                    color: Palette.n700;
-                                    font-size: 12px;
-                                    wrap: word-wrap;
-                                    overflow: elide;
-                                    horizontal-alignment: center;
-                                }
-                            }
-                        }
 
-                        if root.update-state == "downloading" || root.update-ready: VerticalLayout {
-                            height: 52px;
-                            spacing: 7px;
-                            Text {
-                                text: root.update-progress + "%";
-                                color: root.update-ready ? Palette.e700 : Palette.n700;
-                                font-size: 12px;
-                                font-weight: 750;
-                                horizontal-alignment: center;
-                            }
-                            Rectangle {
-                                height: 12px;
-                                border-radius: 6px;
-                                background: Palette.n200;
-                                clip: true;
-                                Rectangle {
-                                    width: parent.width * root.update-progress / 100;
-                                    height: parent.height;
-                                    border-radius: 6px;
-                                    background: Palette.e500;
+                                update-status-row := HorizontalLayout {
+                                    height: root.short ? 34px : 38px;
+                                    Rectangle { horizontal-stretch: 1; }
+                                    update-status-badge := Rectangle {
+                                        width: root.narrow ? 144px : 166px;
+                                        height: parent.height;
+                                        border-radius: parent.height / 2;
+                                        background: root.update-ready || root.update-available ? Palette.a50 : Palette.e100;
+                                        Text {
+                                            text: root.update-ready ? root.update-ready-label : root.update-available ? root.update-available-label : root.update-actual-label;
+                                            color: root.update-ready || root.update-available ? Palette.a700 : Palette.e700;
+                                            font-size: 11px;
+                                            font-weight: 800;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                            overflow: elide;
+                                        }
+                                    }
+                                    Rectangle { horizontal-stretch: 1; }
                                 }
-                            }
-                        }
 
-                        update-recovery-card := Rectangle {
-                            min-height: root.update-rollback-available ? (root.short ? 122px : 138px) : (root.short ? 72px : 84px);
-                            border-radius: 15px;
-                            border-width: 1px;
-                            border-color: root.update-rollback-available ? Palette.e300 : Palette.n200;
-                            background: root.update-rollback-available ? Palette.e50 : Palette.n50;
-                            VerticalLayout {
-                                padding: root.short ? 10px : 12px;
-                                spacing: 3px;
                                 Text {
-                                    text: root.update-protection-title-label;
-                                    color: root.update-rollback-available ? Palette.e700 : Palette.n700;
-                                    font-size: 10px;
-                                    font-weight: 800;
-                                    letter-spacing: 0.8px;
-                                    horizontal-alignment: center;
-                                }
-                                Text {
-                                    text: root.update-rollback-available
-                                        ? root.update-protection-ready-label
-                                        : root.update-protection-planned-label;
-                                    color: Palette.n800;
-                                    font-size: root.short ? 11px : 12px;
-                                    font-weight: 700;
+                                    text: root.update-busy
+                                        ? UiText.translate(UiText.language, root.update-status)
+                                        : root.update-available
+                                            ? root.update-available-label + ": " + root.update-available-version
+                                            : root.update-current-message-label;
+                                    color: root.update-available ? Palette.e700 : Palette.n600;
+                                    font-size: root.narrow ? 13px : 14px;
+                                    font-weight: root.update-available ? 700 : 500;
                                     horizontal-alignment: center;
                                     overflow: elide;
                                 }
-                                Text {
-                                    text: root.update-protection-message-label;
-                                    color: Palette.n500;
-                                    font-size: root.short ? 10px : 11px;
-                                    horizontal-alignment: center;
-                                    overflow: elide;
+
+                                if root.update-error != "": Rectangle {
+                                    min-height: 64px;
+                                    border-radius: 14px;
+                                    border-width: 1px;
+                                    border-color: Palette.r300;
+                                    background: Palette.r50;
+                                    Text {
+                                        x: 14px;
+                                        y: 10px;
+                                        width: parent.width - 28px;
+                                        height: parent.height - 20px;
+                                        text: UiText.translate(UiText.language, root.update-error);
+                                        color: Palette.r700;
+                                        font-size: 12px;
+                                        wrap: word-wrap;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
                                 }
-                                if root.update-rollback-available: CompactActionButton {
-                                    height: root.short ? 38px : 44px;
-                                    text-size: root.short ? 10px : 11px;
-                                    text: root.update-manual-restore-label;
-                                    danger: true;
+
+                                if root.update-available: Rectangle {
+                                    min-height: root.short ? 82px : 108px;
+                                    border-radius: 15px;
+                                    border-width: 1px;
+                                    border-color: Palette.n200;
+                                    background: Palette.n50;
+                                    VerticalLayout {
+                                        padding: 14px;
+                                        spacing: 6px;
+                                        Text {
+                                            text: root.update-changes-label;
+                                            color: Palette.n500;
+                                            font-size: 10px;
+                                            font-weight: 800;
+                                            letter-spacing: 0.8px;
+                                            horizontal-alignment: center;
+                                        }
+                                        Text {
+                                            text: root.update-notes;
+                                            color: Palette.n700;
+                                            font-size: 12px;
+                                            wrap: word-wrap;
+                                            overflow: elide;
+                                            horizontal-alignment: center;
+                                        }
+                                    }
+                                }
+
+                                if root.update-state == "downloading" || root.update-ready: VerticalLayout {
+                                    height: 52px;
+                                    spacing: 7px;
+                                    Text {
+                                        text: root.update-progress + "%";
+                                        color: root.update-ready ? Palette.e700 : Palette.n700;
+                                        font-size: 12px;
+                                        font-weight: 750;
+                                        horizontal-alignment: center;
+                                    }
+                                    Rectangle {
+                                        height: 12px;
+                                        border-radius: 6px;
+                                        background: Palette.n200;
+                                        clip: true;
+                                        Rectangle {
+                                            width: parent.width * root.update-progress / 100;
+                                            height: parent.height;
+                                            border-radius: 6px;
+                                            background: Palette.e500;
+                                        }
+                                    }
+                                }
+
+                                update-recovery-card := Rectangle {
+                                    min-height: root.update-rollback-available ? (root.short ? 122px : 138px) : (root.short ? 72px : 84px);
+                                    border-radius: 15px;
+                                    border-width: 1px;
+                                    border-color: root.update-rollback-available ? Palette.e300 : Palette.n200;
+                                    background: root.update-rollback-available ? Palette.e50 : Palette.n50;
+                                    VerticalLayout {
+                                        padding: root.short ? 10px : 12px;
+                                        spacing: 3px;
+                                        Text {
+                                            text: root.update-protection-title-label;
+                                            color: root.update-rollback-available ? Palette.e700 : Palette.n700;
+                                            font-size: 10px;
+                                            font-weight: 800;
+                                            letter-spacing: 0.8px;
+                                            horizontal-alignment: center;
+                                        }
+                                        Text {
+                                            text: root.update-rollback-available
+                                                ? root.update-protection-ready-label
+                                                : root.update-protection-planned-label;
+                                            color: Palette.n800;
+                                            font-size: root.short ? 11px : 12px;
+                                            font-weight: 700;
+                                            horizontal-alignment: center;
+                                            overflow: elide;
+                                        }
+                                        Text {
+                                            text: root.update-protection-message-label;
+                                            color: Palette.n500;
+                                            font-size: root.short ? 10px : 11px;
+                                            horizontal-alignment: center;
+                                            overflow: elide;
+                                        }
+                                        if root.update-rollback-available: CompactActionButton {
+                                            height: root.short ? 38px : 44px;
+                                            text-size: root.short ? 10px : 11px;
+                                            text: root.update-manual-restore-label;
+                                            danger: true;
+                                            enabled: !root.update-busy;
+                                            clicked => { root.update-rollback-confirm-visible = true; }
+                                        }
+                                    }
+                                }
+
+                                Rectangle { vertical-stretch: 1; }
+
+                                if !root.update-available: CompactActionButton {
+                                    height: 54px;
+                                    text-size: 14px;
+                                    text: root.update-busy ? root.update-checking-label : root.update-check-label;
+                                    primary: true;
                                     enabled: !root.update-busy;
-                                    clicked => { root.update-rollback-confirm-visible = true; }
+                                    clicked => { root.check-update(); }
+                                }
+                                if root.update-available && !root.update-ready: CompactActionButton {
+                                    height: 54px;
+                                    text-size: 14px;
+                                    text: root.update-download-label;
+                                    primary: true;
+                                    enabled: !root.update-busy;
+                                    clicked => { root.download-update(); }
+                                }
+                                if root.update-ready: CompactActionButton {
+                                    height: 54px;
+                                    text-size: 14px;
+                                    text: root.update-install-label;
+                                    primary: true;
+                                    enabled: !root.update-busy;
+                                    clicked => { root.install-update(); }
+                                }
+
+                                if !root.update-available && !root.update-ready: Rectangle {
+                                    height: 1px;
+                                    background: Palette.n200;
+                                }
+                                if !root.update-available && !root.update-ready: CompactActionButton {
+                                    height: 50px;
+                                    text: root.update-offline-visible ? root.update-usb-hide-label : root.update-usb-label;
+                                    enabled: !root.update-busy;
+                                    clicked => { root.update-offline-visible = !root.update-offline-visible; }
+                                }
+                                if root.update-offline-visible && !root.update-available && !root.update-ready: Rectangle {
+                                    min-height: 132px;
+                                    border-radius: 15px;
+                                    border-width: 1px;
+                                    border-color: Palette.n200;
+                                    background: Palette.n50;
+                                    VerticalLayout {
+                                        padding: 12px;
+                                        spacing: 8px;
+                                        LineEdit {
+                                            height: 48px;
+                                            text <=> root.update-offline-path;
+                                            placeholder-text: root.update-usb-path-label;
+                                            accepted => { root.stage-offline-update(self.text); }
+                                        }
+                                        CompactActionButton {
+                                            height: 48px;
+                                            text: root.update-usb-check-label;
+                                            enabled: !root.update-busy && root.update-offline-path != "";
+                                            clicked => { root.stage-offline-update(root.update-offline-path); }
+                                        }
+                                    }
                                 }
                             }
                         }
+                        Rectangle { horizontal-stretch: 1; }
+                    }
 
-                        Rectangle { vertical-stretch: 1; }
-
-                        if !root.update-available: CompactActionButton {
-                            height: 54px;
-                            text-size: 14px;
-                            text: root.update-busy ? root.update-checking-label : root.update-check-label;
-                            primary: true;
-                            enabled: !root.update-busy;
-                            clicked => { root.check-update(); }
-                        }
-                        if root.update-available && !root.update-ready: CompactActionButton {
-                            height: 54px;
-                            text-size: 14px;
-                            text: root.update-download-label;
-                            primary: true;
-                            enabled: !root.update-busy;
-                            clicked => { root.download-update(); }
-                        }
-                        if root.update-ready: CompactActionButton {
-                            height: 54px;
-                            text-size: 14px;
-                            text: root.update-install-label;
-                            primary: true;
-                            enabled: !root.update-busy;
-                            clicked => { root.install-update(); }
-                        }
-
-                        if !root.update-available && !root.update-ready: Rectangle {
-                            height: 1px;
-                            background: Palette.n200;
-                        }
-                        if !root.update-available && !root.update-ready: CompactActionButton {
-                            height: 50px;
-                            text: root.update-offline-visible ? root.update-usb-hide-label : root.update-usb-label;
-                            enabled: !root.update-busy;
-                            clicked => { root.update-offline-visible = !root.update-offline-visible; }
-                        }
-                        if root.update-offline-visible && !root.update-available && !root.update-ready: Rectangle {
-                            min-height: 132px;
-                            border-radius: 15px;
-                            border-width: 1px;
-                            border-color: Palette.n200;
-                            background: Palette.n50;
-                            VerticalLayout {
-                                padding: 12px;
-                                spacing: 8px;
-                                LineEdit {
-                                    height: 48px;
-                                    text <=> root.update-offline-path;
-                                    placeholder-text: root.update-usb-path-label;
-                                    accepted => { root.stage-offline-update(self.text); }
-                                }
-                                CompactActionButton {
-                                    height: 48px;
-                                    text: root.update-usb-check-label;
-                                    enabled: !root.update-busy && root.update-offline-path != "";
-                                    clicked => { root.stage-offline-update(root.update-offline-path); }
-                                }
+                    // The UI toolkit's royalty-free licence asks for its badge on the About screen.
+                    HorizontalLayout {
+                        alignment: center;
+                        spacing: 18px;
+                        AboutSlint { width: root.short ? 150px : 176px; }
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 8px;
+                            Text { text: "LabelPilot © Hryhorii Fedorovskyi"; color: Palette.n500; font-size: 12px; }
+                            CompactActionButton {
+                                width: 236px;
+                                height: root.short ? 38px : 42px;
+                                text: root.about-notices-label;
+                                clicked => { root.open-third-party-notices(); }
                             }
                         }
                     }
                 }
-                Rectangle { horizontal-stretch: 1; }
             }
         }
     }
