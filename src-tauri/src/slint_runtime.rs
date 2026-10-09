@@ -4704,20 +4704,19 @@ pub fn run() -> Result<(), String> {
         }
     }
 
-    // «Сторонние компоненты» on the About page: the licences installed next to the program.
+    // «Сторонние компоненты» on the About page. The licences travel inside the program: a
+    // native update replaces only the executables, so the installer's copy next to them can
+    // be older (or missing on a station that was only ever updated).
     ui.on_open_third_party_notices({
         let weak = ui.as_weak();
         move || {
             let Some(ui) = weak.upgrade() else { return };
-            let notices = std::env::current_exe()
-                .ok()
-                .and_then(|exe| exe.parent().map(|dir| dir.join("THIRD-PARTY-NOTICES.txt")))
-                .filter(|path| path.is_file());
-            let opened = notices.is_some_and(|path| {
-                std::process::Command::new("explorer.exe").arg(path).spawn().is_ok()
-            });
+            const NOTICES: &str = include_str!("../../resources/THIRD-PARTY-NOTICES.txt");
+            let path = env::temp_dir().join("LabelPilot-THIRD-PARTY-NOTICES.txt");
+            let opened = std::fs::write(&path, NOTICES).is_ok()
+                && std::process::Command::new("explorer.exe").arg(&path).spawn().is_ok();
             if !opened {
-                show_toast(&ui, "Файл со списком сторонних компонентов не найден");
+                show_toast(&ui, "Не удалось открыть список сторонних компонентов");
             }
         }
     });

@@ -5689,9 +5689,9 @@
     "Demomodus beendet",
     "Демо-режим завершено"
   ],
-  "Файл со списком сторонних компонентов не найден": [
-    "The list of third-party software was not found",
-    "Die Liste der Software von Drittanbietern wurde nicht gefunden",
-    "Файл зі списком сторонніх компонентів не знайдено"
+  "Не удалось открыть список сторонних компонентов": [
+    "Could not open the list of third-party software",
+    "Die Liste der Software von Drittanbietern konnte nicht geöffnet werden",
+    "Не вдалося відкрити список сторонніх компонентів"
   ]
 }
