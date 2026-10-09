@@ -197,7 +197,9 @@ impl PackRow {
     fn as_report_value(&self, station_uuid: &str) -> Value {
         json!({
             "unique_id": format!("{station_uuid}-pack-{}", self.id),
-            "pack_id": self.id,
+            // The station's own pack row, not the server's tare (Pack): sent as "pack_id" the
+            // server linked the label to whichever tare had that number.
+            "station_pack_id": self.id,
             "product_id": self.nomenclature_id,
             "user_name": self.operator_name.as_deref().unwrap_or(""),
             "pack_name": self.number,
@@ -551,11 +553,12 @@ pub fn prune_reported_logs(persisted: &PersistedState, reported_id: i64) -> Resu
 // Code that records labels, job steps or errors calls these without knowing whether a
 // reporter runs: the Slint reporter installs the wake hook and the error journal.
 
-static WAKE_HOOK: OnceLock<Box<dyn Fn() + Send + Sync>> = OnceLock::new();
+/// Called with `true` for news to send in a moment, `false` for news to batch.
+static WAKE_HOOK: OnceLock<Box<dyn Fn(bool) + Send + Sync>> = OnceLock::new();
 static ERROR_JOURNAL: OnceLock<OperationalState> = OnceLock::new();
 static OPEN_FAULTS: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
 
-pub fn set_wake_hook(hook: impl Fn() + Send + Sync + 'static) {
+pub fn set_wake_hook(hook: impl Fn(bool) + Send + Sync + 'static) {
     let _ = WAKE_HOOK.set(Box::new(hook));
 }
 
@@ -563,10 +566,18 @@ pub fn set_error_journal(operational: OperationalState) {
     let _ = ERROR_JOURNAL.set(operational);
 }
 
-/// Something new to report: wake the reporter (it batches bursts itself).
+/// Something the server should know soon (an error, a finished job): sent in a moment.
 pub fn poke() {
     if let Some(hook) = WAKE_HOOK.get() {
-        hook();
+        hook(true);
+    }
+}
+
+/// New labels or job steps: sent together a little later. A busy line prints a pack every
+/// few seconds, and one report per pack would flood the server and its event list.
+pub fn poke_labels() {
+    if let Some(hook) = WAKE_HOOK.get() {
+        hook(false);
     }
 }
 

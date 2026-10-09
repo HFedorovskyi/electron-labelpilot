@@ -376,7 +376,7 @@ impl OperationalState {
                     params![printed_qty, status, job_id],
                 )
                 .map_err(db_error("update print job progress"))?;
-            crate::station_report::poke();
+            if status == "completed" { crate::station_report::poke() } else { crate::station_report::poke_labels() }
             Ok(json!({
                 "success": true,
                 "status": status,
@@ -473,7 +473,7 @@ impl OperationalState {
             transaction
                 .commit()
                 .map_err(|error| format!("failed to commit record-pack transaction: {error}"))?;
-            crate::station_report::poke();
+            crate::station_report::poke_labels();
             Ok((result, outbox))
         })
     }
@@ -614,7 +614,7 @@ impl OperationalState {
             transaction
                 .commit()
                 .map_err(|error| format!("failed to commit delete-pack transaction: {error}"))?;
-            crate::station_report::poke();
+            crate::station_report::poke_labels();
             Ok(result)
         })
     }
@@ -629,7 +629,7 @@ impl OperationalState {
             transaction
                 .commit()
                 .map_err(|error| format!("failed to commit delete-box transaction: {error}"))?;
-            crate::station_report::poke();
+            crate::station_report::poke_labels();
             Ok(result)
         })
     }

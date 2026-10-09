@@ -236,7 +236,8 @@ fn pack_to_report_label(station_uuid: &str, pack: &Value) -> Value {
     let id = pack.get("id").and_then(Value::as_i64).unwrap_or_default();
     json!({
         "unique_id": format!("{station_uuid}-pack-{id}"),
-        "pack_id": id,
+        // The station's own pack row, not the server's tare (Pack); see station_report.rs.
+        "station_pack_id": id,
         "product_id": pack.get("nomenclature_id").cloned().unwrap_or(Value::Null),
         "user_name": pack.get("operator_name").cloned().unwrap_or_else(|| Value::String(String::new())),
         "pack_name": pack.get("number").cloned().unwrap_or(Value::Null),
