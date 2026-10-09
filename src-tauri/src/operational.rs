@@ -6,18 +6,24 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
+
+/// The same station error is journaled at most once per window (a disconnected scale
+/// or a jammed printer must not flood the journal and the server).
+const STATION_ERROR_REPEAT_WINDOW: Duration = Duration::from_secs(60);
 
 #[derive(Clone)]
 pub struct OperationalState {
     connection: Arc<Mutex<Connection>>,
+    recent_errors: Arc<Mutex<HashMap<String, Instant>>>,
 }
 
 impl OperationalState {
     pub fn new(persisted: &PersistedState) -> Result<Self, String> {
         Ok(Self {
             connection: Arc::new(Mutex::new(crate::processor::open_database(persisted)?)),
+            recent_errors: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
@@ -370,6 +376,7 @@ impl OperationalState {
                     params![printed_qty, status, job_id],
                 )
                 .map_err(db_error("update print job progress"))?;
+            crate::station_report::poke();
             Ok(json!({
                 "success": true,
                 "status": status,
@@ -425,6 +432,7 @@ impl OperationalState {
             transaction
                 .commit()
                 .map_err(|error| format!("failed to commit print-job completion: {error}"))?;
+            crate::station_report::poke();
             Ok(json!({
                 "success": true,
                 "discardedEmptyBoxes": discarded_empty_boxes,
@@ -465,6 +473,7 @@ impl OperationalState {
             transaction
                 .commit()
                 .map_err(|error| format!("failed to commit record-pack transaction: {error}"))?;
+            crate::station_report::poke();
             Ok((result, outbox))
         })
     }
@@ -605,6 +614,7 @@ impl OperationalState {
             transaction
                 .commit()
                 .map_err(|error| format!("failed to commit delete-pack transaction: {error}"))?;
+            crate::station_report::poke();
             Ok(result)
         })
     }
@@ -619,6 +629,7 @@ impl OperationalState {
             transaction
                 .commit()
                 .map_err(|error| format!("failed to commit delete-box transaction: {error}"))?;
+            crate::station_report::poke();
             Ok(result)
         })
     }
@@ -696,20 +707,42 @@ impl OperationalState {
 
     #[allow(dead_code)]
     pub fn record_print_error(&self, message: &str, level: &str) {
+        self.record_station_error("print", level, message);
+    }
+
+    /// Journals a station error for the server (component = print, printer, scale, sync,
+    /// license, update, database, app). Repeats of the same message within a minute are
+    /// skipped. Returns whether a row was written.
+    pub fn record_station_error(&self, component: &str, level: &str, message: &str) -> bool {
         let level = match level {
-            "WARNING" | "INFO" => level,
+            "WARNING" | "WARN" => "WARNING",
+            "INFO" => "INFO",
             _ => "ERROR",
         };
+        let component: String = component.chars().take(32).collect();
         let message: String = message.chars().take(2000).collect();
-        let _ = self.with_connection(|connection| {
+        if message.trim().is_empty() {
+            return false;
+        }
+        let key = format!("{component}|{level}|{message}");
+        if let Ok(mut recent) = self.recent_errors.lock() {
+            let now = Instant::now();
+            recent.retain(|_, at| now.duration_since(*at) < STATION_ERROR_REPEAT_WINDOW);
+            if recent.contains_key(&key) {
+                return false;
+            }
+            recent.insert(key, now);
+        }
+        self.with_connection(|connection| {
             connection
                 .execute(
-                    "INSERT INTO print_errors (event_uid, level, message, created_at) VALUES (?1, ?2, ?3, strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
-                    params![Uuid::new_v4().to_string(), level, message],
+                    "INSERT INTO print_errors (event_uid, level, component, message, created_at) VALUES (?1, ?2, ?3, ?4, strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+                    params![Uuid::new_v4().to_string(), level, component, message],
                 )
                 .map(|_| ())
-                .map_err(db_error("record print error"))
-        });
+                .map_err(db_error("record station error"))
+        })
+        .is_ok()
     }
 
     #[allow(dead_code)]

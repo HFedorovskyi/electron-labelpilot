@@ -737,6 +737,20 @@ fn show_toast(ui: &WeighingPrototype, message: &str) {
 fn show_alert(ui: &WeighingPrototype, message: &str) {
     ui.set_alert_text(message.into());
     ui.set_alert_visible(true);
+    // System errors ("Area: detail") also go to the server; operator hints stay local.
+    if let Some(component) = crate::station_report::alert_component(message) {
+        crate::station_report::record_error(component, message);
+    }
+}
+
+/// Station subsystem name for the server journal from a runtime log subsystem.
+fn report_component(subsystem: &str) -> &str {
+    match subsystem {
+        "ingress" | "sync" => "sync",
+        "scale" => "scale",
+        value if value.starts_with("printer") => "printer",
+        value => value,
+    }
 }
 
 fn has_argument(argument: &str) -> bool {
@@ -1058,6 +1072,9 @@ fn apply_pack_printer_diagnostic(ui: &WeighingPrototype, device: &NativePrinterD
     let (ready, status) = pack_printer_ui_state(device);
     ui.set_printer_ready(ready);
     ui.set_printer_status(status.into());
+    // A hardware fault is reported once when it starts; "not configured" and "busy" are not faults.
+    let fault = !ready && !matches!(device.status.as_str(), "unconfigured" | "busy");
+    crate::station_report::report_fault("printer", fault.then_some(status));
 }
 
 fn printer_health_poll_due(tick: u8, configured: bool, ready: bool) -> bool {
@@ -2496,14 +2513,16 @@ fn apply_update_snapshot(ui: &WeighingPrototype, snapshot: &NativeUpdateSnapshot
     ui.set_update_available(available);
     ui.set_update_ready(ready);
     ui.set_update_rollback_available(snapshot.rollback_available);
-    ui.set_update_error(
-        if snapshot.last_error.is_empty() {
-            String::new()
-        } else {
-            update_user_message(&snapshot.last_error)
-        }
-        .into(),
+    let update_error = if snapshot.last_error.is_empty() {
+        String::new()
+    } else {
+        update_user_message(&snapshot.last_error)
+    };
+    crate::station_report::report_fault(
+        "update",
+        (!update_error.is_empty()).then_some(update_error.as_str()),
     );
+    ui.set_update_error(update_error.into());
     ui.set_update_busy(matches!(
         snapshot.state.as_str(),
         "checking" | "downloading" | "installing"
@@ -2944,6 +2963,9 @@ fn apply_core_event(ui: &WeighingPrototype, event: CoreEvent) {
                 "connecting" | "reconnecting" => ("Весы: подключение", false),
                 _ => ("Весы: отключены", false),
             };
+            if status == "disconnected" {
+                crate::station_report::record_warning("scale", "Весы отключены");
+            }
             ui.set_scale_status(label.into());
             ui.set_scale_online(online);
             if !online {
@@ -2961,6 +2983,7 @@ fn apply_core_event(ui: &WeighingPrototype, event: CoreEvent) {
             let message = payload
                 .as_str()
                 .unwrap_or("Ошибка подключения промышленных весов");
+            crate::station_report::record_error("scale", message);
             show_alert(ui, message);
         }
         CoreEvent::Event { name, payload } if name == "server-status-updated" => {
@@ -2988,6 +3011,7 @@ fn apply_core_event(ui: &WeighingPrototype, event: CoreEvent) {
                 Some("error" | "failed" | "unreachable") => {
                     ui.set_printer_ready(false);
                     ui.set_printer_status("Принтер: ошибка".into());
+                    crate::station_report::record_error("printer", "Ошибка транспорта принтера");
                     show_alert(ui, "Ошибка транспорта принтера");
                 }
                 _ => {}
@@ -2998,6 +3022,12 @@ fn apply_core_event(ui: &WeighingPrototype, event: CoreEvent) {
             level,
             message,
         } if level == "ERROR" || level == "WARN" => {
+            let component = report_component(&subsystem);
+            if level == "ERROR" {
+                crate::station_report::record_error(component, &message);
+            } else {
+                crate::station_report::record_warning(component, &message);
+            }
             show_alert(ui, &format!("{subsystem}: {message}"));
         }
         _ => {}
@@ -3161,6 +3191,13 @@ pub fn run() -> Result<(), String> {
                     let _ = message_tx.send(UiMessage::Core(CoreEvent::Log {
                         subsystem: "scale".to_owned(),
                         level: "ERROR".to_owned(),
+                        message: error,
+                    }));
+                }
+                if let Err(error) = runtime.start_station_reporter() {
+                    let _ = message_tx.send(UiMessage::Core(CoreEvent::Log {
+                        subsystem: "sync".to_owned(),
+                        level: "WARN".to_owned(),
                         message: error,
                     }));
                 }

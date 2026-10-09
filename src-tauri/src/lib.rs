@@ -45,9 +45,13 @@ mod seat_list;
 mod session;
 #[cfg(any(feature = "desktop", feature = "slint-ui"))]
 mod station_fingerprint;
+#[cfg(any(feature = "desktop", feature = "slint-ui"))]
+mod station_report;
+#[cfg(feature = "slint-ui")]
+mod station_reporter;
 #[cfg(feature = "desktop")]
 mod telemetry;
-#[cfg(feature = "desktop")]
+#[cfg(any(feature = "desktop", feature = "slint-ui"))]
 mod transfer;
 
 #[cfg(feature = "slint-ui")]
