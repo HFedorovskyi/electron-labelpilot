@@ -5862,8 +5862,10 @@ export component WeighingPrototype inherits Window {
         background: #000000cc;
 
         Rectangle {
+            // Grows with the message up to the screen; a longer one scrolls inside instead
+            // of being cut off. 326px = padding, icon, title, button and the gaps between.
             width: root.large-dialog-width;
-            height: min(root.dialog-max-height, root.tall ? 520px : 430px);
+            height: min(root.dialog-max-height, max(root.tall ? 520px : 430px, 326px + alert-message-content.min-height));
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
             border-radius: 32px;
@@ -5899,12 +5901,22 @@ export component WeighingPrototype inherits Window {
                     font-weight: 700;
                     horizontal-alignment: center;
                 }
-                Text {
-                    text: root.localized-alert-text;
-                    color: Palette.n600;
-                    font-size: 20px;
-                    wrap: word-wrap;
-                    horizontal-alignment: center;
+                alert-message := ScrollView {
+                    min-height: 0px; vertical-stretch: 1;
+                    viewport-width: self.visible-width;
+                    viewport-height: max(self.visible-height, alert-message-content.min-height);
+                    horizontal-scrollbar-policy: ScrollBarPolicy.always-off; mouse-drag-pan-enabled: true;
+                    alert-message-content := VerticalLayout {
+                        alignment: center;
+                        Text {
+                            text: root.localized-alert-text;
+                            color: Palette.n600;
+                            font-size: 20px;
+                            wrap: word-wrap;
+                            // A long, multi-line error reads better from the left.
+                            horizontal-alignment: root.localized-alert-text.character-count > 120 ? left : center;
+                        }
+                    }
                 }
                 MainButton {
                     height: 64px;
@@ -5966,12 +5978,16 @@ export component WeighingPrototype inherits Window {
                 }
                 SettingsAction { text: root.preferences-title; clicked => { root.open-preferences(); } }
                 if root.operator-login-error != "": Rectangle {
-                    height: 52px;
+                    // Grows with a longer error instead of cutting it after two lines.
+                    min-height: 52px;
                     border-radius: 14px;
                     border-width: 1px;
                     border-color: Palette.r300;
                     background: Palette.r50;
-                    Text { text: UiText.translate(UiText.language, root.operator-login-error); color: Palette.r700; font-size: 15px; horizontal-alignment: center; vertical-alignment: center; wrap: word-wrap; }
+                    HorizontalLayout {
+                        padding: 10px; padding-left: 16px; padding-right: 16px;
+                        Text { text: UiText.translate(UiText.language, root.operator-login-error); color: Palette.r700; font-size: 15px; horizontal-alignment: center; vertical-alignment: center; wrap: word-wrap; }
+                    }
                 }
                 ScrollView {
                     vertical-stretch: 1;
